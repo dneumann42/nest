@@ -1,0 +1,257 @@
+#+title: Nest Constraint Layout
+
+Nest's layout engine is a small Nim layer over
+[[https://github.com/elcritch/kiwiberry][kiwiberry]], a pure Nim Cassowary constraint solver. You describe
+relationships between boxes, the solver finds positions and sizes, and your
+renderer reads solved ~Frame~ values.
+
+The API has two levels:
+
+- Simple helpers: ~row~, ~column~, ~pin~, alignment, size policies.
+- Raw constraints: ~ui.constrain(...)~ for proportional and advanced layouts.
+
+* Mental Model
+
+Every ~LayoutBox~ owns four solver variables:
+
+#+begin_example
+box.x       box.y
+box.width   box.height
+#+end_example
+
+Edges and centers are derived expressions:
+
+#+begin_example
+left    = x
+right   = x + width
+top     = y
+bottom  = y + height
+centerX = x + width / 2
+centerY = y + height / 2
+#+end_example
+
+That means helpers such as ~row~ are not another layout algorithm. They only
+add constraints.
+
+#+begin_example
+window
++------------------------------------------------+
+| padding                                        |
+|  +---------+ gap +----------------+ gap +---+  |
+|  | sidebar |     | content        |     | i |  |
+|  +---------+     +----------------+     +---+  |
+|                                                |
++------------------------------------------------+
+
+Generated relationships:
+sidebar.left = window.left + padding
+content.left = sidebar.right + gap
+inspector.left = content.right + gap
+inspector.right = window.right - padding
+#+end_example
+
+* First Layout
+
+#+begin_src nim
+import nest/layout
+
+let ui = newLayout()
+let window = ui.box("window")
+let toolbar = ui.box("toolbar", height = fixed(48))
+let body = ui.box("body")
+let status = ui.box("status", height = fixed(24))
+
+ui.root window
+ui.column(window, [toolbar, body, status], gap = 8, padding = 12)
+
+ui.resize(800, 600)
+ui.solve()
+
+echo toolbar.frame
+echo body.frame
+echo status.frame
+#+end_src
+
+Result:
+
+#+begin_example
++---------------- window 800x600 ----------------+
+| 12                                             |
+|  +--------------- toolbar 776x48 ------------+ |
+|  8                                             |
+|  +---------------- body 776x488 -------------+ |
+|  8                                             |
+|  +--------------- status 776x24 -------------+ |
+| 12                                             |
++------------------------------------------------+
+#+end_example
+
+* Size Policies
+
+Size policies compile into constraints:
+
+#+begin_src nim
+fixed(48)
+fill(min = 300)
+hug(120, min = 80)
+prefer(240, min = 180, max = 320)
+#+end_src
+
+Use them this way:
+
+#+begin_src nim
+let sidebar = ui.box("sidebar", width = prefer(240, min = 180, max = 320))
+let content = ui.box("content", width = fill(min = 300))
+let inspector = ui.box("inspector", width = prefer(280, min = 200, max = 400))
+
+ui.row(body, [sidebar, content, inspector], gap = 12)
+#+end_src
+
+The preferred boxes stay near their requested sizes when possible. The fill box
+absorbs remaining space.
+
+* Pinning
+
+Use ~pin~ when one box should occupy another box with an inset.
+
+#+begin_src nim
+let content = ui.box("content")
+ui.pin(content, window, inset = 16)
+#+end_src
+
+#+begin_example
+window
++----------------------------------+
+| 16                               |
+|   content                        |
+|   +--------------------------+   |
+|   |                          |   |
+|   +--------------------------+   |
+|                               16 |
++----------------------------------+
+#+end_example
+
+* Alignment And Relative Placement
+
+Alignment helpers make component internals readable:
+
+#+begin_src nim
+let card = ui.box("card", width = fixed(300), height = fixed(120))
+let icon = ui.box("icon", width = fixed(32), height = fixed(32))
+let title = ui.box("title", width = hug(120), height = fixed(24))
+let description = ui.box("description", width = fixed(220), height = fixed(40))
+
+ui.alignCenterX(card, window)
+ui.alignCenterY(card, window)
+
+ui.alignLeft(icon, card, 16)
+ui.alignTop(icon, card, 16)
+ui.after(title, icon, gap = 12)
+ui.alignCenterY(title, icon)
+ui.below(description, title, gap = 8)
+ui.alignLeft(description, title)
+#+end_src
+
+#+begin_example
+card
++--------------------------------+
+| +----+  title                  |
+| |icon|  +-------------------+  |
+| +----+                         |
+|         description            |
+|         +-------------------+  |
++--------------------------------+
+#+end_example
+
+* Raw Constraints
+
+Importing ~nest/layout~ also exports kiwiberry's constraint operators. Drop to
+raw constraints when a helper would hide the intent:
+
+#+begin_src nim
+discard ui.constrain(sidebar.width >= 180)
+discard ui.constrain(sidebar.width <= 320)
+discard ui.constrain((sidebar.width == window.width * 0.20) | Medium)
+discard ui.constrain(inspector.width == sidebar.width)
+#+end_src
+
+Cassowary constraints must stay linear. Proportions such as ~a.width * 2.0~ are
+fine; multiplying two variables together is not.
+
+* Equal Sizes And Ratios
+
+For repeated cells:
+
+#+begin_src nim
+ui.row(window, [a, b, c], gap = 8)
+ui.equalWidth(a, b, c)
+#+end_src
+
+For ratios:
+
+#+begin_src nim
+discard ui.constrain(center.width == left.width * 2.0)
+discard ui.constrain(right.width == left.width)
+#+end_src
+
+#+begin_example
++----------+--------+--------------------+--------+----------+
+| left 1x  | gap    | center 2x          | gap    | right 1x |
++----------+--------+--------------------+--------+----------+
+#+end_example
+
+* Responsive Layouts
+
+Use constraint groups for discrete breakpoints. Add one group, remove it, then
+add another group.
+
+#+begin_src nim
+let desktop = ui.collect:
+  keep ui.constrain(sidebar.left == window.left)
+  keep ui.constrain(sidebar.top == window.top)
+  keep ui.constrain(content.left == sidebar.right + 12)
+  keep ui.constrain(content.top == sidebar.top)
+
+ui.remove desktop
+
+let mobile = ui.collect:
+  keep ui.constrain(sidebar.left == window.left)
+  keep ui.constrain(sidebar.top == window.top)
+  keep ui.constrain(content.left == window.left)
+  keep ui.constrain(content.top == sidebar.bottom + 12)
+#+end_src
+
+Desktop:
+
+#+begin_example
++-----------+------------+------------------+
+| sidebar   | gap        | content          |
++-----------+------------+------------------+
+#+end_example
+
+Mobile:
+
+#+begin_example
++-----------+
+| sidebar   |
++-----------+
+| gap       |
++-----------+
+| content   |
++-----------+
+#+end_example
+
+* Renderer Integration
+
+The layout layer does not render. After solving, read frames and pass them to
+your UI backend:
+
+#+begin_src nim
+ui.resize(windowWidth, windowHeight)
+ui.solve()
+
+let f = button.frame
+renderer.drawButton(f.x, f.y, f.width, f.height)
+#+end_src
+
+This keeps drawing code independent from kiwiberry.

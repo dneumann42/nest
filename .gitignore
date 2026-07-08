@@ -3,3 +3,8 @@ nimcache/
 nimblecache/
 htmldocs/
 
+nimble.develop
+nimble.paths
+nimbledeps
+tests/test_layout
+/nest
