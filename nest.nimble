@@ -18,3 +18,5 @@ task test, "Run the Nest test suite":
   exec "nim c -r --path:src --nimcache:build/nimcache tests/test_layout.nim"
 
 requires "https://github.com/beef331/fungus.git"
+requires "https://github.com/nim-lang/uirelays"
+requires "https://github.com/nim-lang/sdl3"
