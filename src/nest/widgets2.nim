@@ -9,6 +9,8 @@ type
     StaticWidget
     StretchWidth
     StretchHeight
+    FitWidth
+    FitHeight
 
   Alignment* = enum
     AlignAuto
@@ -19,6 +21,10 @@ type
 
   Frame* = object
     x*, y*, width*, height*: float64
+
+  IntrinsicSize* = object
+    hasWidth*, hasHeight*: bool
+    width*, height*: float64
 
   WidgetID* = uint64
   Widget* = object
@@ -91,6 +97,26 @@ proc stretchWidth*(widget: Widget): bool =
 
 proc stretchHeight*(widget: Widget): bool =
   StretchHeight in widget.flags
+
+proc setFit*(widget: var Widget, width, height: bool) =
+  if width:
+    widget.flags.incl FitWidth
+  else:
+    widget.flags.excl FitWidth
+
+  if height:
+    widget.flags.incl FitHeight
+  else:
+    widget.flags.excl FitHeight
+
+proc fitWidth*(widget: Widget): bool =
+  FitWidth in widget.flags
+
+proc fitHeight*(widget: Widget): bool =
+  FitHeight in widget.flags
+
+proc intrinsicSize*(width, height: float64): IntrinsicSize =
+  IntrinsicSize(hasWidth: true, hasHeight: true, width: width, height: height)
 
 proc withAlignSelf*(widget: Widget, alignment: Alignment): Widget =
   result = widget

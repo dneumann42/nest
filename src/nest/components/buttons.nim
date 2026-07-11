@@ -2,11 +2,23 @@ import ../[resources, widgets2]
 import component
 import uirelays
 
+const
+  ButtonPaddingX = 8
+  ButtonPaddingY = 3
+  ButtonMinHeight = 24
+
 type Button* = ref object of Interactive
   label: string
 
 proc new*(T: typedesc[Button], label = ""): T =
   T(label: label)
+
+method measure*(self: Button, resources: Resources): IntrinsicSize =
+  let measurement = resources.measureText("font", self.label)
+  intrinsicSize(
+    (measurement.width + ButtonPaddingX * 2).toFloat,
+    max(measurement.height + ButtonPaddingY * 2, ButtonMinHeight).toFloat,
+  )
 
 method update*(self: Button, widget: Widget, ctx: var UpdateContext) =
   let isHot =
@@ -37,8 +49,8 @@ method draw*(self: Button, widget: Widget, ctx: DrawContext) =
   let (font, _) = ctx.resources.get("font")
   discard drawText(
     Font(font),
-    f.x.toInt,
-    f.y.toInt,
+    f.x.toInt + ButtonPaddingX,
+    f.y.toInt + ButtonPaddingY,
     self.label,
     ctx.palette.textColor,
     ctx.palette.background,

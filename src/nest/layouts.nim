@@ -13,6 +13,7 @@ type
   SizePolicyKind* = enum
     Fill
     Fixed
+    Fit
     Hug
     Prefer
 
@@ -46,6 +47,9 @@ proc fill*(min = 0.0, max = Inf): SizePolicy =
 
 proc fixed*(value: float64): SizePolicy =
   SizePolicy(kind: Fixed, value: value, min: value, max: value)
+
+proc fit*(min = 0.0, max = Inf): SizePolicy =
+  SizePolicy(kind: Fit, min: min, max: max)
 
 proc hug*(preferred: float64, min = 0.0, max = Inf): SizePolicy =
   SizePolicy(kind: Hug, value: preferred, min: min, max: max)
@@ -95,6 +99,8 @@ proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
   case policy.kind
   of Fill:
     discard
+  of Fit:
+    discard
   of Fixed:
     discard ui.solver.constraint(variable == policy.value)
   of Hug, Prefer:
@@ -110,7 +116,8 @@ proc initBox(
     w: newVariable(name & ".width"),
     h: newVariable(name & ".height"),
   )
-  result.setStretch(width.kind != Fixed, height.kind != Fixed)
+  result.setStretch(width.kind notin {Fixed, Fit}, height.kind notin {Fixed, Fit})
+  result.setFit(width.kind == Fit, height.kind == Fit)
   ui.boxes.add result
   ui.applyPolicy(result.w, width)
   ui.applyPolicy(result.h, height)
@@ -224,12 +231,29 @@ proc row*(
   for child in children:
     ui.alignRowChild(parent, child, child.effectiveAlignment(alignItems), padding)
 
-  discard ui.solver.constraint(children[0].left >= parent.left + padding)
+  if parent.fitWidth:
+    discard ui.solver.constraint(children[0].left == parent.left + padding)
+  else:
+    discard ui.solver.constraint(children[0].left >= parent.left + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].left == children[i - 1].right + gap)
 
-  discard ui.solver.constraint(children[^1].right <= parent.right - padding)
+  if not parent.fitWidth:
+    discard ui.solver.constraint(children[^1].right <= parent.right - padding)
+
+  if parent.fitWidth:
+    var contentWidth: Expression = children[0].width.toExpression
+    for i in 1 ..< children.len:
+      contentWidth = contentWidth + children[i].width + gap
+    discard ui.solver.constraint((parent.width == contentWidth + padding * 2.0) | Strong)
+
+  if parent.fitHeight:
+    for child in children:
+      discard ui.solver.constraint(parent.height >= child.height + padding * 2.0)
+      discard ui.solver.constraint(
+        (parent.height == child.height + padding * 2.0) | FillRemainingStrength
+      )
 
   case justifyContent
   of JustifyStart:
@@ -259,12 +283,29 @@ proc column*(
   for child in children:
     ui.alignColumnChild(parent, child, child.effectiveAlignment(alignItems), padding)
 
-  discard ui.solver.constraint(children[0].top >= parent.top + padding)
+  if parent.fitHeight:
+    discard ui.solver.constraint(children[0].top == parent.top + padding)
+  else:
+    discard ui.solver.constraint(children[0].top >= parent.top + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].top == children[i - 1].bottom + gap)
 
-  discard ui.solver.constraint(children[^1].bottom <= parent.bottom - padding)
+  if not parent.fitHeight:
+    discard ui.solver.constraint(children[^1].bottom <= parent.bottom - padding)
+
+  if parent.fitHeight:
+    var contentHeight: Expression = children[0].height.toExpression
+    for i in 1 ..< children.len:
+      contentHeight = contentHeight + children[i].height + gap
+    discard ui.solver.constraint((parent.height == contentHeight + padding * 2.0) | Strong)
+
+  if parent.fitWidth:
+    for child in children:
+      discard ui.solver.constraint(parent.width >= child.width + padding * 2.0)
+      discard ui.solver.constraint(
+        (parent.width == child.width + padding * 2.0) | FillRemainingStrength
+      )
 
   case justifyContent
   of JustifyStart:

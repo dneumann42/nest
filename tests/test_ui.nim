@@ -17,6 +17,9 @@ const
   CenterBox = WidgetID(112)
   Label1 = WidgetID(113)
   Label2 = WidgetID(114)
+  HeaderRow = WidgetID(115)
+  HeaderLabel = WidgetID(116)
+  HeaderNewButton = WidgetID(117)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -32,19 +35,86 @@ proc checkFrame(box: Widget, x, y, width, height: float64) =
   check frame.height == height
 
 suite "ui layout nesting":
+  test "fit button remains visible after a fill label in a row":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: text.len * f.int, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: text.len * f.int, h: 18),
+    )
+    try:
+      var resources = Resources.new()
+      resources.loadFont("font", "", 8)
+      var ui = UI.init()
+      ui.beginLayout(800, 100)
+
+      ui.row(HeaderRow, cfg(width = fixed(500), height = fit())):
+        ui.label(HeaderLabel, "LINE: ", width = fill(), height = fit())
+        ui.button(HeaderNewButton, "New", width = fit(), height = fit())
+
+      ui.applyIntrinsicSizes(resources)
+      ui.endLayout()
+
+      checkFrame(ui.widget(HeaderRow), 0, 0, 500, 24)
+      checkFrame(ui.widget(HeaderLabel), 0, 0, 460, 18)
+      checkFrame(ui.widget(HeaderNewButton), 460, 0, 40, 24)
+    finally:
+      fontRelays = originalFontRelays
+
+  test "text measurement and labels support fit sizing":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: text.len * f.int, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: text.len * f.int, h: 18),
+    )
+    try:
+      var resources = Resources.new()
+      resources.loadFont("body", "", 9)
+
+      let measured = resources.measureText("body", "Paths")
+      check measured.width == 45
+      check measured.height == 18
+      check measured.lineHeight == 22
+
+      let label = Label.new("Paths", "body")
+      let intrinsic = Component(label).measure(resources)
+      check intrinsic.hasWidth
+      check intrinsic.hasHeight
+      check intrinsic.width == 45
+      check intrinsic.height == 18
+    finally:
+      fontRelays = originalFontRelays
+
   test "block layouts add their parent to the enclosing layout":
     var ui = UI.init()
     ui.beginLayout(400, 200)
 
-    ui.column(10.0, 10.0):
-      ui.row(Toolbar, fill(), fixed(30), 5.0, 0.0):
+    ui.column(cfg(gap = 10.0, padding = 10.0)):
+      ui.row(Toolbar, cfg(width = fill(), height = fixed(30), gap = 5.0)):
         ui.button(Button1, "One", width = fixed(50), height = fixed(20))
         ui.button(Button2, "Two", width = fixed(60), height = fixed(20))
 
-      ui.row(Body, fill(), fill(), 10.0, 0.0):
-        ui.column(Sidebar, fixed(80), fill(), 4.0, 4.0):
+      ui.row(Body, cfg(width = fill(), height = fill(), gap = 10.0)):
+        ui.column(Sidebar, cfg(width = fixed(80), height = fill(), gap = 4.0, padding = 4.0)):
           ui.button(Button3, "Three", width = fill(), height = fixed(20))
-        ui.column(Content, fill(), fill(), 0.0, 0.0):
+        ui.column(Content, cfg(width = fill(), height = fill())):
           ui.button(Button4, "Four", width = fixed(70), height = fixed(20))
 
     ui.endLayout()
@@ -62,11 +132,11 @@ suite "ui layout nesting":
     var ui = UI.init()
     ui.beginLayout(500, 120)
 
-    ui.row(Body, fill(), fixed(30), 10.0, 0.0):
-      ui.column(Sidebar, fixed(100), fill(), 0.0, 0.0):
+    ui.row(Body, cfg(width = fill(), height = fixed(30), gap = 10.0)):
+      ui.column(Sidebar, cfg(width = fixed(100), height = fill())):
         ui.button(Button1, "Left", width = fill(), height = fixed(20))
       ui.spacer(Spacer, width = fill(), height = fill())
-      ui.column(Content, prefer(80), fill(), 0.0, 0.0):
+      ui.column(Content, cfg(width = prefer(80), height = fill())):
         ui.button(Button2, "Right", width = fixed(80), height = fixed(20))
 
     ui.endLayout()
@@ -79,7 +149,10 @@ suite "ui layout nesting":
     var ui = UI.init()
     ui.beginLayout(300, 100)
 
-    ui.rowAligned(Body, fill(), fixed(80), 10.0, 10.0, AlignCenter):
+    ui.row(
+      Body,
+      cfg(width = fill(), height = fixed(80), gap = 10.0, padding = 10.0, alignItems = AlignCenter),
+    ):
       ui.button(Button1, "One", width = fixed(40), height = fixed(20))
       ui.button(Button2, "Two", width = fixed(40), height = fixed(20), alignSelf = AlignEnd)
       ui.button(Button5, "Three", width = fixed(40), height = fixed(20), alignSelf = AlignStart)
@@ -94,11 +167,29 @@ suite "ui layout nesting":
     var ui = UI.init()
     ui.beginLayout(300, 120)
 
-    ui.column(10.0, 0.0):
-      ui.rowAlignedJustified(Body, fill(), fixed(40), 10.0, 0.0, AlignCenter, JustifyCenter):
+    ui.column(cfg(gap = 10.0)):
+      ui.row(
+        Body,
+        cfg(
+          width = fill(),
+          height = fixed(40),
+          gap = 10.0,
+          alignItems = AlignCenter,
+          justifyContent = JustifyCenter,
+        ),
+      ):
         ui.button(Button1, "One", width = fixed(40), height = fixed(20))
         ui.button(Button2, "Two", width = fixed(50), height = fixed(20))
-      ui.rowAlignedJustified(Toolbar, fill(), fixed(40), 10.0, 0.0, AlignCenter, JustifyEnd):
+      ui.row(
+        Toolbar,
+        cfg(
+          width = fill(),
+          height = fixed(40),
+          gap = 10.0,
+          alignItems = AlignCenter,
+          justifyContent = JustifyEnd,
+        ),
+      ):
         ui.button(Button3, "Three", width = fixed(40), height = fixed(20))
         ui.button(Button4, "Four", width = fixed(50), height = fixed(20))
 
@@ -114,7 +205,17 @@ suite "ui layout nesting":
     ui.beginLayout(400, 300)
 
     ui.center(CenterBox, fill(), fill()):
-      ui.panelJustified(Panel1, fixed(200), fixed(100), 10.0, 10.0, AlignCenter, JustifyCenter):
+      ui.panel(
+        Panel1,
+        cfg(
+          width = fixed(200),
+          height = fixed(100),
+          gap = 10.0,
+          padding = 10.0,
+          alignItems = AlignCenter,
+          justifyContent = JustifyCenter,
+        ),
+      ):
         ui.label(Label1, "Counter", width = fixed(80), height = fixed(20))
         ui.label(Label2, "0", width = fixed(80), height = fixed(20))
 
@@ -133,7 +234,7 @@ suite "ui layout nesting":
       ui.button(Button1, "One", width = fixed(50), height = fixed(20))
       ui.button(Button2, "Two", width = fixed(60), height = fixed(20))
 
-    ui.row(Body, fill(), fixed(30), 8.0, 0.0):
+    ui.row(Body, cfg(width = fill(), height = fixed(30), gap = 8.0)):
       ui.container(Panel1, Panel.new(), width = fixed(40), height = fixed(30))
       ui.place(actions)
 
@@ -157,7 +258,7 @@ suite "ui layout nesting":
     header.setSlot(header.left, left)
     header.setSlot(header.right, right)
 
-    ui.row(Body, fill(), fixed(30), 10.0, 0.0):
+    ui.row(Body, cfg(width = fill(), height = fixed(30), gap = 10.0)):
       ui.place(left)
       ui.spacer(Spacer, width = fill(), height = fixed(1))
       ui.place(right)

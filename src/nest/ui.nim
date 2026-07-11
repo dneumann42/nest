@@ -1,6 +1,6 @@
 import std/sets
 
-import layouts, components, widgets2
+import layouts, components, resources, widgets2
 export layouts, components
 
 type
@@ -18,6 +18,13 @@ type
     parent: Widget
     children: seq[Widget]
 
+  BoxConfig* = object
+    width*, height*: SizePolicy
+    gap*, padding*: float64
+    alignItems*: Alignment
+    justifyContent*: Justification
+    alignSelf*: Alignment
+
   PendingLayout = object
     kind: LayoutKind
     parent: Widget
@@ -34,6 +41,25 @@ type
     components*: seq[ComponentWidget]
     pendingLayouts: seq[PendingLayout]
     phase: UIPhase
+
+proc cfg*(
+    width = fill(),
+    height = fill(),
+    gap = 0.0,
+    padding = 0.0,
+    alignItems = AlignStretch,
+    justifyContent = JustifyStart,
+    alignSelf = AlignAuto,
+): BoxConfig =
+  BoxConfig(
+    width: width,
+    height: height,
+    gap: gap,
+    padding: padding,
+    alignItems: alignItems,
+    justifyContent: justifyContent,
+    alignSelf: alignSelf,
+  )
 
 proc init*(T: typedesc[UI]): T =
   var ui = newLayout()
@@ -97,7 +123,6 @@ proc endLayout*(self: var UI) =
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
       )
-    self.layout.solve()
 
   self.layout.solve()
 
@@ -173,6 +198,14 @@ proc attach*(self: var UI, widget: Widget, component: Component) =
     return
   self.components.add((component, widget))
 
+proc applyIntrinsicSizes*(self: UI, resources: Resources) =
+  for (component, widget) in self.components:
+    let size = component.measure(resources)
+    if widget.fitWidth and size.hasWidth:
+      discard self.layout.constrain(widget.width == size.width)
+    if widget.fitHeight and size.hasHeight:
+      discard self.layout.constrain(widget.height == size.height)
+
 template events*(self: var UI, body: untyped) =
   if self.phase == EventPhase:
     body
@@ -183,12 +216,15 @@ template layout*(
     drawContext: var DrawContext,
     blk: untyped,
 ): auto =
+  # This could totally be done at compile time, the only reason I am
+  # avoiding doing that, is I want to allow loading ui from a dynamic module
   ui.phase = EventPhase
   blk
 
   ui.phase = LayoutPhase
   ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
   blk
+  ui.applyIntrinsicSizes(drawContext.resources)
   ui.endLayout()
   updateContext.hotWidgets.clear()
   updateContext.activeWidgets.clear()
@@ -202,16 +238,11 @@ proc update*(self: UI, context: var UpdateContext) =
     component.update(widget, context)
 
 proc draw*(self: UI, context: DrawContext) =
+  fillRect(rect(0, 0, context.windowWidth, context.windowHeight), color(0, 0, 0))
   for (component, widget) in self.components:
     component.draw(widget, context)
 
-proc row*(
-    self: var UI,
-    gap = 0.0,
-    padding = 0.0,
-    alignItems = AlignStretch,
-    justifyContent = JustifyStart,
-) =
+proc row*(self: var UI, config: BoxConfig) =
   if self.phase == EventPhase:
     return
   let components = self.takeChildren()
@@ -219,19 +250,13 @@ proc row*(
     kind: RowLayout,
     parent: self.currentParent(),
     children: components,
-    gap: gap,
-    padding: padding,
-    alignItems: alignItems,
-    justifyContent: justifyContent,
+    gap: config.gap,
+    padding: config.padding,
+    alignItems: config.alignItems,
+    justifyContent: config.justifyContent,
   )
 
-proc column*(
-    self: var UI,
-    gap = 0.0,
-    padding = 0.0,
-    alignItems = AlignStretch,
-    justifyContent = JustifyStart,
-) =
+proc column*(self: var UI, config: BoxConfig) =
   if self.phase == EventPhase:
     return
   let components = self.takeChildren()
@@ -239,290 +264,60 @@ proc column*(
     kind: ColumnLayout,
     parent: self.currentParent(),
     children: components,
-    gap: gap,
-    padding: padding,
-    alignItems: alignItems,
-    justifyContent: justifyContent,
+    gap: config.gap,
+    padding: config.padding,
+    alignItems: config.alignItems,
+    justifyContent: config.justifyContent,
   )
 
-template row*(self: var UI, gp = 0.0, pad = 0.0, body: untyped) =
+template row*(self: var UI, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
     else:
       body
-      self.row(gp, pad)
+      self.row(config)
 
-template rowJustified*(
-    self: var UI,
-    gp: float64,
-    pad: float64,
-    justifyContent: Justification,
-    body: untyped,
-) =
+template column*(self: var UI, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
     else:
       body
-      self.row(gp, pad, justifyContent = justifyContent)
-
-template rowAligned*(
-    self: var UI, gp = 0.0, pad = 0.0, alignItems: Alignment, body: untyped
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      body
-      self.row(gp, pad, alignItems)
-
-template rowAlignedJustified*(
-    self: var UI,
-    gp: float64,
-    pad: float64,
-    alignItems: Alignment,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      body
-      self.row(gp, pad, alignItems, justifyContent)
-
-template column*(self: var UI, gp = 0.0, pad = 0.0, body: untyped) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      body
-      self.column(gp, pad)
-
-template columnJustified*(
-    self: var UI,
-    gp: float64,
-    pad: float64,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      body
-      self.column(gp, pad, justifyContent = justifyContent)
-
-template columnAligned*(
-    self: var UI, gp = 0.0, pad = 0.0, alignItems: Alignment, body: untyped
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      body
-      self.column(gp, pad, alignItems)
-
-template columnAlignedJustified*(
-    self: var UI,
-    gp: float64,
-    pad: float64,
-    alignItems: Alignment,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      body
-      self.column(gp, pad, alignItems, justifyContent)
+      self.column(config)
 
 template row*(
     self: var UI,
     id: WidgetID,
-    w = fill(),
-    h = fill(),
-    gp = 0.0,
-    pad = 0.0,
+    config: BoxConfig,
     body: untyped,
 ) =
   block:
     if self.phase == EventPhase:
       body
     else:
-      let layoutParent = self.box(id, width = w, height = h)
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
       self.pushLayout(layoutParent)
       body
-      self.row(gp, pad)
-      discard self.popLayout()
-
-template rowJustified*(
-    self: var UI,
-    id: WidgetID,
-    w: SizePolicy,
-    h: SizePolicy,
-    gp: float64,
-    pad: float64,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.row(gp, pad, justifyContent = justifyContent)
-      discard self.popLayout()
-
-template rowAligned*(
-    self: var UI,
-    id: WidgetID,
-    w = fill(),
-    h = fill(),
-    gp = 0.0,
-    pad = 0.0,
-    alignItems: Alignment,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.row(gp, pad, alignItems)
-      discard self.popLayout()
-
-template rowAlignedJustified*(
-    self: var UI,
-    id: WidgetID,
-    w: SizePolicy,
-    h: SizePolicy,
-    gp: float64,
-    pad: float64,
-    alignItems: Alignment,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.row(gp, pad, alignItems, justifyContent)
-      discard self.popLayout()
-
-template rowAligned*(
-    self: var UI, id: WidgetID, w, h: SizePolicy, alignItems: Alignment, body: untyped
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.row(0.0, 0.0, alignItems)
+      self.row(config)
       discard self.popLayout()
 
 template column*(
     self: var UI,
     id: WidgetID,
-    w = fill(),
-    h = fill(),
-    gp = 0.0,
-    pad = 0.0,
+    config: BoxConfig,
     body: untyped,
 ) =
   block:
     if self.phase == EventPhase:
       body
     else:
-      let layoutParent = self.box(id, width = w, height = h)
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
       self.pushLayout(layoutParent)
       body
-      self.column(gp, pad)
-      discard self.popLayout()
-
-template columnJustified*(
-    self: var UI,
-    id: WidgetID,
-    w: SizePolicy,
-    h: SizePolicy,
-    gp: float64,
-    pad: float64,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.column(gp, pad, justifyContent = justifyContent)
-      discard self.popLayout()
-
-template columnAligned*(
-    self: var UI,
-    id: WidgetID,
-    w = fill(),
-    h = fill(),
-    gp = 0.0,
-    pad = 0.0,
-    alignItems: Alignment,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.column(gp, pad, alignItems)
-      discard self.popLayout()
-
-template columnAlignedJustified*(
-    self: var UI,
-    id: WidgetID,
-    w: SizePolicy,
-    h: SizePolicy,
-    gp: float64,
-    pad: float64,
-    alignItems: Alignment,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.column(gp, pad, alignItems, justifyContent)
-      discard self.popLayout()
-
-template columnAligned*(
-    self: var UI, id: WidgetID, w, h: SizePolicy, alignItems: Alignment, body: untyped
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      self.pushLayout(layoutParent)
-      body
-      self.column(0.0, 0.0, alignItems)
+      self.column(config)
       discard self.popLayout()
 
 template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyped) =
@@ -550,46 +345,20 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyp
 template panel*(
     self: var UI,
     id: WidgetID,
-    w = fill(),
-    h = fill(),
-    gp = 0.0,
-    pad = 0.0,
-    alignItems = AlignStretch,
+    config: BoxConfig,
     body: untyped,
 ) =
   block:
     if self.phase == EventPhase:
       body
     else:
-      let layoutParent = self.box(id, width = w, height = h)
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
       let component = Panel.new()
       self.attach(layoutParent, Component(component))
       self.pushLayout(layoutParent)
       body
-      self.column(gp, pad, alignItems)
-      discard self.popLayout()
-
-template panelJustified*(
-    self: var UI,
-    id: WidgetID,
-    w: SizePolicy,
-    h: SizePolicy,
-    gp: float64,
-    pad: float64,
-    alignItems: Alignment,
-    justifyContent: Justification,
-    body: untyped,
-) =
-  block:
-    if self.phase == EventPhase:
-      body
-    else:
-      let layoutParent = self.box(id, width = w, height = h)
-      let component = Panel.new()
-      self.attach(layoutParent, Component(component))
-      self.pushLayout(layoutParent)
-      body
-      self.column(gp, pad, alignItems, justifyContent)
+      self.column(config)
       discard self.popLayout()
 
 proc box*(
@@ -637,11 +406,12 @@ proc label*(
     id: WidgetID,
     text: string,
     width, height: SizePolicy,
+    fontName = "font",
     alignSelf = AlignAuto,
 ) =
   if ui.phase == EventPhase:
     return
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  let lbl = Label.new(text)
+  let lbl = Label.new(text, fontName)
   ui.attach(box, Component(lbl))
   ui.addChild(box)

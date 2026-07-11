@@ -245,6 +245,29 @@ suite "constraint layout":
     checkFrame left, 0, 0, 120, 50
     checkFrame right, 120, 0, 160, 50
 
+  test "fit containers derive size from known children":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let columnPanel = ui.box("columnPanel", width = fit(), height = fit())
+    let wide = ui.box("wide", width = fixed(120), height = fixed(20))
+    let narrow = ui.box("narrow", width = fixed(80), height = fixed(30))
+    let rowPanel = ui.box("rowPanel", width = fit(), height = fit())
+    let short = ui.box("short", width = fixed(40), height = fixed(18))
+    let tall = ui.box("tall", width = fixed(60), height = fixed(34))
+
+    ui.root window
+    discard ui.constrain(columnPanel.left == window.left)
+    discard ui.constrain(columnPanel.top == window.top)
+    ui.column(columnPanel, [wide, narrow], gap = 5, padding = 10)
+    discard ui.constrain(rowPanel.left == window.left)
+    discard ui.constrain(rowPanel.top == columnPanel.bottom + 20)
+    ui.row(rowPanel, [short, tall], gap = 7, padding = 4)
+    ui.resize(500, 300)
+    ui.solve()
+
+    checkFrame columnPanel, 0, 0, 140, 75
+    checkFrame rowPanel, 0, 95, 115, 42
+
   test "constraint groups can switch responsive layouts":
     let ui = newLayout()
     let window = ui.box("window")

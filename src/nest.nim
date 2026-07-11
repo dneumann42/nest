@@ -90,13 +90,28 @@ proc layoutCounter(ui: var UI, drawContext: DrawContext, counter: var CounterMod
     if drawContext.active(IncrementButton):
       inc counter.count
 
-  ui.panelJustified(
-    CounterPanel, fixed(360), fixed(220), 18.0, 24.0, AlignCenter, JustifyCenter
+  ui.panel(
+    CounterPanel,
+    cfg(
+      width = fixed(360),
+      height = fixed(220),
+      gap = 18.0,
+      padding = 24.0,
+      alignItems = AlignCenter,
+      justifyContent = JustifyCenter,
+    ),
   ):
     ui.label(TitleLabel, "Counter", width = fixed(120), height = fixed(28))
     ui.label(ValueLabel, $counter.count, width = fixed(120), height = fixed(44))
-    ui.rowAlignedJustified(
-      ControlsRow, fill(), fixed(40), 12.0, 0.0, AlignCenter, JustifyCenter
+    ui.row(
+      ControlsRow,
+      cfg(
+        width = fill(),
+        height = fixed(40),
+        gap = 12.0,
+        alignItems = AlignCenter,
+        justifyContent = JustifyCenter,
+      ),
     ):
       ui.button(DecrementButton, "-", width = fixed(72), height = fixed(32))
       ui.button(ResetButton, "Reset", width = fixed(96), height = fixed(32))

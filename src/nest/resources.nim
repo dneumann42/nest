@@ -5,6 +5,9 @@ export uirelays
 type
   ResourceID* = string
   Resource* = int
+  TextMeasurement* = object
+    width*, height*, lineHeight*: int
+
   Resources* = object
     resources: TableRef[string, int]
     fontMetrics: TableRef[string, FontMetrics]
@@ -24,3 +27,16 @@ proc get*(
   let res = resources.resources[name]
   let met = resources.fontMetrics[name]
   result = (res, met)
+
+proc measureText*(resources: Resources, fontName, text: string): TextMeasurement =
+  let (font, metrics) = resources.get(fontName)
+  let extent = uirelays.measureText(Font(font), text)
+  result = TextMeasurement(
+    width: extent.w,
+    height:
+      if extent.h > 0:
+        extent.h
+      else:
+        metrics.lineHeight,
+    lineHeight: metrics.lineHeight,
+  )
