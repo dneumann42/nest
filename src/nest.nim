@@ -1,4 +1,4 @@
-import nest/[ui, resources]
+import nest/[ui, resources, palette]
 export ui
 
 import fungus
@@ -24,7 +24,10 @@ template application*(cfg: AppConfig, blk: untyped) =
     updateContext {.inject.} =
       UpdateContext(windowWidth: cfg.width, windowHeight: cfg.height)
     drawContext {.inject.} = DrawContext(
-      resources: Resources.new(), windowWidth: cfg.width, windowHeight: cfg.height
+      resources: Resources.new(),
+      palette: Palette.init(),
+      windowWidth: cfg.width,
+      windowHeight: cfg.height,
     )
   drawContext.resources.loadFont("font", "", 18)
   while running:
@@ -38,6 +41,13 @@ template application*(cfg: AppConfig, blk: untyped) =
         updateContext.mouseY = e.y
         drawContext.mouseX = e.x
         drawContext.mouseY = e.y
+      of MouseDownEvent:
+        let last = updateContext.mouseLeftDown
+        updateContext.mouseLeftDown = true
+        updateContext.mouseLeftPressed = not last
+      of MouseUpEvent:
+        updateContext.mouseLeftDown = false
+        updateContext.mouseLeftPressed = false
       of WindowResizeEvent:
         updateContext.windowWidth = e.x
         updateContext.windowHeight = e.y

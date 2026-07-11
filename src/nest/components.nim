@@ -27,19 +27,32 @@ method update*(self: Button, widget: Widget, ctx: var UpdateContext) =
     ctx.mouseX < (widget.frame.x + widget.frame.width).toInt and
     ctx.mouseY > widget.frame.y.toInt and
     ctx.mouseY < (widget.frame.y + widget.frame.height).toInt
+  let isActive = isHot and ctx.mouseLeftPressed
   if isHot:
     ctx.setHot(widget.id)
+  if isActive:
+    ctx.setActive(widget.id)
 
 method draw*(self: Button, widget: Widget, ctx: DrawContext) =
-  let f = widget.frame
+  let
+    f = widget.frame
+    hot = ctx.hot(widget.id)
+    active = ctx.active(widget.id)
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
-    if ctx.hot(widget.id):
-      color(100, 120, 100)
+    if not active and hot:
+      ctx.palette.backgroundHot
+    elif active and hot:
+      ctx.palette.backgroundActive
     else:
-      color(49, 50, 68),
+      ctx.palette.background,
   )
   let (font, metrics) = ctx.resources.get("font")
   discard drawText(
-    Font(font), f.x.toInt, f.y.toInt, self.label, color(200, 150, 50), color(49, 50, 68)
+    Font(font),
+    f.x.toInt,
+    f.y.toInt,
+    self.label,
+    ctx.palette.textColor,
+    ctx.palette.background,
   )

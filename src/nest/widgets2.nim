@@ -32,12 +32,15 @@ type
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
     hotWidgets*: HashSet[WidgetID]
+    activeWidgets*: HashSet[WidgetID]
     palette*: Palette
 
   UpdateContext* = object
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
+    mouseLeftPressed*, mouseLeftDown*: bool
     hotWidgets*: HashSet[WidgetID]
+    activeWidgets*: HashSet[WidgetID]
 
 const InvalidWidgetID* = WidgetID(0)
 
@@ -47,8 +50,15 @@ proc hot*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
 proc setHot*(ctx: var UpdateContext, id: WidgetID) =
   ctx.hotWidgets.incl(id)
 
+proc active*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
+  ctx.activeWidgets.contains(id)
+
+proc setActive*(ctx: var UpdateContext, id: WidgetID) =
+  ctx.activeWidgets.incl(id)
+
 proc switchState*(updateContext: var UpdateContext, drawContext: var DrawContext) =
   drawContext.hotWidgets = updateContext.hotWidgets
+  drawContext.activeWidgets = updateContext.activeWidgets
 
 proc frame*(box: Widget): Frame =
   Frame(
