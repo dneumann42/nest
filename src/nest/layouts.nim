@@ -2,6 +2,12 @@ import std/[math, strformat]
 
 import kiwiberry
 export kiwiberry
+import widgets2
+export widgets2
+
+const
+  WindowResizeStrength = createStrength(999'ks, 0'ks, 0'ks)
+  FillRemainingStrength = createStrength(2'ks, 0'ks, 0'ks)
 
 type
   SizePolicyKind* = enum
@@ -16,20 +22,16 @@ type
     min*: float64
     max*: float64
 
-  Frame* = object
-    x*, y*, width*, height*: float64
-
-  LayoutBox* = ref object
-    name*: string
-    xv, yv, wv, hv: Variable
+  LayoutBox* = Widget
+  LayoutBoxID* = uint64
 
   ConstraintGroup* = object
     constraints*: seq[Constraint]
 
   Layout* = ref object
     solver*: SolverRef
-    rootBox*: LayoutBox
-    boxes*: seq[LayoutBox]
+    rootBox*: Widget
+    boxes*: seq[Widget]
 
 proc `$`*(frame: Frame): string =
   &"Frame(x: {frame.x}, y: {frame.y}, width: {frame.width}, height: {frame.height})"
@@ -49,35 +51,35 @@ proc prefer*(value: float64, min = 0.0, max = Inf): SizePolicy =
 proc newLayout*(): Layout =
   Layout(solver: newSolver())
 
-proc x*(box: LayoutBox): Variable =
-  box.xv
+proc x*(box: Widget): Variable =
+  box.x
 
-proc y*(box: LayoutBox): Variable =
-  box.yv
+proc y*(box: Widget): Variable =
+  box.y
 
-proc width*(box: LayoutBox): Variable =
-  box.wv
+proc width*(box: Widget): Variable =
+  box.w
 
-proc height*(box: LayoutBox): Variable =
-  box.hv
+proc height*(box: Widget): Variable =
+  box.h
 
-proc left*(box: LayoutBox): Expression =
-  box.xv.toExpression
+proc left*(box: Widget): Expression =
+  box.x.toExpression
 
-proc top*(box: LayoutBox): Expression =
-  box.yv.toExpression
+proc top*(box: Widget): Expression =
+  box.y.toExpression
 
-proc right*(box: LayoutBox): Expression =
-  box.xv + box.wv
+proc right*(box: Widget): Expression =
+  box.x + box.w
 
-proc bottom*(box: LayoutBox): Expression =
-  box.yv + box.hv
+proc bottom*(box: Widget): Expression =
+  box.y + box.h
 
-proc centerX*(box: LayoutBox): Expression =
-  box.xv + box.wv / 2.0
+proc centerX*(box: Widget): Expression =
+  box.x + box.w / 2.0
 
-proc centerY*(box: LayoutBox): Expression =
-  box.yv + box.hv / 2.0
+proc centerY*(box: Widget): Expression =
+  box.y + box.h / 2.0
 
 proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
   discard ui.solver.constraint(variable >= policy.min)
@@ -93,42 +95,41 @@ proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
   of Hug, Prefer:
     discard ui.solver.constraint((variable == policy.value) | Strong)
 
-proc box*(ui: Layout, name: string, width = fill(), height = fill()): LayoutBox =
-  result = LayoutBox(
-    name: name,
-    xv: newVariable(name & ".x"),
-    yv: newVariable(name & ".y"),
-    wv: newVariable(name & ".width"),
-    hv: newVariable(name & ".height"),
+proc initBox(ui: Layout, id: WidgetID, name: string, width, height: SizePolicy): Widget =
+  result = Widget(
+    id: id,
+    x: newVariable(name & ".x"),
+    y: newVariable(name & ".y"),
+    w: newVariable(name & ".width"),
+    h: newVariable(name & ".height"),
   )
+  result.setStretch(width.kind != Fixed, height.kind != Fixed)
   ui.boxes.add result
-  ui.applyPolicy(result.wv, width)
-  ui.applyPolicy(result.hv, height)
+  ui.applyPolicy(result.w, width)
+  ui.applyPolicy(result.h, height)
 
-proc root*(ui: Layout, box: LayoutBox) =
+proc box*(ui: Layout, id: LayoutBoxID, width = fill(), height = fill()): Widget =
+  ui.initBox(WidgetID(id), $id, width, height)
+
+proc box*(ui: Layout, id: string, width = fill(), height = fill()): Widget =
+  ui.initBox(nextWidgetID(), id, width, height)
+
+proc root*(ui: Layout, box: Widget) =
   ui.rootBox = box
   discard ui.solver.constraint(box.x == 0.0)
   discard ui.solver.constraint(box.y == 0.0)
-  ui.solver[box.width] = Strong
-  ui.solver[box.height] = Strong
+  ui.solver[box.w] = WindowResizeStrength
+  ui.solver[box.h] = WindowResizeStrength
 
 proc resize*(ui: Layout, width, height: float64) =
-  if ui.rootBox.isNil:
-    raise newException(ValueError, "layout has no root box")
+  if ui.rootBox.w.isNil or ui.rootBox.h.isNil:
+    raise newException(ValueError, "layout root must be set before resize")
 
-  ui.solver.suggest(ui.rootBox.width, width)
-  ui.solver.suggest(ui.rootBox.height, height)
+  ui.solver.suggest(ui.rootBox.w, width)
+  ui.solver.suggest(ui.rootBox.h, height)
 
 proc solve*(ui: Layout) =
   ui.solver.update()
-
-proc frame*(box: LayoutBox): Frame =
-  Frame(
-    x: box.x.value.float64,
-    y: box.y.value.float64,
-    width: box.width.value.float64,
-    height: box.height.value.float64,
-  )
 
 proc constrain*(ui: Layout, constraint: Constraint): Constraint {.discardable.} =
   ui.solver.constraint(constraint)
@@ -149,86 +150,92 @@ proc remove*(ui: Layout, group: ConstraintGroup) =
   for constraint in group.constraints:
     ui.solver.remove constraint
 
-proc pin*(ui: Layout, child, parent: LayoutBox, inset = 0.0) =
+proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
   discard ui.solver.constraint(child.left == parent.left + inset)
   discard ui.solver.constraint(child.top == parent.top + inset)
   discard ui.solver.constraint(child.right == parent.right - inset)
   discard ui.solver.constraint(child.bottom == parent.bottom - inset)
 
 proc row*(
-    ui: Layout,
-    parent: LayoutBox,
-    children: openArray[LayoutBox],
-    gap = 0.0,
-    padding = 0.0,
+    ui: Layout, parent: Widget, children: openArray[Widget], gap = 0.0, padding = 0.0
 ) =
   if children.len == 0:
     return
 
   for child in children:
     discard ui.solver.constraint(child.top == parent.top + padding)
-    discard ui.solver.constraint(child.bottom == parent.bottom - padding)
+    discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
+    if child.stretchHeight:
+      discard ui.solver.constraint(child.bottom == parent.bottom - padding)
 
   discard ui.solver.constraint(children[0].left == parent.left + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].left == children[i - 1].right + gap)
 
-  discard ui.solver.constraint(children[^1].right == parent.right - padding)
+  for child in children:
+    discard ui.solver.constraint(child.right <= parent.right - padding)
+
+  discard ui.solver.constraint(
+    (children[^1].right == parent.right - padding) | FillRemainingStrength
+  )
 
 proc column*(
-    ui: Layout,
-    parent: LayoutBox,
-    children: openArray[LayoutBox],
-    gap = 0.0,
-    padding = 0.0,
+    ui: Layout, parent: Widget, children: openArray[Widget], gap = 0.0, padding = 0.0
 ) =
   if children.len == 0:
     return
 
   for child in children:
     discard ui.solver.constraint(child.left == parent.left + padding)
-    discard ui.solver.constraint(child.right == parent.right - padding)
+    discard ui.solver.constraint(child.right <= parent.right - padding)
+    if child.stretchWidth:
+      discard ui.solver.constraint(child.right == parent.right - padding)
 
   discard ui.solver.constraint(children[0].top == parent.top + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].top == children[i - 1].bottom + gap)
 
-  discard ui.solver.constraint(children[^1].bottom == parent.bottom - padding)
+  for child in children:
+    discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
 
-proc alignLeft*(ui: Layout, a, b: LayoutBox, offset = 0.0) =
+  discard ui.solver.constraint(
+    (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
+  )
+
+proc alignLeft*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.left == b.left + offset)
 
-proc alignRight*(ui: Layout, a, b: LayoutBox, offset = 0.0) =
+proc alignRight*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.right == b.right + offset)
 
-proc alignTop*(ui: Layout, a, b: LayoutBox, offset = 0.0) =
+proc alignTop*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.top == b.top + offset)
 
-proc alignBottom*(ui: Layout, a, b: LayoutBox, offset = 0.0) =
+proc alignBottom*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.bottom == b.bottom + offset)
 
-proc alignCenterX*(ui: Layout, a, b: LayoutBox, offset = 0.0) =
+proc alignCenterX*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.centerX == b.centerX + offset)
 
-proc alignCenterY*(ui: Layout, a, b: LayoutBox, offset = 0.0) =
+proc alignCenterY*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.centerY == b.centerY + offset)
 
-proc after*(ui: Layout, a, b: LayoutBox, gap = 0.0) =
+proc after*(ui: Layout, a, b: Widget, gap = 0.0) =
   discard ui.solver.constraint(a.left == b.right + gap)
 
-proc below*(ui: Layout, a, b: LayoutBox, gap = 0.0) =
+proc below*(ui: Layout, a, b: Widget, gap = 0.0) =
   discard ui.solver.constraint(a.top == b.bottom + gap)
 
-proc equalWidth*(ui: Layout, boxes: varargs[LayoutBox]) =
+proc equalWidth*(ui: Layout, boxes: varargs[Widget]) =
   if boxes.len < 2:
     return
 
   for i in 1 ..< boxes.len:
     discard ui.solver.constraint(boxes[i].width == boxes[0].width)
 
-proc equalHeight*(ui: Layout, boxes: varargs[LayoutBox]) =
+proc equalHeight*(ui: Layout, boxes: varargs[Widget]) =
   if boxes.len < 2:
     return
 

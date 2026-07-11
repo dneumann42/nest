@@ -47,6 +47,32 @@ suite "constraint layout":
     checkFrame body, 12, 68, 776, 488
     checkFrame status, 12, 564, 776, 24
 
+  test "column does not force fixed child to fill parent height":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let button = ui.box("button", width = fixed(100), height = fixed(24))
+
+    ui.root window
+    ui.column(window, [button])
+    ui.resize(800, 600)
+    ui.solve()
+
+    checkFrame window, 0, 0, 800, 600
+    checkFrame button, 0, 0, 100, 24
+
+  test "row does not force fixed child to fill parent width":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let button = ui.box("button", width = fixed(100), height = fixed(24))
+
+    ui.root window
+    ui.row(window, [button])
+    ui.resize(800, 600)
+    ui.solve()
+
+    checkFrame window, 0, 0, 800, 600
+    checkFrame button, 0, 0, 100, 24
+
   test "pin constrains all edges with an inset":
     let ui = newLayout()
     let window = ui.box("window")
