@@ -12,15 +12,16 @@ suite "DSL reader":
     check read.ok
 
     let program = Program(read.node)
-    check program.body.lines.len == 3
+    check program.body.lines.len == 6
     check BlockCommandLine(program.body.lines[0]).command.identifier == "define"
-    check BlockCommandLine(program.body.lines[1]).command.identifier == "events"
+    check BlockCommandLine(program.body.lines[1]).command.identifier == "command"
+    check BlockCommandLine(program.body.lines[4]).command.identifier == "events"
 
-    let column = BlockCommandLine(program.body.lines[2])
+    let column = BlockCommandLine(program.body.lines[5])
     check column.command.identifier == "column"
     check column.command.values.len == 1
     check CallValue(column.command.values[0]).identifier == "id"
-    check column.body.lines.len == 7
+    check column.body.lines.len == 10
 
   test "parses call keyword assignments":
     let stream = newStringStream("width = (prefer 800: min = 400)\n")

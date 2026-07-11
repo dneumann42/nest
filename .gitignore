@@ -10,3 +10,5 @@ tests/test_layout
 /nest
 /tests/test_ui
 /tests/test_dsl_reader
+/src/example/pathEditor
+/tests/test_dsl_runtime

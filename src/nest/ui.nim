@@ -248,6 +248,12 @@ proc submitted*(self: UI, id: WidgetID): bool =
 proc focused*(self: UI, id: WidgetID): bool =
   self.eventFocusedWidget == id
 
+proc inEventPhase*(self: UI): bool =
+  self.phase == EventPhase
+
+proc inLayoutPhase*(self: UI): bool =
+  self.phase == LayoutPhase
+
 proc listKey*(index: int, value: string): string =
   $index & ":" & value
 
