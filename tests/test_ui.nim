@@ -20,6 +20,7 @@ const
   HeaderRow = WidgetID(115)
   HeaderLabel = WidgetID(116)
   HeaderNewButton = WidgetID(117)
+  Input1 = WidgetID(118)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -101,6 +102,59 @@ suite "ui layout nesting":
       check intrinsic.height == 18
     finally:
       fontRelays = originalFontRelays
+
+  test "line input focuses edits and submits":
+    var ui = UI.init()
+    var state = LineInputState.new("abc")
+    ui.beginLayout(300, 80)
+
+    ui.lineInput(Input1, state, width = fixed(200), height = fixed(30))
+    ui.endLayout()
+
+    var ctx = UpdateContext(mouseX: 10, mouseY: 10, mouseLeftPressed: true)
+    ui.update(ctx)
+    check ctx.focused(Input1)
+
+    ctx.mouseLeftPressed = false
+    ctx.keyInputs = @[KeyInput(key: KeyA, mods: {CtrlPressed})]
+    ctx.textInputs = @["X"]
+    ui.update(ctx)
+    check state.text == "Xabc"
+    check state.cursor == 1
+
+    ctx.keyInputs = @[KeyInput(key: KeyE, mods: {CtrlPressed})]
+    ctx.textInputs = @[]
+    ui.update(ctx)
+    check state.cursor == state.text.len
+
+    ctx.keyInputs = @[KeyInput(key: KeyBackspace)]
+    ui.update(ctx)
+    check state.text == "Xab"
+    check state.cursor == 3
+
+    ctx.keyInputs = @[KeyInput(key: KeyEnter)]
+    ui.update(ctx)
+    check ctx.submitted(Input1)
+    check ctx.focusedWidget == InvalidWidgetID
+
+  test "line input escape and outside click clear focus without submit":
+    var ui = UI.init()
+    var state = LineInputState.new("abc")
+    ui.beginLayout(300, 80)
+
+    ui.lineInput(Input1, state, width = fixed(200), height = fixed(30))
+    ui.endLayout()
+
+    var ctx = UpdateContext(focusedWidget: Input1)
+    ctx.keyInputs = @[KeyInput(key: KeyEsc)]
+    ui.update(ctx)
+    check ctx.focusedWidget == InvalidWidgetID
+    check not ctx.submitted(Input1)
+
+    ctx = UpdateContext(focusedWidget: Input1, mouseX: 250, mouseY: 40, mouseLeftPressed: true)
+    ui.update(ctx)
+    check ctx.focusedWidget == InvalidWidgetID
+    check not ctx.submitted(Input1)
 
   test "block layouts add their parent to the enclosing layout":
     var ui = UI.init()

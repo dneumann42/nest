@@ -4,13 +4,19 @@ import ../nest
 
 type PathEditor* = object
   paths: seq[string]
+  newPath: LineInputState
+  newPathID: WidgetID
 
 proc getPathVariables(): seq[string] =
   let path = getEnv("PATH")
   result = path.split({':'})
 
 proc init*(T: typedesc[PathEditor]): T =
-  T(paths: getPathVariables())
+  T(
+    paths: getPathVariables(),
+    newPath: LineInputState.new(""),
+    newPathID: nextWidgetID(),
+  )
 
 proc pathListBoxItem(ui: var UI, item: string) =
   ui.row(nextWidgetID(), cfg(width = fill(), height = fit(), gap = 12.0)):
@@ -37,6 +43,10 @@ proc start() =
   var ui = UI.init()
   var app = PathEditor.init()
   application AppConfig.init(width = 1280, height = 720, title = "Path Editor"):
+    ui.events:
+      if drawContext.submitted(app.newPathID):
+        discard
+
     ui.layout(updateContext, drawContext):
       ui.column(
         nextWidgetID(),
@@ -49,11 +59,13 @@ proc start() =
         ),
       ):
         ui.label(nextWidgetID(), "Paths", fit(), fit())
+
+        let newPathID = app.newPathID
         ui.pathListBox(
           app.paths,
           header = proc(ui: var UI) =
             ui.row(nextWidgetID(), cfg(width = fill(), height = fit())):
-              ui.label(nextWidgetID(), "LINE: ", fill(), fit())
+              ui.lineInput(newPathID, app.newPath, fill(), fit())
               ui.button(nextWidgetID(), "New", fit(), fit()),
         )
 

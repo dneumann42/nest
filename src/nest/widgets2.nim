@@ -4,6 +4,10 @@ import kiwiberry
 import palette
 
 type
+  KeyInput* = object
+    key*: KeyCode
+    mods*: set[Modifier]
+
   WidgetFlag = enum
     InteractiveWidget
     StaticWidget
@@ -39,6 +43,8 @@ type
     windowWidth*, windowHeight*: int
     hotWidgets*: HashSet[WidgetID]
     activeWidgets*: HashSet[WidgetID]
+    focusedWidget*: WidgetID
+    submittedWidgets*: HashSet[WidgetID]
     palette*: Palette
 
   UpdateContext* = object
@@ -47,6 +53,10 @@ type
     mouseLeftPressed*, mouseLeftDown*: bool
     hotWidgets*: HashSet[WidgetID]
     activeWidgets*: HashSet[WidgetID]
+    focusedWidget*: WidgetID
+    submittedWidgets*: HashSet[WidgetID]
+    keyInputs*: seq[KeyInput]
+    textInputs*: seq[string]
 
 const InvalidWidgetID* = WidgetID(0)
 
@@ -62,9 +72,26 @@ proc active*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
 proc setActive*(ctx: var UpdateContext, id: WidgetID) =
   ctx.activeWidgets.incl(id)
 
+proc focused*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
+  ctx.focusedWidget == id
+
+proc setFocus*(ctx: var UpdateContext, id: WidgetID) =
+  ctx.focusedWidget = id
+
+proc clearFocus*(ctx: var UpdateContext) =
+  ctx.focusedWidget = InvalidWidgetID
+
+proc submitted*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
+  ctx.submittedWidgets.contains(id)
+
+proc submit*(ctx: var UpdateContext, id: WidgetID) =
+  ctx.submittedWidgets.incl(id)
+
 proc switchState*(updateContext: var UpdateContext, drawContext: var DrawContext) =
   drawContext.hotWidgets = updateContext.hotWidgets
   drawContext.activeWidgets = updateContext.activeWidgets
+  drawContext.focusedWidget = updateContext.focusedWidget
+  drawContext.submittedWidgets = updateContext.submittedWidgets
 
 proc frame*(box: Widget): Frame =
   Frame(

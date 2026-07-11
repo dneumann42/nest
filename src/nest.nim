@@ -1,3 +1,5 @@
+import std/sets
+
 import nest/[ui, resources, palette]
 export ui
 
@@ -17,6 +19,12 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
   result = createWindow(cfg.width, cfg.height)
   setWindowTitle(cfg.title)
 
+proc textFromEvent(chars: array[4, char]): string =
+  for ch in chars:
+    if ch == '\0':
+      break
+    result.add(ch)
+
 template application*(cfg: AppConfig, blk: untyped) =
   let window {.inject.} = cfg.initWindow()
   var
@@ -32,7 +40,15 @@ template application*(cfg: AppConfig, blk: untyped) =
   drawContext.resources.loadFont("font", "", 18)
   while running:
     var e = Event()
-    while pollEvent(e):
+    updateContext.keyInputs.setLen(0)
+    updateContext.textInputs.setLen(0)
+    updateContext.submittedWidgets.clear()
+    let inputFlags =
+      if drawContext.focusedWidget != InvalidWidgetID:
+        {WantTextInput}
+      else:
+        {}
+    while pollEvent(e, inputFlags):
       case e.kind
       of QuitEvent, WindowCloseEvent:
         running = false
@@ -53,6 +69,12 @@ template application*(cfg: AppConfig, blk: untyped) =
         updateContext.windowHeight = e.y
         drawContext.windowWidth = e.x
         drawContext.windowHeight = e.y
+      of KeyDownEvent:
+        updateContext.keyInputs.add KeyInput(key: e.key, mods: e.mods)
+      of TextInputEvent:
+        let text = textFromEvent(e.text)
+        if text.len > 0:
+          updateContext.textInputs.add text
       else:
         discard
     blk

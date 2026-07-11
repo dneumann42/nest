@@ -415,3 +415,18 @@ proc label*(
   let lbl = Label.new(text, fontName)
   ui.attach(box, Component(lbl))
   ui.addChild(box)
+
+proc lineInput*(
+    ui: var UI,
+    id: WidgetID,
+    state: LineInputState,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) =
+  if ui.phase == EventPhase:
+    return
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  let input = LineInput.new(state, fontName)
+  ui.attach(box, Component(input))
+  ui.addChild(box)
