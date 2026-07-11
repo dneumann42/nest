@@ -1,6 +1,7 @@
-import std/atomics
+import std/[atomics, sets]
 import resources
 import kiwiberry
+import palette
 
 type
   WidgetFlag = enum
@@ -30,12 +31,24 @@ type
     resources*: Resources
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
+    hotWidgets*: HashSet[WidgetID]
+    palette*: Palette
 
   UpdateContext* = object
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
+    hotWidgets*: HashSet[WidgetID]
 
 const InvalidWidgetID* = WidgetID(0)
+
+proc hot*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
+  ctx.hotWidgets.contains(id)
+
+proc setHot*(ctx: var UpdateContext, id: WidgetID) =
+  ctx.hotWidgets.incl(id)
+
+proc switchState*(updateContext: var UpdateContext, drawContext: var DrawContext) =
+  drawContext.hotWidgets = updateContext.hotWidgets
 
 proc frame*(box: Widget): Frame =
   Frame(

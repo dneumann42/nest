@@ -1,0 +1,13 @@
+#+TITLE: Components
+
+Components can emit events
+A button can be hovered, and clicked, right clicked and middle clicked.
+These events need to be raised and handled.
+Update is the method where these events are emitted.
+The handler happens after all of the updates, before the next frame
+
+#+begin_src nim
+
+
+
+#+end_src

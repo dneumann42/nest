@@ -19,7 +19,6 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
 
 template application*(cfg: AppConfig, blk: untyped) =
   let window {.inject.} = cfg.initWindow()
-
   var
     running {.inject.} = true
     updateContext {.inject.} =
@@ -27,9 +26,7 @@ template application*(cfg: AppConfig, blk: untyped) =
     drawContext {.inject.} = DrawContext(
       resources: Resources.new(), windowWidth: cfg.width, windowHeight: cfg.height
     )
-
   drawContext.resources.loadFont("font", "", 18)
-
   while running:
     var e = Event()
     while pollEvent(e):

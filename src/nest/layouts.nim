@@ -95,7 +95,9 @@ proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
   of Hug, Prefer:
     discard ui.solver.constraint((variable == policy.value) | Strong)
 
-proc initBox(ui: Layout, id: WidgetID, name: string, width, height: SizePolicy): Widget =
+proc initBox(
+    ui: Layout, id: WidgetID, name: string, width, height: SizePolicy
+): Widget =
   result = Widget(
     id: id,
     x: newVariable(name & ".x"),
@@ -157,12 +159,11 @@ proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
   discard ui.solver.constraint(child.bottom == parent.bottom - inset)
 
 proc effectiveAlignment(child: Widget, parentAlignment: Alignment): Alignment =
-  if child.alignSelf == AlignAuto:
-    parentAlignment
-  else:
-    child.alignSelf
+  if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
 
-proc alignRowChild(ui: Layout, parent, child: Widget, alignment: Alignment, padding: float64) =
+proc alignRowChild(
+    ui: Layout, parent, child: Widget, alignment: Alignment, padding: float64
+) =
   case alignment
   of AlignAuto:
     ui.alignRowChild(parent, child, AlignStretch, padding)

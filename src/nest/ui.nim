@@ -105,15 +105,19 @@ proc popLayout(self: var UI): Widget =
   self.addChild(result)
 
 template layout*(
-    ui: var UI, updateContext: UpdateContext, drawContext: DrawContext, blk: untyped
+    ui: var UI,
+    updateContext: var UpdateContext,
+    drawContext: var DrawContext,
+    blk: untyped,
 ): auto =
   ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
   blk
   ui.endLayout()
   ui.update(updateContext)
+  switchState(updateContext, drawContext)
   ui.draw(drawContext)
 
-proc update*(self: UI, context: UpdateContext) =
+proc update*(self: UI, context: var UpdateContext) =
   for (component, widget) in self.components:
     component.update(widget, context)
 
@@ -201,11 +205,7 @@ template rowAligned*(
     discard self.popLayout()
 
 template rowAligned*(
-    self: var UI,
-    id: WidgetID,
-    w, h: SizePolicy,
-    alignItems: Alignment,
-    body: untyped,
+    self: var UI, id: WidgetID, w, h: SizePolicy, alignItems: Alignment, body: untyped
 ) =
   block:
     let layoutParent = self.box(id, width = w, height = h)
@@ -248,11 +248,7 @@ template columnAligned*(
     discard self.popLayout()
 
 template columnAligned*(
-    self: var UI,
-    id: WidgetID,
-    w, h: SizePolicy,
-    alignItems: Alignment,
-    body: untyped,
+    self: var UI, id: WidgetID, w, h: SizePolicy, alignItems: Alignment, body: untyped
 ) =
   block:
     let layoutParent = self.box(id, width = w, height = h)
