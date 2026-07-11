@@ -51,6 +51,7 @@ type
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
     mouseLeftPressed*, mouseLeftDown*: bool
+    mouseWheelX*, mouseWheelY*: float64
     hotWidgets*: HashSet[WidgetID]
     activeWidgets*: HashSet[WidgetID]
     focusedWidget*: WidgetID
@@ -59,6 +60,9 @@ type
     textInputs*: seq[string]
 
 const InvalidWidgetID* = WidgetID(0)
+
+proc lerp*(a, b, t: float64): float64 =
+  a + (b - a) * t
 
 proc hot*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
   ctx.hotWidgets.contains(id)

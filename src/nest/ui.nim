@@ -1,4 +1,4 @@
-import std/sets
+import std/[sets, tables]
 
 import layouts, components, resources, widgets2
 export layouts, components
@@ -18,12 +18,27 @@ type
     parent: Widget
     children: seq[Widget]
 
+  ScrollAxis = enum
+    NoScroll
+    ScrollX
+    ScrollY
+
+  ScrollState = object
+    scrollX, scrollY: float64
+    targetX, targetY: float64
+    maxX, maxY: float64
+    contentWidth, contentHeight: float64
+    dragging: ScrollAxis
+    dragStartMouse: float64
+    dragStartScroll: float64
+
   BoxConfig* = object
     width*, height*: SizePolicy
     gap*, padding*: float64
     alignItems*: Alignment
     justifyContent*: Justification
     alignSelf*: Alignment
+    scrollX*, scrollY*: bool
 
   PendingLayout = object
     kind: LayoutKind
@@ -32,6 +47,7 @@ type
     gap, padding: float64
     alignItems: Alignment
     justifyContent: Justification
+    scrollX, scrollY: bool
 
   UI* = object
     layout*: Layout
@@ -40,6 +56,9 @@ type
     childrenWidgets*: seq[Widget]
     components*: seq[ComponentWidget]
     pendingLayouts: seq[PendingLayout]
+    layoutChildren: Table[WidgetID, seq[Widget]]
+    scrollStates: Table[WidgetID, ScrollState]
+    scrollContainers: HashSet[WidgetID]
     phase: UIPhase
 
 proc cfg*(
@@ -50,6 +69,8 @@ proc cfg*(
     alignItems = AlignStretch,
     justifyContent = JustifyStart,
     alignSelf = AlignAuto,
+    scrollX = false,
+    scrollY = false,
 ): BoxConfig =
   BoxConfig(
     width: width,
@@ -59,6 +80,8 @@ proc cfg*(
     alignItems: alignItems,
     justifyContent: justifyContent,
     alignSelf: alignSelf,
+    scrollX: scrollX,
+    scrollY: scrollY,
   )
 
 proc init*(T: typedesc[UI]): T =
@@ -78,6 +101,8 @@ proc reset*(self: var UI) =
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
   self.pendingLayouts.setLen(0)
+  self.layoutChildren.clear()
+  self.scrollContainers.clear()
   self.phase = LayoutPhase
 
 proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
@@ -86,7 +111,142 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.frames = @[LayoutFrame(parent: self.root)]
   self.childrenWidgets.setLen(0)
   self.pendingLayouts.setLen(0)
+  self.layoutChildren.clear()
+  self.scrollContainers.clear()
   self.layout.resize(windowWidth.toFloat, windowHeight.toFloat)
+
+proc clamp(value, lo, hi: float64): float64 =
+  min(max(value, lo), hi)
+
+proc shiftWidget(widget: Widget, dx, dy: float64) =
+  widget.x.value = widget.x.value + dx
+  widget.y.value = widget.y.value + dy
+
+proc scrollbarSize(): float64 = 10.0
+
+proc scrollWheelStep(): float64 = 42.0
+
+proc scrollLerpFactor(): float64 = 0.35
+
+proc snapBackLerpFactor(): float64 = 0.22
+
+proc overscrollLimit(viewport: float64): float64 =
+  min(72.0, max(viewport * 0.35, 16.0))
+
+proc snapTarget(value, lo, hi: float64): float64 =
+  let target = value.clamp(lo, hi)
+  result = value.lerp(target, snapBackLerpFactor())
+  if abs(result - target) < 0.25:
+    result = target
+
+proc horizontalTrack(parent: Widget): Frame =
+  let f = parent.frame
+  Frame(
+    x: f.x,
+    y: f.y + max(f.height - scrollbarSize(), 0.0),
+    width: max(f.width - scrollbarSize(), 0.0),
+    height: min(scrollbarSize(), f.height),
+  )
+
+proc verticalTrack(parent: Widget): Frame =
+  let f = parent.frame
+  Frame(
+    x: f.x + max(f.width - scrollbarSize(), 0.0),
+    y: f.y,
+    width: min(scrollbarSize(), f.width),
+    height: max(f.height - scrollbarSize(), 0.0),
+  )
+
+proc horizontalThumb(parent: Widget, state: ScrollState): Frame =
+  let track = horizontalTrack(parent)
+  if state.maxX <= 0 or state.contentWidth <= 0 or track.width <= 0:
+    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+  let thumbWidth = max(24.0, track.width * min(parent.frame.width / state.contentWidth, 1.0))
+  let travel = max(track.width - thumbWidth, 0.0)
+  Frame(
+    x: track.x + travel * (state.scrollX / state.maxX),
+    y: track.y,
+    width: thumbWidth,
+    height: track.height,
+  )
+
+proc verticalThumb(parent: Widget, state: ScrollState): Frame =
+  let track = verticalTrack(parent)
+  if state.maxY <= 0 or state.contentHeight <= 0 or track.height <= 0:
+    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+  let thumbHeight = max(24.0, track.height * min(parent.frame.height / state.contentHeight, 1.0))
+  let travel = max(track.height - thumbHeight, 0.0)
+  Frame(
+    x: track.x,
+    y: track.y + travel * (state.scrollY / state.maxY),
+    width: track.width,
+    height: thumbHeight,
+  )
+
+proc contains(frame: Frame, x, y: int): bool =
+  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
+    y.toFloat >= frame.y and y.toFloat < frame.y + frame.height
+
+proc shiftDescendants(self: UI, parent: Widget, dx, dy: float64) =
+  if not self.layoutChildren.hasKey(parent.id):
+    return
+  for child in self.layoutChildren[parent.id]:
+    child.shiftWidget(dx, dy)
+    self.shiftDescendants(child, dx, dy)
+
+proc updateScrollState(self: var UI, parent: Widget) =
+  if not self.layoutChildren.hasKey(parent.id):
+    return
+  var
+    minLeft = Inf
+    minTop = Inf
+    maxRight = -Inf
+    maxBottom = -Inf
+
+  for child in self.layoutChildren[parent.id]:
+    let f = child.frame
+    minLeft = min(minLeft, f.x)
+    minTop = min(minTop, f.y)
+    maxRight = max(maxRight, f.x + f.width)
+    maxBottom = max(maxBottom, f.y + f.height)
+
+  var state = self.scrollStates.getOrDefault(parent.id)
+  let parentFrame = parent.frame
+  if minLeft == Inf:
+    state.contentWidth = parentFrame.width
+    state.contentHeight = parentFrame.height
+  else:
+    state.contentWidth = max(parentFrame.width, maxRight - min(parentFrame.x, minLeft))
+    state.contentHeight = max(parentFrame.height, maxBottom - min(parentFrame.y, minTop))
+  state.maxX = max(state.contentWidth - parentFrame.width, 0.0)
+  state.maxY = max(state.contentHeight - parentFrame.height, 0.0)
+  let
+    overscrollX = overscrollLimit(parentFrame.width)
+    overscrollY = overscrollLimit(parentFrame.height)
+  state.targetX = state.targetX.clamp(-overscrollX, state.maxX + overscrollX)
+  state.targetY = state.targetY.clamp(-overscrollY, state.maxY + overscrollY)
+  if state.dragging != ScrollX:
+    state.targetX = state.targetX.snapTarget(0.0, state.maxX)
+  if state.dragging != ScrollY:
+    state.targetY = state.targetY.snapTarget(0.0, state.maxY)
+  state.scrollX = state.scrollX.clamp(-overscrollX, state.maxX + overscrollX).lerp(
+    state.targetX, scrollLerpFactor()
+  )
+  state.scrollY = state.scrollY.clamp(-overscrollY, state.maxY + overscrollY).lerp(
+    state.targetY, scrollLerpFactor()
+  )
+  if state.maxX <= 0 and state.dragging == ScrollX:
+    state.dragging = NoScroll
+  if state.maxY <= 0 and state.dragging == ScrollY:
+    state.dragging = NoScroll
+  self.scrollStates[parent.id] = state
+
+proc applyScrollOffsets(self: var UI) =
+  for parent in self.layout.boxes:
+    if parent.id in self.scrollContainers:
+      self.updateScrollState(parent)
+      let state = self.scrollStates[parent.id]
+      self.shiftDescendants(parent, -state.scrollX, -state.scrollY)
 
 proc endLayout*(self: var UI): bool {.discardable.} =
   if self.frames.len == 1 and self.frames[0].children.len > 0:
@@ -99,11 +259,16 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       padding: 0.0,
       alignItems: AlignStretch,
       justifyContent: JustifyStart,
+      scrollX: false,
+      scrollY: false,
     )
     self.frames[0].children.setLen(0)
 
   for i in countdown(self.pendingLayouts.high, 0):
     let pending = self.pendingLayouts[i]
+    self.layoutChildren[pending.parent.id] = pending.children
+    if pending.scrollX or pending.scrollY:
+      self.scrollContainers.incl pending.parent.id
     case pending.kind
     of RowLayout:
       self.layout.row(
@@ -113,6 +278,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         padding = pending.padding,
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
+        scrollX = pending.scrollX,
+        scrollY = pending.scrollY,
       )
     of ColumnLayout:
       self.layout.column(
@@ -122,9 +289,13 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         padding = pending.padding,
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
+        scrollX = pending.scrollX,
+        scrollY = pending.scrollY,
       )
 
   result = self.layout.solve()
+  if result:
+    self.applyScrollOffsets()
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:
@@ -242,14 +413,129 @@ template layout*(
     updateContext.activeWidgets.clear()
   ui.reset()
 
-proc update*(self: UI, context: var UpdateContext) =
+proc updateScrollbarDrag(self: var UI, parent: Widget, context: var UpdateContext) =
+  if parent.id notin self.scrollContainers:
+    return
+  var state = self.scrollStates.getOrDefault(parent.id)
+  let
+    overscrollX = overscrollLimit(parent.frame.width)
+    overscrollY = overscrollLimit(parent.frame.height)
+  if parent.frame.contains(context.mouseX, context.mouseY):
+    if state.maxY > 0 and context.mouseWheelY != 0:
+      state.targetY =
+        (state.targetY - context.mouseWheelY * scrollWheelStep()).clamp(
+          -overscrollY, state.maxY + overscrollY
+        )
+      context.setActive(parent.id)
+    if state.maxX > 0 and context.mouseWheelX != 0:
+      state.targetX =
+        (state.targetX - context.mouseWheelX * scrollWheelStep()).clamp(
+          -overscrollX, state.maxX + overscrollX
+        )
+      context.setActive(parent.id)
+
+  if not context.mouseLeftDown:
+    state.dragging = NoScroll
+
+  if context.mouseLeftPressed:
+    if state.maxY > 0 and verticalThumb(parent, state).contains(context.mouseX, context.mouseY):
+      state.dragging = ScrollY
+      state.dragStartMouse = context.mouseY.toFloat
+      state.dragStartScroll = state.targetY
+      context.setActive(parent.id)
+    elif state.maxX > 0 and horizontalThumb(parent, state).contains(context.mouseX, context.mouseY):
+      state.dragging = ScrollX
+      state.dragStartMouse = context.mouseX.toFloat
+      state.dragStartScroll = state.targetX
+      context.setActive(parent.id)
+
+  case state.dragging
+  of ScrollY:
+    let track = verticalTrack(parent)
+    let thumb = verticalThumb(parent, state)
+    let travel = max(track.height - thumb.height, 1.0)
+    state.targetY =
+      (state.dragStartScroll + (context.mouseY.toFloat - state.dragStartMouse) * state.maxY / travel)
+        .clamp(-overscrollY, state.maxY + overscrollY)
+    context.setActive(parent.id)
+  of ScrollX:
+    let track = horizontalTrack(parent)
+    let thumb = horizontalThumb(parent, state)
+    let travel = max(track.width - thumb.width, 1.0)
+    state.targetX =
+      (state.dragStartScroll + (context.mouseX.toFloat - state.dragStartMouse) * state.maxX / travel)
+        .clamp(-overscrollX, state.maxX + overscrollX)
+    context.setActive(parent.id)
+  of NoScroll:
+    discard
+
+  self.scrollStates[parent.id] = state
+
+proc componentTable(self: UI): Table[WidgetID, Component] =
   for (component, widget) in self.components:
-    component.update(widget, context)
+    result[widget.id] = component
+
+proc updateWidgetTree(
+    self: var UI,
+    widget: Widget,
+    components: Table[WidgetID, Component],
+    context: var UpdateContext,
+    clipped = false,
+) =
+  self.updateScrollbarDrag(widget, context)
+  if components.hasKey(widget.id):
+    components[widget.id].update(widget, context)
+
+  let insideClip =
+    (not clipped) or widget.frame.contains(context.mouseX, context.mouseY) or
+      context.focused(widget.id)
+  let childClipped = clipped or widget.id in self.scrollContainers
+
+  if not insideClip and childClipped:
+    return
+  for child in self.layoutChildren.getOrDefault(widget.id):
+    self.updateWidgetTree(child, components, context, childClipped)
+
+proc update*(self: var UI, context: var UpdateContext) =
+  let components = self.componentTable()
+  self.updateWidgetTree(self.root, components, context)
 
 proc draw*(self: UI, context: DrawContext) =
   fillRect(rect(0, 0, context.windowWidth, context.windowHeight), color(0, 0, 0))
-  for (component, widget) in self.components:
-    component.draw(widget, context)
+
+  proc drawScrollbars(widget: Widget) =
+    if widget.id notin self.scrollContainers:
+      return
+    let state = self.scrollStates.getOrDefault(widget.id)
+    if state.maxY > 0:
+      let track = verticalTrack(widget)
+      let thumb = verticalThumb(widget, state)
+      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), context.palette.panelMuted)
+      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), context.palette.cardAccent)
+    if state.maxX > 0:
+      let track = horizontalTrack(widget)
+      let thumb = horizontalThumb(widget, state)
+      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), context.palette.panelMuted)
+      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), context.palette.cardAccent)
+
+  let components = self.componentTable()
+  proc drawWidgetTree(widget: Widget) =
+    if components.hasKey(widget.id):
+      components[widget.id].draw(widget, context)
+
+    if widget.id in self.scrollContainers:
+      let f = widget.frame
+      saveState()
+      setClipRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt))
+      for child in self.layoutChildren.getOrDefault(widget.id):
+        drawWidgetTree(child)
+      restoreState()
+      drawScrollbars(widget)
+    else:
+      for child in self.layoutChildren.getOrDefault(widget.id):
+        drawWidgetTree(child)
+
+  drawWidgetTree(self.root)
 
 proc row*(self: var UI, config: BoxConfig) =
   if self.phase == EventPhase:
@@ -263,6 +549,8 @@ proc row*(self: var UI, config: BoxConfig) =
     padding: config.padding,
     alignItems: config.alignItems,
     justifyContent: config.justifyContent,
+    scrollX: config.scrollX,
+    scrollY: config.scrollY,
   )
 
 proc column*(self: var UI, config: BoxConfig) =
@@ -277,6 +565,8 @@ proc column*(self: var UI, config: BoxConfig) =
     padding: config.padding,
     alignItems: config.alignItems,
     justifyContent: config.justifyContent,
+    scrollX: config.scrollX,
+    scrollY: config.scrollY,
   )
 
 template row*(self: var UI, config: BoxConfig, body: untyped) =

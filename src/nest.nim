@@ -42,6 +42,8 @@ template application*(cfg: AppConfig, blk: untyped) =
     var e = Event()
     updateContext.keyInputs.setLen(0)
     updateContext.textInputs.setLen(0)
+    updateContext.mouseWheelX = 0
+    updateContext.mouseWheelY = 0
     updateContext.submittedWidgets.clear()
     let inputFlags =
       if drawContext.focusedWidget != InvalidWidgetID:
@@ -75,6 +77,9 @@ template application*(cfg: AppConfig, blk: untyped) =
         let text = textFromEvent(e.text)
         if text.len > 0:
           updateContext.textInputs.add text
+      of MouseWheelEvent:
+        updateContext.mouseWheelX += e.x.toFloat
+        updateContext.mouseWheelY += e.y.toFloat
       else:
         discard
     blk

@@ -181,17 +181,24 @@ proc effectiveAlignment(child: Widget, parentAlignment: Alignment): Alignment =
   if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
 
 proc alignRowChild(
-    ui: Layout, parent, child: Widget, alignment: Alignment, padding: float64
+    ui: Layout,
+    parent,
+    child: Widget,
+    alignment: Alignment,
+    padding: float64,
+    allowOverflowY = false,
 ) =
   case alignment
   of AlignAuto:
-    ui.alignRowChild(parent, child, AlignStretch, padding)
+    ui.alignRowChild(parent, child, AlignStretch, padding, allowOverflowY)
   of AlignStart:
     discard ui.constrain(child.top == parent.top + padding)
-    discard ui.constrain(child.bottom <= parent.bottom - padding)
+    if not allowOverflowY:
+      discard ui.constrain(child.bottom <= parent.bottom - padding)
   of AlignCenter:
     discard ui.constrain(child.top >= parent.top + padding)
-    discard ui.constrain(child.bottom <= parent.bottom - padding)
+    if not allowOverflowY:
+      discard ui.constrain(child.bottom <= parent.bottom - padding)
     discard ui.constrain(child.centerY == parent.centerY)
   of AlignEnd:
     discard ui.constrain(child.top >= parent.top + padding)
@@ -203,17 +210,24 @@ proc alignRowChild(
       discard ui.constrain(child.bottom == parent.bottom - padding)
 
 proc alignColumnChild(
-    ui: Layout, parent, child: Widget, alignment: Alignment, padding: float64
+    ui: Layout,
+    parent,
+    child: Widget,
+    alignment: Alignment,
+    padding: float64,
+    allowOverflowX = false,
 ) =
   case alignment
   of AlignAuto:
-    ui.alignColumnChild(parent, child, AlignStretch, padding)
+    ui.alignColumnChild(parent, child, AlignStretch, padding, allowOverflowX)
   of AlignStart:
     discard ui.constrain(child.left == parent.left + padding)
-    discard ui.constrain(child.right <= parent.right - padding)
+    if not allowOverflowX:
+      discard ui.constrain(child.right <= parent.right - padding)
   of AlignCenter:
     discard ui.constrain(child.left >= parent.left + padding)
-    discard ui.constrain(child.right <= parent.right - padding)
+    if not allowOverflowX:
+      discard ui.constrain(child.right <= parent.right - padding)
     discard ui.constrain(child.centerX == parent.centerX)
   of AlignEnd:
     discard ui.constrain(child.left >= parent.left + padding)
@@ -231,12 +245,14 @@ proc row*(
     padding = 0.0,
     alignItems = AlignStretch,
     justifyContent = JustifyStart,
+    scrollX = false,
+    scrollY = false,
 ) =
   if children.len == 0:
     return
 
   for child in children:
-    ui.alignRowChild(parent, child, child.effectiveAlignment(alignItems), padding)
+    ui.alignRowChild(parent, child, child.effectiveAlignment(alignItems), padding, scrollY)
 
   if parent.fitWidth:
     discard ui.constrain(children[0].left == parent.left + padding)
@@ -246,7 +262,7 @@ proc row*(
   for i in 1 ..< children.len:
     discard ui.constrain(children[i].left == children[i - 1].right + gap)
 
-  if not parent.fitWidth:
+  if not parent.fitWidth and not scrollX:
     discard ui.constrain(children[^1].right <= parent.right - padding)
 
   if parent.fitWidth:
@@ -265,9 +281,10 @@ proc row*(
   case justifyContent
   of JustifyStart:
     discard ui.constrain(children[0].left == parent.left + padding)
-    discard ui.constrain(
-      (children[^1].right == parent.right - padding) | FillRemainingStrength
-    )
+    if not scrollX:
+      discard ui.constrain(
+        (children[^1].right == parent.right - padding) | FillRemainingStrength
+      )
   of JustifyCenter:
     discard ui.constrain(
       (children[0].left + children[^1].right) / 2.0 == parent.centerX
@@ -283,12 +300,14 @@ proc column*(
     padding = 0.0,
     alignItems = AlignStretch,
     justifyContent = JustifyStart,
+    scrollX = false,
+    scrollY = false,
 ) =
   if children.len == 0:
     return
 
   for child in children:
-    ui.alignColumnChild(parent, child, child.effectiveAlignment(alignItems), padding)
+    ui.alignColumnChild(parent, child, child.effectiveAlignment(alignItems), padding, scrollX)
 
   if parent.fitHeight:
     discard ui.constrain(children[0].top == parent.top + padding)
@@ -298,7 +317,7 @@ proc column*(
   for i in 1 ..< children.len:
     discard ui.constrain(children[i].top == children[i - 1].bottom + gap)
 
-  if not parent.fitHeight:
+  if not parent.fitHeight and not scrollY:
     discard ui.constrain(children[^1].bottom <= parent.bottom - padding)
 
   if parent.fitHeight:
@@ -317,9 +336,10 @@ proc column*(
   case justifyContent
   of JustifyStart:
     discard ui.constrain(children[0].top == parent.top + padding)
-    discard ui.constrain(
-      (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
-    )
+    if not scrollY:
+      discard ui.constrain(
+        (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
+      )
   of JustifyCenter:
     discard ui.constrain(
       (children[0].top + children[^1].bottom) / 2.0 == parent.centerY

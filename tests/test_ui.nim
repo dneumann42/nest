@@ -24,6 +24,13 @@ const
   NarrowPanel = WidgetID(119)
   NarrowHeader = WidgetID(120)
   NarrowButton = WidgetID(121)
+  ScrollPanel = WidgetID(122)
+  ScrollItem1 = WidgetID(123)
+  ScrollItem2 = WidgetID(124)
+  ScrollItem3 = WidgetID(125)
+  ScrollRow = WidgetID(126)
+  OutsideHeader = WidgetID(127)
+  OutsideFooter = WidgetID(128)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -39,6 +46,9 @@ proc checkFrame(box: Widget, x, y, width, height: float64) =
   check frame.height == height
 
 suite "ui layout nesting":
+  test "lerp interpolates toward a target":
+    check lerp(0.0, 10.0, 0.25) == 2.5
+
   test "fit button remains visible after a fill label in a row":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -199,8 +209,162 @@ suite "ui layout nesting":
       check ui.widget(NarrowHeader).frame.height >= 28
       check ui.widget(Input1).frame.width >= 0
       check ui.widget(NarrowButton).frame.width > 0
+      check ui.widget(NarrowButton).frame.x > ui.widget(Input1).frame.x + 200
     finally:
       fontRelays = originalFontRelays
+
+  test "vertical scrollbar drag offsets scroll container children":
+    var ui = UI.init()
+
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+    ui.endLayout()
+
+    checkFrame(ui.widget(ScrollItem1), 0, 0, 90, 30)
+
+    var ctx = UpdateContext(mouseX: 95, mouseY: 5, mouseLeftPressed: true, mouseLeftDown: true)
+    ui.update(ctx)
+    ctx.mouseLeftPressed = false
+    ctx.mouseY = 30
+    ui.update(ctx)
+
+    ui.reset()
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+    ui.endLayout()
+
+    check ui.widget(ScrollItem1).frame.y < 0
+
+  test "mouse wheel scrolls vertically with easing":
+    var ui = UI.init()
+
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+    ui.endLayout()
+
+    var ctx = UpdateContext(mouseX: 10, mouseY: 10, mouseWheelY: -1)
+    ui.update(ctx)
+
+    ui.reset()
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+    ui.endLayout()
+
+    check ui.widget(ScrollItem1).frame.y < 0
+    check ui.widget(ScrollItem1).frame.y > -30
+
+  test "scroll target overshoots and snaps back with easing":
+    var ui = UI.init()
+
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+    ui.endLayout()
+
+    var ctx = UpdateContext(mouseX: 10, mouseY: 10, mouseWheelY: 1)
+    ui.update(ctx)
+
+    ui.reset()
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+      ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+    ui.endLayout()
+
+    let overshotY = ui.widget(ScrollItem1).frame.y
+    check overshotY > 0
+
+    var settledY = overshotY
+    for _ in 0 ..< 24:
+      ui.reset()
+      ui.beginLayout(120, 80)
+      ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+        ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
+        ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
+        ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
+      ui.endLayout()
+      settledY = ui.widget(ScrollItem1).frame.y
+
+    check settledY < overshotY
+    check settledY >= 0
+
+  test "header row can remain outside scroll panel":
+    var ui = UI.init()
+
+    ui.beginLayout(160, 120)
+    ui.column(Body, cfg(width = fixed(120), height = fixed(100), gap = 8.0)):
+      ui.row(OutsideHeader, cfg(width = fill(), height = fixed(30))):
+        ui.button(HeaderNewButton, "New", width = fixed(40), height = fixed(24))
+      ui.panel(ScrollPanel, cfg(width = fill(), height = fill(), scrollY = true)):
+        ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(40))
+        ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(40))
+        ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(40))
+    ui.endLayout()
+
+    check ui.widget(OutsideHeader).frame.y == 0
+    check ui.widget(ScrollPanel).frame.y > ui.widget(OutsideHeader).frame.y
+
+  test "short scroll content does not pull footer row upward":
+    var ui = UI.init()
+
+    ui.beginLayout(160, 120)
+    ui.column(Body, cfg(width = fixed(120), height = fixed(100), gap = 8.0)):
+      ui.row(OutsideHeader, cfg(width = fill(), height = fixed(30))):
+        ui.button(HeaderNewButton, "Top", width = fixed(40), height = fixed(24))
+      ui.panel(ScrollPanel, cfg(width = fill(), height = fill(), scrollY = true)):
+        ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(20))
+      ui.row(OutsideFooter, cfg(width = fill(), height = fixed(20))):
+        ui.button(NarrowButton, "New", width = fixed(40), height = fixed(20))
+    ui.endLayout()
+
+    checkFrame(ui.widget(OutsideHeader), 0, 0, 120, 30)
+    checkFrame(ui.widget(ScrollPanel), 0, 38, 120, 34)
+    checkFrame(ui.widget(OutsideFooter), 0, 80, 120, 20)
+
+  test "horizontal scrollbar drag offsets scroll container children":
+    var ui = UI.init()
+
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollX = true)):
+      ui.row(ScrollRow, cfg(width = fit(), height = fit(), scrollX = true)):
+        ui.button(ScrollItem1, "One", width = fixed(60), height = fixed(30))
+        ui.button(ScrollItem2, "Two", width = fixed(60), height = fixed(30))
+        ui.button(ScrollItem3, "Three", width = fixed(60), height = fixed(30))
+    ui.endLayout()
+
+    checkFrame(ui.widget(ScrollItem1), 0, 0, 60, 30)
+
+    var ctx = UpdateContext(mouseX: 5, mouseY: 55, mouseLeftPressed: true, mouseLeftDown: true)
+    ui.update(ctx)
+    ctx.mouseLeftPressed = false
+    ctx.mouseX = 40
+    ui.update(ctx)
+
+    ui.reset()
+    ui.beginLayout(120, 80)
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollX = true)):
+      ui.row(ScrollRow, cfg(width = fit(), height = fit(), scrollX = true)):
+        ui.button(ScrollItem1, "One", width = fixed(60), height = fixed(30))
+        ui.button(ScrollItem2, "Two", width = fixed(60), height = fixed(30))
+        ui.button(ScrollItem3, "Three", width = fixed(60), height = fixed(30))
+    ui.endLayout()
+
+    check ui.widget(ScrollItem1).frame.x < 0
 
   test "block layouts add their parent to the enclosing layout":
     var ui = UI.init()
