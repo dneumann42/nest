@@ -56,35 +56,60 @@ template application*(cfg: AppConfig, blk: untyped) =
       else:
         discard
     blk
+    updateContext.mouseLeftPressed = false
     refresh()
     sleep(16)
   shutdown()
 
+const
+  CenterStage = WidgetID(101)
+  CounterPanel = WidgetID(102)
+  TitleLabel = WidgetID(103)
+  ValueLabel = WidgetID(104)
+  ControlsRow = WidgetID(105)
+  DecrementButton = WidgetID(106)
+  ResetButton = WidgetID(107)
+  IncrementButton = WidgetID(108)
+
+type
+  AppModel = object
+    title = "Nest Counter"
+    counter: CounterModel
+
+  CounterModel = object
+    count = 0
+    changed = 0
+    timesReset = 0
+
+proc layoutCounter(ui: var UI, drawContext: DrawContext, counter: var CounterModel) =
+  ui.events:
+    if drawContext.active(DecrementButton):
+      dec counter.count
+    if drawContext.active(ResetButton):
+      counter.count = 0
+    if drawContext.active(IncrementButton):
+      inc counter.count
+
+  ui.panelJustified(
+    CounterPanel, fixed(360), fixed(220), 18.0, 24.0, AlignCenter, JustifyCenter
+  ):
+    ui.label(TitleLabel, "Counter", width = fixed(120), height = fixed(28))
+    ui.label(ValueLabel, $counter.count, width = fixed(120), height = fixed(44))
+    ui.rowAlignedJustified(
+      ControlsRow, fill(), fixed(40), 12.0, 0.0, AlignCenter, JustifyCenter
+    ):
+      ui.button(DecrementButton, "-", width = fixed(72), height = fixed(32))
+      ui.button(ResetButton, "Reset", width = fixed(96), height = fixed(32))
+      ui.button(IncrementButton, "+", width = fixed(72), height = fixed(32))
+
 proc start() =
-  application AppConfig.init(width = 1100, height = 720, title = "Nest Layout Lab"):
-    var ui = UI.init()
+  var ui = UI.init()
+  var app = AppModel()
+
+  application AppConfig.init(width = 720, height = 480, title = app.title):
     ui.layout(updateContext, drawContext):
-      ui.columnAligned(nextWidgetID(), w = fill(), h = fill(), alignItems = AlignCenter):
-        ui.button(nextWidgetID(), "Nest", width = fixed(84), height = fixed(32))
-        ui.button(nextWidgetID(), "Projects", width = fixed(104), height = fixed(28))
-        ui.button(
-          nextWidgetID(),
-          "Tall",
-          width = fixed(62),
-          height = fixed(32),
-          alignSelf = AlignEnd,
-        )
-        ui.spacer(nextWidgetID(), width = fill(), height = fixed(1))
-        ui.button(
-          nextWidgetID(), "Search", width = prefer(180, min = 120), height = fixed(28)
-        )
-        ui.button(
-          nextWidgetID(),
-          "Profile",
-          width = fixed(96),
-          height = fixed(24),
-          alignSelf = AlignStart,
-        )
+      ui.center(CenterStage, fill(), fill()):
+        ui.layoutCounter(drawContext, app.counter)
 
 when isMainModule:
   start()

@@ -22,6 +22,11 @@ type
     min*: float64
     max*: float64
 
+  Justification* = enum
+    JustifyStart
+    JustifyCenter
+    JustifyEnd
+
   LayoutBox* = Widget
   LayoutBoxID* = uint64
 
@@ -211,6 +216,7 @@ proc row*(
     gap = 0.0,
     padding = 0.0,
     alignItems = AlignStretch,
+    justifyContent = JustifyStart,
 ) =
   if children.len == 0:
     return
@@ -218,14 +224,25 @@ proc row*(
   for child in children:
     ui.alignRowChild(parent, child, child.effectiveAlignment(alignItems), padding)
 
-  discard ui.solver.constraint(children[0].left == parent.left + padding)
+  discard ui.solver.constraint(children[0].left >= parent.left + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].left == children[i - 1].right + gap)
 
-  discard ui.solver.constraint(
-    (children[^1].right == parent.right - padding) | FillRemainingStrength
-  )
+  discard ui.solver.constraint(children[^1].right <= parent.right - padding)
+
+  case justifyContent
+  of JustifyStart:
+    discard ui.solver.constraint(children[0].left == parent.left + padding)
+    discard ui.solver.constraint(
+      (children[^1].right == parent.right - padding) | FillRemainingStrength
+    )
+  of JustifyCenter:
+    discard ui.solver.constraint(
+      (children[0].left + children[^1].right) / 2.0 == parent.centerX
+    )
+  of JustifyEnd:
+    discard ui.solver.constraint(children[^1].right == parent.right - padding)
 
 proc column*(
     ui: Layout,
@@ -234,6 +251,7 @@ proc column*(
     gap = 0.0,
     padding = 0.0,
     alignItems = AlignStretch,
+    justifyContent = JustifyStart,
 ) =
   if children.len == 0:
     return
@@ -241,14 +259,25 @@ proc column*(
   for child in children:
     ui.alignColumnChild(parent, child, child.effectiveAlignment(alignItems), padding)
 
-  discard ui.solver.constraint(children[0].top == parent.top + padding)
+  discard ui.solver.constraint(children[0].top >= parent.top + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].top == children[i - 1].bottom + gap)
 
-  discard ui.solver.constraint(
-    (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
-  )
+  discard ui.solver.constraint(children[^1].bottom <= parent.bottom - padding)
+
+  case justifyContent
+  of JustifyStart:
+    discard ui.solver.constraint(children[0].top == parent.top + padding)
+    discard ui.solver.constraint(
+      (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
+    )
+  of JustifyCenter:
+    discard ui.solver.constraint(
+      (children[0].top + children[^1].bottom) / 2.0 == parent.centerY
+    )
+  of JustifyEnd:
+    discard ui.solver.constraint(children[^1].bottom == parent.bottom - padding)
 
 proc alignLeft*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.solver.constraint(a.left == b.left + offset)
