@@ -55,6 +55,8 @@ type
     frames*: seq[LayoutFrame]
     childrenWidgets*: seq[Widget]
     components*: seq[ComponentWidget]
+    componentByID: Table[WidgetID, Component]
+    intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
     layoutChildren: Table[WidgetID, seq[Widget]]
     scrollStates: Table[WidgetID, ScrollState]
@@ -86,7 +88,11 @@ proc cfg*(
 
 proc init*(T: typedesc[UI]): T =
   var ui = newLayout()
-  result = T(layout: ui, root: ui.box(nextWidgetID(), width = fill(), height = fill()))
+  result = T(
+    layout: ui,
+    root: ui.box(nextWidgetID(), width = fill(), height = fill()),
+    intrinsicByID: newTable[WidgetID, IntrinsicSize](),
+  )
 
 proc reset*(self: var UI) =
   let rootID =
@@ -100,6 +106,11 @@ proc reset*(self: var UI) =
   self.frames.setLen(0)
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
+  self.componentByID.clear()
+  if self.intrinsicByID.isNil:
+    self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
+  else:
+    self.intrinsicByID.clear()
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
@@ -110,6 +121,12 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.parent = self.root
   self.frames = @[LayoutFrame(parent: self.root)]
   self.childrenWidgets.setLen(0)
+  self.components.setLen(0)
+  self.componentByID.clear()
+  if self.intrinsicByID.isNil:
+    self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
+  else:
+    self.intrinsicByID.clear()
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
@@ -187,12 +204,17 @@ proc contains(frame: Frame, x, y: int): bool =
   x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
     y.toFloat >= frame.y and y.toFloat < frame.y + frame.height
 
-proc shiftDescendants(self: UI, parent: Widget, dx, dy: float64) =
+proc shiftDescendants(
+    self: UI, parent: Widget, dx, dy: float64, visited: var HashSet[WidgetID]
+) =
   if not self.layoutChildren.hasKey(parent.id):
     return
   for child in self.layoutChildren[parent.id]:
+    if child.id in visited:
+      continue
+    visited.incl child.id
     child.shiftWidget(dx, dy)
-    self.shiftDescendants(child, dx, dy)
+    self.shiftDescendants(child, dx, dy, visited)
 
 proc updateScrollState(self: var UI, parent: Widget) =
   if not self.layoutChildren.hasKey(parent.id):
@@ -246,7 +268,205 @@ proc applyScrollOffsets(self: var UI) =
     if parent.id in self.scrollContainers:
       self.updateScrollState(parent)
       let state = self.scrollStates[parent.id]
-      self.shiftDescendants(parent, -state.scrollX, -state.scrollY)
+      var visited: HashSet[WidgetID]
+      visited.incl parent.id
+      self.shiftDescendants(parent, -state.scrollX, -state.scrollY, visited)
+
+proc clampPolicy(value: float64, policy: WidgetSizePolicy): float64 =
+  min(max(value, policy.min), policy.max)
+
+proc directAlignment(child: Widget, parentAlignment: Alignment): Alignment =
+  if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
+
+proc directLeafWidth(self: UI, widget: Widget): float64 =
+  let intrinsic = self.intrinsicByID.getOrDefault(widget.id)
+  case widget.widthPolicy.kind
+  of WidgetFixed:
+    widget.widthPolicy.value
+  of WidgetHug, WidgetPrefer:
+    widget.widthPolicy.value.clampPolicy(widget.widthPolicy)
+  of WidgetFit:
+    (if intrinsic.hasWidth: intrinsic.width else: widget.widthPolicy.min).clampPolicy(
+      widget.widthPolicy
+    )
+  of WidgetFill:
+    widget.widthPolicy.min
+
+proc directLeafHeight(self: UI, widget: Widget): float64 =
+  let intrinsic = self.intrinsicByID.getOrDefault(widget.id)
+  case widget.heightPolicy.kind
+  of WidgetFixed:
+    widget.heightPolicy.value
+  of WidgetHug, WidgetPrefer:
+    widget.heightPolicy.value.clampPolicy(widget.heightPolicy)
+  of WidgetFit:
+    (if intrinsic.hasHeight: intrinsic.height else: widget.heightPolicy.min).clampPolicy(
+      widget.heightPolicy
+    )
+  of WidgetFill:
+    widget.heightPolicy.min
+
+proc preferredWidth(
+    self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
+): float64
+proc preferredHeight(
+    self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
+): float64
+
+proc preferredWidth(
+    self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
+): float64 =
+  if widget.widthPolicy.kind != WidgetFit or not pendingByParent.hasKey(widget.id):
+    return self.directLeafWidth(widget)
+
+  let pending = pendingByParent[widget.id]
+  case pending.kind
+  of RowLayout:
+    if pending.children.len == 0:
+      return widget.widthPolicy.min
+    var width = pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
+    for child in pending.children:
+      width += self.preferredWidth(child, pendingByParent)
+    width.clampPolicy(widget.widthPolicy)
+  of ColumnLayout:
+    var width = widget.widthPolicy.min
+    for child in pending.children:
+      width = max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
+    width.clampPolicy(widget.widthPolicy)
+
+proc preferredHeight(
+    self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
+): float64 =
+  if widget.heightPolicy.kind != WidgetFit or not pendingByParent.hasKey(widget.id):
+    return self.directLeafHeight(widget)
+
+  let pending = pendingByParent[widget.id]
+  case pending.kind
+  of RowLayout:
+    var height = widget.heightPolicy.min
+    for child in pending.children:
+      height = max(height, self.preferredHeight(child, pendingByParent) + pending.padding * 2.0)
+    height.clampPolicy(widget.heightPolicy)
+  of ColumnLayout:
+    if pending.children.len == 0:
+      return widget.heightPolicy.min
+    var height = pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
+    for child in pending.children:
+      height += self.preferredHeight(child, pendingByParent)
+    height.clampPolicy(widget.heightPolicy)
+
+proc assignDirectStack(
+    self: UI,
+    pending: PendingLayout,
+    pendingByParent: Table[WidgetID, PendingLayout],
+) =
+  if pending.children.len == 0:
+    return
+
+  let parentFrame = pending.parent.frame
+  case pending.kind
+  of ColumnLayout:
+    let
+      availableWidth = max(parentFrame.width - pending.padding * 2.0, 0.0)
+      availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
+    var fixedHeight = pending.gap * max(pending.children.len - 1, 0).toFloat
+    var fillCount = 0
+    for child in pending.children:
+      if child.heightPolicy.kind == WidgetFill and not pending.scrollY:
+        inc fillCount
+      else:
+        fixedHeight += self.preferredHeight(child, pendingByParent)
+    let fillHeight =
+      if fillCount > 0:
+        max((availableHeight - fixedHeight) / fillCount.toFloat, 0.0)
+      else:
+        0.0
+    let contentHeight = fixedHeight + fillHeight * fillCount.toFloat
+    var y =
+      case pending.justifyContent
+      of JustifyCenter:
+        parentFrame.y + (parentFrame.height - contentHeight) / 2.0
+      of JustifyEnd:
+        parentFrame.y + parentFrame.height - pending.padding - contentHeight
+      of JustifyStart:
+        parentFrame.y + pending.padding
+    for child in pending.children:
+      let childHeight =
+        if child.heightPolicy.kind == WidgetFill and not pending.scrollY:
+          fillHeight.clampPolicy(child.heightPolicy)
+        else:
+          self.preferredHeight(child, pendingByParent)
+      var childWidth =
+        if child.widthPolicy.kind == WidgetFill or
+            (child.directAlignment(pending.alignItems) == AlignStretch and child.stretchWidth):
+          availableWidth.clampPolicy(child.widthPolicy)
+        else:
+          self.preferredWidth(child, pendingByParent)
+      childWidth = max(childWidth, 0.0)
+      let alignment = child.directAlignment(pending.alignItems)
+      let x =
+        case alignment
+        of AlignCenter:
+          parentFrame.x + (parentFrame.width - childWidth) / 2.0
+        of AlignEnd:
+          parentFrame.x + parentFrame.width - pending.padding - childWidth
+        else:
+          parentFrame.x + pending.padding
+      child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
+      if pendingByParent.hasKey(child.id):
+        self.assignDirectStack(pendingByParent[child.id], pendingByParent)
+      y += childHeight + pending.gap
+  of RowLayout:
+    let
+      availableWidth = max(parentFrame.width - pending.padding * 2.0, 0.0)
+      availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
+    var fixedWidth = pending.gap * max(pending.children.len - 1, 0).toFloat
+    var fillCount = 0
+    for child in pending.children:
+      if child.widthPolicy.kind == WidgetFill and not pending.scrollX:
+        inc fillCount
+      else:
+        fixedWidth += self.preferredWidth(child, pendingByParent)
+    let fillWidth =
+      if fillCount > 0:
+        max((availableWidth - fixedWidth) / fillCount.toFloat, 0.0)
+      else:
+        0.0
+    let contentWidth = fixedWidth + fillWidth * fillCount.toFloat
+    var x =
+      case pending.justifyContent
+      of JustifyCenter:
+        parentFrame.x + (parentFrame.width - contentWidth) / 2.0
+      of JustifyEnd:
+        parentFrame.x + parentFrame.width - pending.padding - contentWidth
+      of JustifyStart:
+        parentFrame.x + pending.padding
+    for child in pending.children:
+      let childWidth =
+        if child.widthPolicy.kind == WidgetFill and not pending.scrollX:
+          fillWidth.clampPolicy(child.widthPolicy)
+        else:
+          self.preferredWidth(child, pendingByParent)
+      var childHeight =
+        if child.heightPolicy.kind == WidgetFill or
+            (child.directAlignment(pending.alignItems) == AlignStretch and child.stretchHeight):
+          availableHeight.clampPolicy(child.heightPolicy)
+        else:
+          self.preferredHeight(child, pendingByParent)
+      childHeight = max(childHeight, 0.0)
+      let alignment = child.directAlignment(pending.alignItems)
+      let y =
+        case alignment
+        of AlignCenter:
+          parentFrame.y + (parentFrame.height - childHeight) / 2.0
+        of AlignEnd:
+          parentFrame.y + parentFrame.height - pending.padding - childHeight
+        else:
+          parentFrame.y + pending.padding
+      child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
+      if pendingByParent.hasKey(child.id):
+        self.assignDirectStack(pendingByParent[child.id], pendingByParent)
+      x += childWidth + pending.gap
 
 proc endLayout*(self: var UI): bool {.discardable.} =
   if self.frames.len == 1 and self.frames[0].children.len > 0:
@@ -264,11 +484,41 @@ proc endLayout*(self: var UI): bool {.discardable.} =
     )
     self.frames[0].children.setLen(0)
 
+  var
+    parentByID: Table[WidgetID, WidgetID]
+    pendingByParent: Table[WidgetID, PendingLayout]
+    scrollParentIDs: HashSet[WidgetID]
+    directParents: HashSet[WidgetID]
+
+  for pending in self.pendingLayouts:
+    pendingByParent[pending.parent.id] = pending
+    if pending.scrollX or pending.scrollY:
+      scrollParentIDs.incl pending.parent.id
+    for child in pending.children:
+      parentByID[child.id] = pending.parent.id
+
+  proc hasScrollAncestor(id: WidgetID): bool =
+    var current = id
+    while parentByID.hasKey(current):
+      let parentID = parentByID[current]
+      if parentID in scrollParentIDs:
+        return true
+      current = parentID
+    false
+
+  for pending in self.pendingLayouts:
+    if pending.scrollX or pending.scrollY:
+      directParents.incl pending.parent.id
+    elif pending.parent.id in scrollParentIDs or pending.parent.id.hasScrollAncestor():
+      directParents.incl pending.parent.id
+
   for i in countdown(self.pendingLayouts.high, 0):
     let pending = self.pendingLayouts[i]
     self.layoutChildren[pending.parent.id] = pending.children
     if pending.scrollX or pending.scrollY:
       self.scrollContainers.incl pending.parent.id
+    if pending.parent.id in directParents:
+      continue
     case pending.kind
     of RowLayout:
       self.layout.row(
@@ -295,6 +545,9 @@ proc endLayout*(self: var UI): bool {.discardable.} =
 
   result = self.layout.solve()
   if result:
+    for parentID in directParents:
+      if parentID in self.scrollContainers and pendingByParent.hasKey(parentID):
+        self.assignDirectStack(pendingByParent[parentID], pendingByParent)
     self.applyScrollOffsets()
 
 proc addChild(self: var UI, child: Widget) =
@@ -368,10 +621,14 @@ proc attach*(self: var UI, widget: Widget, component: Component) =
   if self.phase == EventPhase:
     return
   self.components.add((component, widget))
+  self.componentByID[widget.id] = component
 
 proc applyIntrinsicSizes*(self: UI, resources: Resources) =
   for (component, widget) in self.components:
+    if not widget.fitWidth and not widget.fitHeight:
+      continue
     let size = component.measure(resources)
+    self.intrinsicByID[widget.id] = size
     if widget.fitWidth and size.hasWidth:
       discard self.layout.constrain(widget.width == size.width)
     if widget.fitHeight and size.hasHeight:
@@ -471,10 +728,6 @@ proc updateScrollbarDrag(self: var UI, parent: Widget, context: var UpdateContex
 
   self.scrollStates[parent.id] = state
 
-proc componentTable(self: UI): Table[WidgetID, Component] =
-  for (component, widget) in self.components:
-    result[widget.id] = component
-
 proc updateWidgetTree(
     self: var UI,
     widget: Widget,
@@ -497,8 +750,7 @@ proc updateWidgetTree(
     self.updateWidgetTree(child, components, context, childClipped)
 
 proc update*(self: var UI, context: var UpdateContext) =
-  let components = self.componentTable()
-  self.updateWidgetTree(self.root, components, context)
+  self.updateWidgetTree(self.root, self.componentByID, context)
 
 proc draw*(self: UI, context: DrawContext) =
   fillRect(rect(0, 0, context.windowWidth, context.windowHeight), color(0, 0, 0))
@@ -518,10 +770,9 @@ proc draw*(self: UI, context: DrawContext) =
       fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), context.palette.panelMuted)
       fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), context.palette.cardAccent)
 
-  let components = self.componentTable()
   proc drawWidgetTree(widget: Widget) =
-    if components.hasKey(widget.id):
-      components[widget.id].draw(widget, context)
+    if self.componentByID.hasKey(widget.id):
+      self.componentByID[widget.id].draw(widget, context)
 
     if widget.id in self.scrollContainers:
       let f = widget.frame

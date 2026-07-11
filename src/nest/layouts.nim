@@ -57,6 +57,16 @@ proc hug*(preferred: float64, min = 0.0, max = Inf): SizePolicy =
 proc prefer*(value: float64, min = 0.0, max = Inf): SizePolicy =
   SizePolicy(kind: Prefer, value: value, min: min, max: max)
 
+proc widgetPolicy(policy: SizePolicy): WidgetSizePolicy =
+  let kind =
+    case policy.kind
+    of Fill: WidgetFill
+    of Fixed: WidgetFixed
+    of Fit: WidgetFit
+    of Hug: WidgetHug
+    of Prefer: WidgetPrefer
+  WidgetSizePolicy(kind: kind, value: policy.value, min: policy.min, max: policy.max)
+
 proc newLayout*(): Layout =
   Layout(solver: newSolver())
 
@@ -97,19 +107,23 @@ proc constrain*(ui: Layout, constraint: Constraint): Constraint {.discardable.} 
     result = constraint
 
 proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
-  discard ui.constrain(variable >= policy.min)
-
-  if policy.max < Inf:
-    discard ui.constrain(variable <= policy.max)
-
   case policy.kind
   of Fill:
+    discard ui.constrain(variable >= policy.min)
+    if policy.max < Inf:
+      discard ui.constrain(variable <= policy.max)
     discard
   of Fit:
+    discard ui.constrain(variable >= policy.min)
+    if policy.max < Inf:
+      discard ui.constrain(variable <= policy.max)
     discard
   of Fixed:
     discard ui.constrain(variable == policy.value)
   of Hug, Prefer:
+    discard ui.constrain(variable >= policy.min)
+    if policy.max < Inf:
+      discard ui.constrain(variable <= policy.max)
     discard ui.constrain((variable == policy.value) | Strong)
 
 proc initBox(
@@ -121,6 +135,8 @@ proc initBox(
     y: newVariable(name & ".y"),
     w: newVariable(name & ".width"),
     h: newVariable(name & ".height"),
+    widthPolicy: width.widgetPolicy,
+    heightPolicy: height.widgetPolicy,
   )
   result.setStretch(width.kind notin {Fixed, Fit}, height.kind notin {Fixed, Fit})
   result.setFit(width.kind == Fit, height.kind == Fit)

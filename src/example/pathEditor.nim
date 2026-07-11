@@ -74,7 +74,7 @@ proc start() =
         ui.pathListBox(app.pathListBoxID, app.paths, app.search.text)
         ui.row(nextWidgetID(), cfg(width = prefer(800, min = 400), height = fit())):
           ui.lineInput(app.newPathID, app.newPath, fill(), fit())
-          ui.button(newButton, "Browse", fit(), fit())
+          ui.button(browseButton, "Browse", fit(), fit())
           ui.button(newButton, "New", fit(), fit())
 
 when isMainModule:

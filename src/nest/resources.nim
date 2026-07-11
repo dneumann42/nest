@@ -11,15 +11,21 @@ type
   Resources* = object
     resources: TableRef[string, int]
     fontMetrics: TableRef[string, FontMetrics]
+    textMeasurements: TableRef[string, TextMeasurement]
 
 proc new*(T: typedesc[Resources]): T =
-  T(fontMetrics: newTable[string, FontMetrics](), resources: newTable[string, int]())
+  T(
+    fontMetrics: newTable[string, FontMetrics](),
+    resources: newTable[string, int](),
+    textMeasurements: newTable[string, TextMeasurement](),
+  )
 
 proc loadFont*(resources: Resources, name, path: string, size: Positive) =
   var metrics = FontMetrics()
   let font = openFont(path, size, metrics)
   resources.resources[name] = int(font)
   resources.fontMetrics[name] = metrics
+  resources.textMeasurements.clear()
 
 proc get*(
     resources: Resources, name: string
@@ -29,6 +35,10 @@ proc get*(
   result = (res, met)
 
 proc measureText*(resources: Resources, fontName, text: string): TextMeasurement =
+  let key = fontName & "\0" & text
+  if resources.textMeasurements.hasKey(key):
+    return resources.textMeasurements[key]
+
   let (font, metrics) = resources.get(fontName)
   let extent = uirelays.measureText(Font(font), text)
   result = TextMeasurement(
@@ -40,3 +50,4 @@ proc measureText*(resources: Resources, fontName, text: string): TextMeasurement
         metrics.lineHeight,
     lineHeight: metrics.lineHeight,
   )
+  resources.textMeasurements[key] = result

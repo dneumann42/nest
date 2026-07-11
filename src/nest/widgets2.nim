@@ -23,6 +23,19 @@ type
     AlignEnd
     AlignStretch
 
+  WidgetSizeKind* = enum
+    WidgetFill
+    WidgetFixed
+    WidgetFit
+    WidgetHug
+    WidgetPrefer
+
+  WidgetSizePolicy* = object
+    kind*: WidgetSizeKind
+    value*: float64
+    min*: float64
+    max*: float64
+
   Frame* = object
     x*, y*, width*, height*: float64
 
@@ -35,6 +48,7 @@ type
     id*: WidgetID
     x*, y*, w*, h*: Variable
     alignSelf*: Alignment
+    widthPolicy*, heightPolicy*: WidgetSizePolicy
     flags: set[WidgetFlag]
 
   DrawContext* = object
@@ -104,6 +118,12 @@ proc frame*(box: Widget): Frame =
     width: box.w.value.float64,
     height: box.h.value.float64,
   )
+
+proc setFrame*(box: Widget, frame: Frame) =
+  box.x.value = frame.x
+  box.y.value = frame.y
+  box.w.value = frame.width
+  box.h.value = frame.height
 
 proc nextWidgetID*(): WidgetID =
   var nextID {.global.}: Atomic[uint64]
