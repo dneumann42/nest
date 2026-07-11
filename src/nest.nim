@@ -56,10 +56,8 @@ template application*(cfg: AppConfig, blk: untyped) =
 proc start() =
   application AppConfig.init(width = 1100, height = 720, title = "Nest Layout Lab"):
     var ui = UI.init()
-
-    ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
-    ui.column(14.0, 18.0):
-      ui.rowAligned(nextWidgetID(), fill(), fixed(56), 12.0, 12.0, AlignCenter):
+    ui.layout(updateContext, drawContext):
+      ui.columnAligned(nextWidgetID(), w = fill(), h = fill(), alignItems = AlignCenter):
         ui.button(nextWidgetID(), "Nest", width = fixed(84), height = fixed(32))
         ui.button(nextWidgetID(), "Projects", width = fixed(104), height = fixed(28))
         ui.button(
@@ -80,10 +78,6 @@ proc start() =
           height = fixed(24),
           alignSelf = AlignStart,
         )
-    ui.endLayout()
-
-    ui.update(updateContext)
-    ui.draw(drawContext)
 
 when isMainModule:
   start()

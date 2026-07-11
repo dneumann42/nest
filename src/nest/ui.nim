@@ -104,6 +104,15 @@ proc popLayout(self: var UI): Widget =
   self.parent = self.currentParent()
   self.addChild(result)
 
+template layout*(
+    ui: var UI, updateContext: UpdateContext, drawContext: DrawContext, blk: untyped
+): auto =
+  ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
+  blk
+  ui.endLayout()
+  ui.update(updateContext)
+  ui.draw(drawContext)
+
 proc update*(self: UI, context: UpdateContext) =
   for (component, widget) in self.components:
     component.update(widget, context)
@@ -139,7 +148,9 @@ template row*(self: var UI, gp = 0.0, pad = 0.0, body: untyped) =
     body
     self.row(gp, pad)
 
-template rowAligned*(self: var UI, gp = 0.0, pad = 0.0, alignItems: Alignment, body: untyped) =
+template rowAligned*(
+    self: var UI, gp = 0.0, pad = 0.0, alignItems: Alignment, body: untyped
+) =
   block:
     body
     self.row(gp, pad, alignItems)
@@ -189,6 +200,20 @@ template rowAligned*(
     self.row(gp, pad, alignItems)
     discard self.popLayout()
 
+template rowAligned*(
+    self: var UI,
+    id: WidgetID,
+    w, h: SizePolicy,
+    alignItems: Alignment,
+    body: untyped,
+) =
+  block:
+    let layoutParent = self.box(id, width = w, height = h)
+    self.pushLayout(layoutParent)
+    body
+    self.row(0.0, 0.0, alignItems)
+    discard self.popLayout()
+
 template column*(
     self: var UI,
     id: WidgetID,
@@ -222,6 +247,20 @@ template columnAligned*(
     self.column(gp, pad, alignItems)
     discard self.popLayout()
 
+template columnAligned*(
+    self: var UI,
+    id: WidgetID,
+    w, h: SizePolicy,
+    alignItems: Alignment,
+    body: untyped,
+) =
+  block:
+    let layoutParent = self.box(id, width = w, height = h)
+    self.pushLayout(layoutParent)
+    body
+    self.column(0.0, 0.0, alignItems)
+    discard self.popLayout()
+
 proc box*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget =
@@ -237,8 +276,7 @@ proc button*(
     ui: var UI,
     id: WidgetID,
     label: string,
-    width,
-    height: SizePolicy,
+    width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
