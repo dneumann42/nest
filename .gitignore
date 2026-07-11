@@ -8,3 +8,5 @@ nimble.paths
 nimbledeps
 tests/test_layout
 /nest
+/tests/test_ui
+/tests/test_dsl_reader

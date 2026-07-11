@@ -12,6 +12,7 @@ bin = @["nest"]
 task test, "Run the Nest test suite":
   exec "nim c -r --path:src --nimcache:build/nimcache tests/test_layout.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_ui.nim"
+  exec "nim c -r --path:src --nimcache:build/nimcache tests/test_dsl_reader.nim"
 
 requires "nim >= 2.2.10"
 requires "chroma"
