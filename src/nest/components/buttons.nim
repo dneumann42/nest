@@ -53,5 +53,5 @@ method draw*(self: Button, widget: Widget, ctx: DrawContext) =
     f.y.toInt + ButtonPaddingY,
     self.label,
     ctx.palette.textColor,
-    ctx.palette.background,
+    color(0, 0, 0, 0),
   )

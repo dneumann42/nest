@@ -23,5 +23,5 @@ method draw*(self: Label, widget: Widget, ctx: DrawContext) =
     f.y.toInt,
     self.text,
     ctx.palette.textColor,
-    ctx.palette.panelBackground,
+    color(0, 0, 0, 0), #ctx.palette.panelBackground,
   )

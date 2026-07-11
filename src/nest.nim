@@ -1,7 +1,8 @@
 import std/sets
 
-import nest/[ui, resources, palette]
+import nest/[ui, resources, palette, dialogs]
 export ui
+export dialogs
 
 import fungus
 export fungus
