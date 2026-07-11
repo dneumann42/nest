@@ -1,4 +1,4 @@
-import std/[sets, tables]
+import std/[macros, sets, strutils, tables]
 
 import layouts, components, resources, widgets2
 export layouts, components
@@ -61,7 +61,37 @@ type
     layoutChildren: Table[WidgetID, seq[Widget]]
     scrollStates: Table[WidgetID, ScrollState]
     scrollContainers: HashSet[WidgetID]
+    idScopes: seq[string]
+    eventActiveWidgets: HashSet[WidgetID]
+    eventSubmittedWidgets: HashSet[WidgetID]
+    eventFocusedWidget: WidgetID
     phase: UIPhase
+
+  ListItem*[T] = object
+    index*: int
+    key*: string
+    value*: T
+
+  EditLineState* = object
+    input*: LineInputState
+    inputID*: WidgetID
+    key*: string
+
+macro layoutOnly*(definition: untyped): untyped =
+  result = definition
+  if result.kind notin {nnkProcDef, nnkFuncDef, nnkMethodDef}:
+    error("layoutOnly can only be used on routines", definition)
+
+  let params = result[3]
+  if params.len < 2 or params[1].kind != nnkIdentDefs:
+    error("layoutOnly requires a routine with a UI receiver as the first parameter", definition)
+
+  let receiver = params[1][0]
+  let body = result[^1]
+  result[^1] = quote do:
+    if `receiver`.phase == EventPhase:
+      return
+    `body`
 
 proc cfg*(
     width = fill(),
@@ -94,6 +124,87 @@ proc init*(T: typedesc[UI]): T =
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
   )
 
+proc stableHash(text: string): uint64 =
+  result = 14_695_981_039_346_656_037'u64
+  for ch in text:
+    result = result xor uint64(ch.ord)
+    result = result * 1_099_511_628_211'u64
+
+proc keyedWidgetID(parts: openArray[string]): WidgetID =
+  var text: string
+  for part in parts:
+    text.add part.len.intToStr
+    text.add ":"
+    text.add part
+    text.add "\0"
+  WidgetID(0x8000_0000_0000_0000'u64 or stableHash(text))
+
+proc id*(self: UI, parts: varargs[string, `$`]): WidgetID =
+  var scoped = self.idScopes
+  for part in parts:
+    scoped.add part
+  keyedWidgetID(scoped)
+
+template scope*(self: var UI, key: untyped, body: untyped) =
+  block:
+    self.idScopes.add($key)
+    try:
+      body
+      discard
+    finally:
+      self.idScopes.setLen(self.idScopes.len - 1)
+
+proc beginEvents(self: var UI, context: DrawContext) =
+  self.phase = EventPhase
+  self.eventActiveWidgets = context.activeWidgets
+  self.eventSubmittedWidgets = context.submittedWidgets
+  self.eventFocusedWidget = context.focusedWidget
+
+proc active*(self: UI, id: WidgetID): bool =
+  id in self.eventActiveWidgets
+
+proc clicked*(self: UI, id: WidgetID): bool =
+  self.active(id)
+
+proc submitted*(self: UI, id: WidgetID): bool =
+  id in self.eventSubmittedWidgets
+
+proc focused*(self: UI, id: WidgetID): bool =
+  self.eventFocusedWidget == id
+
+proc listKey*(index: int, value: string): string =
+  $index & ":" & value
+
+proc listItems*[T](
+    items: openArray[T],
+    key: proc(item: T, index: int): string,
+    filter: proc(item: T, index: int): bool = nil,
+): seq[ListItem[T]] =
+  for index, item in items:
+    if filter.isNil or filter(item, index):
+      result.add ListItem[T](index: index, key: key(item, index), value: item)
+
+proc editLineState*(): EditLineState =
+  EditLineState(input: LineInputState.new(""), inputID: nextWidgetID(), key: "")
+
+proc editing*(state: EditLineState): bool =
+  state.key.len > 0
+
+proc editing*(state: EditLineState, key: string): bool =
+  state.key == key
+
+proc beginEdit*(state: var EditLineState, key, value: string) =
+  state.key = key
+  state.input.text = value
+  state.input.cursor = value.len
+
+proc cancelEdit*(state: var EditLineState) =
+  state.key = ""
+
+proc saveEdit*(state: var EditLineState): string =
+  result = state.input.text
+  state.cancelEdit()
+
 proc reset*(self: var UI) =
   let rootID =
     if self.root.id == InvalidWidgetID:
@@ -114,6 +225,10 @@ proc reset*(self: var UI) =
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
+  self.idScopes.setLen(0)
+  self.eventActiveWidgets.clear()
+  self.eventSubmittedWidgets.clear()
+  self.eventFocusedWidget = InvalidWidgetID
   self.phase = LayoutPhase
 
 proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
@@ -130,6 +245,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
+  self.idScopes.setLen(0)
   self.layout.resize(windowWidth.toFloat, windowHeight.toFloat)
 
 proc clamp(value, lo, hi: float64): float64 =
@@ -607,19 +723,13 @@ template singleSlot*(self: var UI, body: untyped): Widget =
       )
     captured[0]
 
-proc place*(self: var UI, slot: WidgetSlot) =
-  if self.phase == EventPhase:
-    return
+proc place*(self: var UI, slot: WidgetSlot) {.layoutOnly.} =
   self.addChildren(slot)
 
-proc place*(self: var UI, widget: Widget) =
-  if self.phase == EventPhase:
-    return
+proc place*(self: var UI, widget: Widget) {.layoutOnly.} =
   self.addChild(widget)
 
-proc attach*(self: var UI, widget: Widget, component: Component) =
-  if self.phase == EventPhase:
-    return
+proc attach*(self: var UI, widget: Widget, component: Component) {.layoutOnly.} =
   self.components.add((component, widget))
   self.componentByID[widget.id] = component
 
@@ -646,7 +756,7 @@ template layout*(
 ): auto =
   # This could totally be done at compile time, the only reason I am
   # avoiding doing that, is I want to allow loading ui from a dynamic module
-  ui.phase = EventPhase
+  ui.beginEvents(drawContext)
   blk
 
   ui.phase = LayoutPhase
@@ -788,9 +898,7 @@ proc draw*(self: UI, context: DrawContext) =
 
   drawWidgetTree(self.root)
 
-proc row*(self: var UI, config: BoxConfig) =
-  if self.phase == EventPhase:
-    return
+proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   let components = self.takeChildren()
   self.pendingLayouts.add PendingLayout(
     kind: RowLayout,
@@ -804,9 +912,7 @@ proc row*(self: var UI, config: BoxConfig) =
     scrollY: config.scrollY,
   )
 
-proc column*(self: var UI, config: BoxConfig) =
-  if self.phase == EventPhase:
-    return
+proc column*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   let components = self.takeChildren()
   self.pendingLayouts.add PendingLayout(
     kind: ColumnLayout,
@@ -824,16 +930,20 @@ template row*(self: var UI, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
+      discard
     else:
       body
+      discard
       self.row(config)
 
 template column*(self: var UI, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
+      discard
     else:
       body
+      discard
       self.column(config)
 
 template row*(
@@ -845,11 +955,13 @@ template row*(
   block:
     if self.phase == EventPhase:
       body
+      discard
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
       self.pushLayout(layoutParent)
       body
+      discard
       self.row(config)
       discard self.popLayout()
 
@@ -862,11 +974,13 @@ template column*(
   block:
     if self.phase == EventPhase:
       body
+      discard
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
       self.pushLayout(layoutParent)
       body
+      discard
       self.column(config)
       discard self.popLayout()
 
@@ -874,10 +988,12 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyp
   block:
     if self.phase == EventPhase:
       body
+      discard
     else:
       let layoutParent = self.box(id, width = w, height = h)
       self.pushLayout(layoutParent)
       body
+      discard
       let captured = self.takeChildren()
       if captured.len != 1:
         raise newException(
@@ -901,6 +1017,7 @@ template panel*(
   block:
     if self.phase == EventPhase:
       body
+      discard
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
@@ -908,6 +1025,7 @@ template panel*(
       self.attach(layoutParent, Component(component))
       self.pushLayout(layoutParent)
       body
+      discard
       self.column(config)
       discard self.popLayout()
 
@@ -922,18 +1040,14 @@ proc container*(
     component: Container,
     width, height: SizePolicy,
     alignSelf = AlignAuto,
-): Widget {.discardable.} =
-  if self.phase == EventPhase:
-    return
+): Widget {.discardable, layoutOnly.} =
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
   self.attach(result, Component(component))
   self.addChild(result)
 
 proc spacer*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
-): Widget {.discardable.} =
-  if self.phase == EventPhase:
-    return
+): Widget {.discardable, layoutOnly.} =
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
   self.addChild(result)
 
@@ -943,13 +1057,22 @@ proc button*(
     label: string,
     width, height: SizePolicy,
     alignSelf = AlignAuto,
-) =
+): bool {.discardable.} =
   if ui.phase == EventPhase:
-    return
+    return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   let btn = Button.new(label)
   ui.attach(box, Component(btn))
   ui.addChild(box)
+
+proc button*(
+    ui: var UI,
+    key: string,
+    label: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  ui.button(ui.id(key), label, width, height, alignSelf)
 
 proc label*(
     ui: var UI,
@@ -958,9 +1081,7 @@ proc label*(
     width, height: SizePolicy,
     fontName = "font",
     alignSelf = AlignAuto,
-) =
-  if ui.phase == EventPhase:
-    return
+) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   let lbl = Label.new(text, fontName)
   ui.attach(box, Component(lbl))
@@ -973,9 +1094,7 @@ proc lineInput*(
     width, height: SizePolicy,
     fontName = "font",
     alignSelf = AlignAuto,
-) =
-  if ui.phase == EventPhase:
-    return
+) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   let input = LineInput.new(state, fontName)
   ui.attach(box, Component(input))

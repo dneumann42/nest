@@ -1,4 +1,4 @@
-import std/unittest
+import std/[sets, strutils, unittest]
 
 import nest/[palette, resources, ui]
 
@@ -614,3 +614,58 @@ suite "ui layout nesting":
       ui.button(Button1, "One", width = fixed(50 + count.toFloat), height = fixed(20))
 
     check count == 1
+
+  test "keyed scopes list helpers and edit line state simplify dynamic rows":
+    var ui = UI.init()
+    var rows = @["alpha", "beta", "gamma"]
+    var edit = editLineState()
+    var updateContext = UpdateContext(windowWidth: 320, windowHeight: 120)
+    var drawContext = DrawContext(
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 320, windowHeight: 120
+    )
+    drawContext.resources.loadFont("font", "", 18)
+
+    let filtered = listItems[string](
+      rows,
+      proc(item: string, index: int): string = listKey(index, item),
+      proc(item: string, index: int): bool = item.contains("a"),
+    )
+    check filtered.len == 3
+    check filtered[1].index == 1
+
+    let duplicates = listItems[string](
+      @["same", "same"],
+      proc(item: string, index: int): string = listKey(index, item),
+    )
+    check duplicates.len == 2
+    check duplicates[0].key != duplicates[1].key
+
+    var scopedID: WidgetID
+    ui.scope("row"):
+      scopedID = ui.id("edit")
+    ui.scope("row"):
+      check ui.id("edit") == scopedID
+
+    edit.beginEdit(filtered[1].key, filtered[1].value)
+    check edit.editing(filtered[1].key)
+    edit.input.text = "changed"
+    check edit.saveEdit() == "changed"
+    check not edit.editing
+
+    ui.layout(updateContext, drawContext):
+      for row in listItems[string](rows, proc(item: string, index: int): string = listKey(index, item)):
+        ui.scope(row.key):
+          discard ui.button("edit", "Edit", fit(), fit())
+
+    var betaEditID: WidgetID
+    ui.scope(listKey(1, "beta")):
+      betaEditID = ui.id("edit")
+    drawContext.activeWidgets.incl betaEditID
+
+    ui.layout(updateContext, drawContext):
+      for row in listItems[string](rows, proc(item: string, index: int): string = listKey(index, item)):
+        ui.scope(row.key):
+          if ui.button("edit", "Edit", fit(), fit()):
+            edit.beginEdit(row.key, row.value)
+
+    check edit.editing(listKey(1, "beta"))

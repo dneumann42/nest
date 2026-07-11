@@ -1,47 +1,42 @@
-import std/[hashes, os, sets, strutils]
+import std/[os, sets, strutils]
 
 import ../nest
 
 type
-  PathWidget* =
-    tuple[
-      index: int,
-      path: string,
-      editButton, deleteButton, saveButton, cancelButton: WidgetID,
-    ]
+  PathEntry = object
+    id: uint64
+    path: string
+
   PathEditor* = object
-    paths: seq[string]
+    paths: seq[PathEntry]
+    nextPathID: uint64
     newPath: LineInputState
     newPathID: WidgetID
     search: LineInputState
     searchID: WidgetID
     pathListBoxID: WidgetID
-    pathLineEdit: LineInputState
-    pathLineEditID: WidgetID
-    pathLineEditing: int
-
-const PathLineEditNone = -1
-
-proc pathActionID(path: string, index: int, action: string): WidgetID =
-  let hashed = uint64(!$hash(path & "\0" & $index & "\0" & action))
-  WidgetID(0x8000_0000_0000_0000'u64 or hashed)
+    pathLineEdit: EditLineState
 
 proc getPathVariables(): seq[string] =
   let path = getEnv("PATH")
   result = path.split({':'})
 
+proc addPath(editor: var PathEditor, path: string) =
+  editor.paths.add PathEntry(id: editor.nextPathID, path: path)
+  inc editor.nextPathID
+
 proc init*(T: typedesc[PathEditor]): T =
-  T(
-    paths: getPathVariables(),
+  result = T(
+    nextPathID: 1,
     newPath: LineInputState.new(""),
     newPathID: nextWidgetID(),
     search: LineInputState.new(""),
     searchID: nextWidgetID(),
     pathListBoxID: nextWidgetID(),
-    pathLineEdit: LineInputState.new(""),
-    pathLineEditID: nextWidgetID(),
-    pathLineEditing: PathLineEditNone,
+    pathLineEdit: editLineState(),
   )
+  for path in getPathVariables():
+    result.addPath(path)
 
 proc pathListBoxItem(ui: var UI, item: string, actions: proc(ui: var UI)) =
   ui.row(
@@ -60,46 +55,37 @@ proc pathListBoxItem(ui: var UI, item: string, actions: proc(ui: var UI)) =
 proc pathListBox(
     ui: var UI,
     id: WidgetID,
-    paths: var seq[string],
-    pathLineEdit: LineInputState,
-    pathLineEditID: WidgetID,
-    pathLineEditing: var int,
+    paths: var seq[PathEntry],
+    pathLineEdit: var EditLineState,
     search: string,
-    drawContext: DrawContext,
 ) =
-  var pathWidgets = newSeq[PathWidget]()
-  for idx, path in paths.pairs:
-    if search.len > 0 and not path.contains(search):
-      continue
-    pathWidgets.add(
-      (
-        index: idx,
-        path: path,
-        editButton: pathActionID(path, idx, "edit"),
-        deleteButton: pathActionID(path, idx, "delete"),
-        saveButton: pathActionID(path, idx, "save"),
-        cancelButton: pathActionID(path, idx, "cancel"),
-      )
-    )
+  let rows = listItems[PathEntry](
+    paths,
+    proc(entry: PathEntry, index: int): string = $entry.id,
+    proc(entry: PathEntry, index: int): bool =
+      search.len == 0 or entry.path.contains(search),
+  )
 
   ui.events:
     var deleteIndexes: HashSet[int]
-    for idx, widget in pathWidgets.pairs:
-      if drawContext.active(widget.editButton):
-        pathLineEditing = widget.index
-        pathLineEdit.text = widget.path
-        pathLineEdit.cursor = widget.path.len
-      if drawContext.active(widget.saveButton) and pathLineEditing == widget.index:
-        paths[widget.index] = pathLineEdit.text
-        pathLineEditing = PathLineEditNone
-      if drawContext.active(widget.cancelButton) and pathLineEditing == widget.index:
-        pathLineEditing = PathLineEditNone
-      if drawContext.active(widget.deleteButton):
-        deleteIndexes.incl widget.index
+    for row in rows:
+      ui.scope(row.key):
+        if ui.clicked(ui.id("edit")):
+          pathLineEdit.beginEdit(row.key, row.value.path)
+        if ui.clicked(ui.id("save")) and pathLineEdit.editing(row.key):
+          paths[row.index].path = pathLineEdit.saveEdit()
+        if ui.clicked(ui.id("cancel")) and pathLineEdit.editing(row.key):
+          pathLineEdit.cancelEdit()
+        if ui.clicked(ui.id("delete")):
+          deleteIndexes.incl row.index
     if deleteIndexes.len > 0:
-      var kept: seq[string]
-      for idx, path in paths.pairs:
-        if idx notin deleteIndexes:
+      if pathLineEdit.editing:
+        for row in rows:
+          if row.index in deleteIndexes and pathLineEdit.editing(row.key):
+            pathLineEdit.cancelEdit()
+      var kept: seq[PathEntry]
+      for index, path in paths.pairs:
+        if index notin deleteIndexes:
           kept.add path
       paths = kept
 
@@ -115,26 +101,21 @@ proc pathListBox(
       scrollY = true,
     ),
   ):
-    for widget in pathWidgets:
-      let
-        index = widget.index
-        path = widget.path
-        editButton = widget.editButton
-        deleteButton = widget.deleteButton
-        saveButton = widget.saveButton
-        cancelButton = widget.cancelButton
-      if pathLineEditing == index:
-        ui.row(
-          nextWidgetID(),
-          cfg(width = fill(), height = fit(), gap = 12.0, alignItems = AlignCenter),
-        ):
-          ui.lineInput(pathLineEditID, pathLineEdit, fill(), fixed(28))
-          ui.button(cancelButton, "Cancel", fixed(80), fixed(24))
-          ui.button(saveButton, "Save", fixed(64), fixed(24))
-      else:
-        ui.pathListBoxItem(path) do(ui: var UI):
-          ui.button(editButton, "Edit", fit(), fit())
-          ui.button(deleteButton, "Delete", fit(), fit())
+    for row in rows:
+      ui.scope(row.key):
+        if pathLineEdit.editing(row.key):
+          ui.row(
+            ui.id("edit-row"),
+            cfg(width = fill(), height = fit(), gap = 12.0, alignItems = AlignCenter),
+          ):
+            ui.lineInput(pathLineEdit.inputID, pathLineEdit.input, fill(), fixed(28))
+            ui.button(ui.id("cancel"), "Cancel", fit(), fit())
+            ui.button(ui.id("save"), "Save", fit(), fit())
+        else:
+          ui.pathListBoxItem(row.value.path) do(ui: var UI):
+            ui.button(ui.id("edit"), "Edit", fit(), fit())
+            ui.button(ui.id("delete"), "Delete", fit(), fit())
+        discard
 
 proc start() =
   var ui = UI.init()
@@ -148,14 +129,14 @@ proc start() =
   application AppConfig.init(width = 640, height = 480, title = "Path Editor"):
     ui.layout(updateContext, drawContext):
       ui.events:
-        if drawContext.active(newButton):
+        if ui.clicked(newButton):
           let newPath = app.newPath.text
-          app.paths.add(newPath)
-        if drawContext.active(browseButton):
+          app.addPath(newPath)
+        if ui.clicked(browseButton):
           browseFolder proc(path: string) =
             app.newPath.text = path
             app.newPath.cursor = path.len
-        if drawContext.active(saveButton):
+        if ui.clicked(saveButton):
           discard
 
       ui.column(
@@ -187,8 +168,7 @@ proc start() =
           ui.label(nextWidgetID(), "Search", fit(), fit())
           ui.lineInput(app.searchID, app.search, fill(), fit())
         ui.pathListBox(
-          app.pathListBoxID, app.paths, app.pathLineEdit, app.pathLineEditID,
-          app.pathLineEditing, app.search.text, drawContext,
+          app.pathListBoxID, app.paths, app.pathLineEdit, app.search.text
         )
         ui.row(
           nextWidgetID(), cfg(width = prefer(800, min = 400), height = fit(), gap = 8.0)
