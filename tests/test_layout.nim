@@ -87,6 +87,33 @@ suite "constraint layout":
     checkFrame first, 8, 8, 120, 20
     checkFrame second, 140, 8, 90, 20
 
+  test "fit height row with flexible children survives invalid resize dimensions":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let rowPanel = ui.box("rowPanel", width = fill(), height = fit())
+    let flexible = ui.box("flexible", width = fill(), height = fixed(28))
+    let button = ui.box("button", width = fixed(40), height = fixed(24))
+
+    ui.root window
+    ui.column(window, [rowPanel], alignItems = AlignCenter, justifyContent = JustifyCenter)
+    ui.row(rowPanel, [flexible, button])
+    ui.resize(-1, -1)
+    ui.solve()
+
+    check rowPanel.frame.height >= 28
+    check flexible.frame.width >= 0
+
+  test "invalid required constraints do not crash the solver wrapper":
+    let ui = newLayout()
+    let window = ui.box("window")
+
+    ui.root window
+    ui.resize(120, 80)
+    discard ui.constrain(window.width == -1)
+
+    check ui.solve()
+    check window.frame.width == -1
+
   test "column allows fixed children to overflow short parents":
     let ui = newLayout()
     let window = ui.box("window")

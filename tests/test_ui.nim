@@ -21,6 +21,9 @@ const
   HeaderLabel = WidgetID(116)
   HeaderNewButton = WidgetID(117)
   Input1 = WidgetID(118)
+  NarrowPanel = WidgetID(119)
+  NarrowHeader = WidgetID(120)
+  NarrowButton = WidgetID(121)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -155,6 +158,49 @@ suite "ui layout nesting":
     ui.update(ctx)
     check ctx.focusedWidget == InvalidWidgetID
     check not ctx.submitted(Input1)
+
+  test "path editor style input row survives narrow windows":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: text.len * f.int, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: text.len * f.int, h: 18),
+    )
+    try:
+      var resources = Resources.new()
+      resources.loadFont("font", "", 8)
+      var ui = UI.init()
+      var state = LineInputState.new("")
+
+      ui.beginLayout(80, 40)
+      ui.column(
+        Body,
+        cfg(width = fill(), height = fill(), alignItems = AlignCenter, justifyContent = JustifyCenter),
+      ):
+        ui.panel(
+          NarrowPanel,
+          cfg(width = prefer(800, min = 400), height = fit(), alignItems = AlignCenter),
+        ):
+          ui.row(NarrowHeader, cfg(width = fill(), height = fit())):
+            ui.lineInput(Input1, state, width = fill(), height = fit())
+            ui.button(NarrowButton, "New", width = fit(), height = fit())
+
+      ui.applyIntrinsicSizes(resources)
+      ui.endLayout()
+
+      check ui.widget(NarrowHeader).frame.height >= 28
+      check ui.widget(Input1).frame.width >= 0
+      check ui.widget(NarrowButton).frame.width > 0
+    finally:
+      fontRelays = originalFontRelays
 
   test "block layouts add their parent to the enclosing layout":
     var ui = UI.init()

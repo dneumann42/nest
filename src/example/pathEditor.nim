@@ -42,12 +42,15 @@ proc pathListBox(ui: var UI, paths: var seq[string], header: proc(ui: var UI): v
 proc start() =
   var ui = UI.init()
   var app = PathEditor.init()
-  application AppConfig.init(width = 1280, height = 720, title = "Path Editor"):
-    ui.events:
-      if drawContext.submitted(app.newPathID):
-        discard
 
+  let newButton = nextWidgetID()
+  application AppConfig.init(width = 640, height = 480, title = "Path Editor"):
     ui.layout(updateContext, drawContext):
+      ui.events:
+        if drawContext.active(newButton):
+          let newPath = app.newPath.text
+          app.paths.add(newPath)
+
       ui.column(
         nextWidgetID(),
         cfg(
@@ -66,7 +69,7 @@ proc start() =
           header = proc(ui: var UI) =
             ui.row(nextWidgetID(), cfg(width = fill(), height = fit())):
               ui.lineInput(newPathID, app.newPath, fill(), fit())
-              ui.button(nextWidgetID(), "New", fit(), fit()),
+              ui.button(newButton, "New", fit(), fit()),
         )
 
 when isMainModule:

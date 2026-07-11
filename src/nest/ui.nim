@@ -88,7 +88,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.pendingLayouts.setLen(0)
   self.layout.resize(windowWidth.toFloat, windowHeight.toFloat)
 
-proc endLayout*(self: var UI) =
+proc endLayout*(self: var UI): bool {.discardable.} =
   if self.frames.len == 1 and self.frames[0].children.len > 0:
     let children = self.frames[0].children
     self.pendingLayouts.add PendingLayout(
@@ -124,7 +124,7 @@ proc endLayout*(self: var UI) =
         justifyContent = pending.justifyContent,
       )
 
-  self.layout.solve()
+  result = self.layout.solve()
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:
@@ -222,15 +222,24 @@ template layout*(
   blk
 
   ui.phase = LayoutPhase
-  ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
-  blk
-  ui.applyIntrinsicSizes(drawContext.resources)
-  ui.endLayout()
-  updateContext.hotWidgets.clear()
-  updateContext.activeWidgets.clear()
-  ui.update(updateContext)
-  switchState(updateContext, drawContext)
-  ui.draw(drawContext)
+  var layoutOk {.gensym.} = false
+  try:
+    ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
+    blk
+    ui.applyIntrinsicSizes(drawContext.resources)
+    layoutOk = ui.endLayout()
+  except InternalSolverError, UnsatisfiableConstraintError:
+    layoutOk = false
+
+  if layoutOk:
+    updateContext.hotWidgets.clear()
+    updateContext.activeWidgets.clear()
+    ui.update(updateContext)
+    switchState(updateContext, drawContext)
+    ui.draw(drawContext)
+  else:
+    updateContext.hotWidgets.clear()
+    updateContext.activeWidgets.clear()
   ui.reset()
 
 proc update*(self: UI, context: var UpdateContext) =

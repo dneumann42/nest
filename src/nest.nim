@@ -65,10 +65,10 @@ template application*(cfg: AppConfig, blk: untyped) =
         updateContext.mouseLeftDown = false
         updateContext.mouseLeftPressed = false
       of WindowResizeEvent:
-        updateContext.windowWidth = e.x
-        updateContext.windowHeight = e.y
-        drawContext.windowWidth = e.x
-        drawContext.windowHeight = e.y
+        updateContext.windowWidth = max(e.x, 0)
+        updateContext.windowHeight = max(e.y, 0)
+        drawContext.windowWidth = updateContext.windowWidth
+        drawContext.windowHeight = updateContext.windowHeight
       of KeyDownEvent:
         updateContext.keyInputs.add KeyInput(key: e.key, mods: e.mods)
       of TextInputEvent:
