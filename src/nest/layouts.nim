@@ -156,49 +156,94 @@ proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
   discard ui.solver.constraint(child.right == parent.right - inset)
   discard ui.solver.constraint(child.bottom == parent.bottom - inset)
 
+proc effectiveAlignment(child: Widget, parentAlignment: Alignment): Alignment =
+  if child.alignSelf == AlignAuto:
+    parentAlignment
+  else:
+    child.alignSelf
+
+proc alignRowChild(ui: Layout, parent, child: Widget, alignment: Alignment, padding: float64) =
+  case alignment
+  of AlignAuto:
+    ui.alignRowChild(parent, child, AlignStretch, padding)
+  of AlignStart:
+    discard ui.solver.constraint(child.top == parent.top + padding)
+    discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
+  of AlignCenter:
+    discard ui.solver.constraint(child.top >= parent.top + padding)
+    discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
+    discard ui.solver.constraint(child.centerY == parent.centerY)
+  of AlignEnd:
+    discard ui.solver.constraint(child.top >= parent.top + padding)
+    discard ui.solver.constraint(child.bottom == parent.bottom - padding)
+  of AlignStretch:
+    discard ui.solver.constraint(child.top == parent.top + padding)
+    if child.stretchHeight:
+      discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
+      discard ui.solver.constraint(child.bottom == parent.bottom - padding)
+
+proc alignColumnChild(
+    ui: Layout, parent, child: Widget, alignment: Alignment, padding: float64
+) =
+  case alignment
+  of AlignAuto:
+    ui.alignColumnChild(parent, child, AlignStretch, padding)
+  of AlignStart:
+    discard ui.solver.constraint(child.left == parent.left + padding)
+    discard ui.solver.constraint(child.right <= parent.right - padding)
+  of AlignCenter:
+    discard ui.solver.constraint(child.left >= parent.left + padding)
+    discard ui.solver.constraint(child.right <= parent.right - padding)
+    discard ui.solver.constraint(child.centerX == parent.centerX)
+  of AlignEnd:
+    discard ui.solver.constraint(child.left >= parent.left + padding)
+    discard ui.solver.constraint(child.right == parent.right - padding)
+  of AlignStretch:
+    discard ui.solver.constraint(child.left == parent.left + padding)
+    if child.stretchWidth:
+      discard ui.solver.constraint(child.width == parent.width - padding * 2.0)
+
 proc row*(
-    ui: Layout, parent: Widget, children: openArray[Widget], gap = 0.0, padding = 0.0
+    ui: Layout,
+    parent: Widget,
+    children: openArray[Widget],
+    gap = 0.0,
+    padding = 0.0,
+    alignItems = AlignStretch,
 ) =
   if children.len == 0:
     return
 
   for child in children:
-    discard ui.solver.constraint(child.top == parent.top + padding)
-    discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
-    if child.stretchHeight:
-      discard ui.solver.constraint(child.bottom == parent.bottom - padding)
+    ui.alignRowChild(parent, child, child.effectiveAlignment(alignItems), padding)
 
   discard ui.solver.constraint(children[0].left == parent.left + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].left == children[i - 1].right + gap)
 
-  for child in children:
-    discard ui.solver.constraint(child.right <= parent.right - padding)
-
   discard ui.solver.constraint(
     (children[^1].right == parent.right - padding) | FillRemainingStrength
   )
 
 proc column*(
-    ui: Layout, parent: Widget, children: openArray[Widget], gap = 0.0, padding = 0.0
+    ui: Layout,
+    parent: Widget,
+    children: openArray[Widget],
+    gap = 0.0,
+    padding = 0.0,
+    alignItems = AlignStretch,
 ) =
   if children.len == 0:
     return
 
   for child in children:
-    discard ui.solver.constraint(child.left == parent.left + padding)
-    discard ui.solver.constraint(child.right <= parent.right - padding)
-    if child.stretchWidth:
-      discard ui.solver.constraint(child.right == parent.right - padding)
+    ui.alignColumnChild(parent, child, child.effectiveAlignment(alignItems), padding)
 
   discard ui.solver.constraint(children[0].top == parent.top + padding)
 
   for i in 1 ..< children.len:
     discard ui.solver.constraint(children[i].top == children[i - 1].bottom + gap)
-
-  for child in children:
-    discard ui.solver.constraint(child.bottom <= parent.bottom - padding)
 
   discard ui.solver.constraint(
     (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength

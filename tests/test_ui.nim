@@ -12,6 +12,7 @@ const
   Button3 = WidgetID(107)
   Button4 = WidgetID(108)
   Spacer = WidgetID(109)
+  Button5 = WidgetID(110)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -69,3 +70,18 @@ suite "ui layout nesting":
     checkFrame(ui.widget(Sidebar), 0, 0, 100, 30)
     checkFrame(ui.widget(Spacer), 110, 0, 300, 30)
     checkFrame(ui.widget(Content), 420, 0, 80, 30)
+
+  test "aligned row helpers center children and allow align self override":
+    var ui = UI.init()
+    ui.beginLayout(300, 100)
+
+    ui.rowAligned(Body, fill(), fixed(80), 10.0, 10.0, AlignCenter):
+      ui.button(Button1, "One", width = fixed(40), height = fixed(20))
+      ui.button(Button2, "Two", width = fixed(40), height = fixed(20), alignSelf = AlignEnd)
+      ui.button(Button5, "Three", width = fixed(40), height = fixed(20), alignSelf = AlignStart)
+
+    ui.endLayout()
+
+    checkFrame(ui.widget(Button1), 10, 30, 40, 20)
+    checkFrame(ui.widget(Button2), 60, 50, 40, 20)
+    checkFrame(ui.widget(Button5), 110, 10, 40, 20)

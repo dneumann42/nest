@@ -1,4 +1,4 @@
-import std/[sets, atomics]
+import std/atomics
 import resources
 import kiwiberry
 
@@ -9,6 +9,13 @@ type
     StretchWidth
     StretchHeight
 
+  Alignment* = enum
+    AlignAuto
+    AlignStart
+    AlignCenter
+    AlignEnd
+    AlignStretch
+
   Frame* = object
     x*, y*, width*, height*: float64
 
@@ -16,6 +23,7 @@ type
   Widget* = object
     id*: WidgetID
     x*, y*, w*, h*: Variable
+    alignSelf*: Alignment
     flags: set[WidgetFlag]
 
   DrawContext* = object
@@ -60,3 +68,7 @@ proc stretchWidth*(widget: Widget): bool =
 
 proc stretchHeight*(widget: Widget): bool =
   StretchHeight in widget.flags
+
+proc withAlignSelf*(widget: Widget, alignment: Alignment): Widget =
+  result = widget
+  result.alignSelf = alignment

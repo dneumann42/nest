@@ -42,8 +42,8 @@ template application*(cfg: AppConfig, blk: untyped) =
         drawContext.mouseX = e.x
         drawContext.mouseY = e.y
       of WindowResizeEvent:
-        updateContext.mouseX = e.x
-        updateContext.mouseY = e.y
+        updateContext.windowWidth = e.x
+        updateContext.windowHeight = e.y
         drawContext.windowWidth = e.x
         drawContext.windowHeight = e.y
       else:
@@ -53,37 +53,35 @@ template application*(cfg: AppConfig, blk: untyped) =
     sleep(16)
   shutdown()
 
-let
-  Toolbar = nextWidgetID()
-  Body = nextWidgetID()
-  Sidebar = nextWidgetID()
-  Content = nextWidgetID()
-  Button1 = nextWidgetID()
-  Button2 = nextWidgetID()
-  Button3 = nextWidgetID()
-  Button4 = nextWidgetID()
-  Button5 = nextWidgetID()
-
 proc start() =
-  application AppConfig.init(title = "Nest Demo"):
+  application AppConfig.init(width = 1100, height = 720, title = "Nest Layout Lab"):
     var ui = UI.init()
 
     ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
-
-    ui.column(16.0, 25.0):
-      ui.row(nextWidgetID(), fill(), fixed(32), 12.0, 0.0):
-        ui.button(nextWidgetID(), "Click ME", width = fixed(100), height = fixed(24))
-        ui.button(nextWidgetID(), "Click AGAIN", width = fixed(120), height = fixed(24))
-
-      ui.row(nextWidgetID(), fill(), fill(), 16.0, 0.0):
-        ui.column(nextWidgetID(), fixed(260), fill(), 8.0, 0.0):
-          ui.button(nextWidgetID(), "One", width = fill(), height = fixed(24))
-          ui.button(nextWidgetID(), "Two", width = fill(), height = fixed(24))
-        ui.spacer(nextWidgetID(), width = fill(), height = hug(24.0))
-        ui.column(nextWidgetID(), prefer(100.0), fill(), 8.0, 0.0):
-          ui.button(nextWidgetID(), "Content", width = fixed(140), height = fixed(24))
-
+    ui.column(14.0, 18.0):
+      ui.rowAligned(nextWidgetID(), fill(), fixed(56), 12.0, 12.0, AlignCenter):
+        ui.button(nextWidgetID(), "Nest", width = fixed(84), height = fixed(32))
+        ui.button(nextWidgetID(), "Projects", width = fixed(104), height = fixed(28))
+        ui.button(
+          nextWidgetID(),
+          "Tall",
+          width = fixed(62),
+          height = fixed(32),
+          alignSelf = AlignEnd,
+        )
+        ui.spacer(nextWidgetID(), width = fill(), height = fixed(1))
+        ui.button(
+          nextWidgetID(), "Search", width = prefer(180, min = 120), height = fixed(28)
+        )
+        ui.button(
+          nextWidgetID(),
+          "Profile",
+          width = fixed(96),
+          height = fixed(24),
+          alignSelf = AlignStart,
+        )
     ui.endLayout()
+
     ui.update(updateContext)
     ui.draw(drawContext)
 

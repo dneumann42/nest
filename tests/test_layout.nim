@@ -73,6 +73,78 @@ suite "constraint layout":
     checkFrame window, 0, 0, 800, 600
     checkFrame button, 0, 0, 100, 24
 
+  test "row allows fixed children to overflow narrow parents":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let first = ui.box("first", width = fixed(120), height = fixed(20))
+    let second = ui.box("second", width = fixed(90), height = fixed(20))
+
+    ui.root window
+    ui.row(window, [first, second], gap = 12, padding = 8)
+    ui.resize(160, 80)
+    ui.solve()
+
+    checkFrame first, 8, 8, 120, 20
+    checkFrame second, 140, 8, 90, 20
+
+  test "column allows fixed children to overflow short parents":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let first = ui.box("first", width = fixed(80), height = fixed(70))
+    let second = ui.box("second", width = fixed(80), height = fixed(60))
+
+    ui.root window
+    ui.column(window, [first, second], gap = 10, padding = 8)
+    ui.resize(160, 100)
+    ui.solve()
+
+    checkFrame first, 8, 8, 80, 70
+    checkFrame second, 8, 88, 80, 60
+
+  test "row align items positions children on the cross axis":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let top = ui.box("top", width = fixed(50), height = fixed(20))
+    let middle = ui.box("middle", width = fixed(50), height = fixed(30))
+    let bottom = ui.box("bottom", width = fixed(50), height = fixed(40))
+
+    ui.root window
+    ui.row(
+      window,
+      [top.withAlignSelf(AlignStart), middle, bottom.withAlignSelf(AlignEnd)],
+      gap = 10,
+      padding = 10,
+      alignItems = AlignCenter,
+    )
+    ui.resize(300, 100)
+    ui.solve()
+
+    checkFrame top, 10, 10, 50, 20
+    checkFrame middle, 70, 35, 50, 30
+    checkFrame bottom, 130, 50, 50, 40
+
+  test "column align items positions children on the cross axis":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let left = ui.box("left", width = fixed(50), height = fixed(20))
+    let center = ui.box("center", width = fixed(70), height = fixed(20))
+    let right = ui.box("right", width = fixed(80), height = fixed(20))
+
+    ui.root window
+    ui.column(
+      window,
+      [left.withAlignSelf(AlignStart), center, right.withAlignSelf(AlignEnd)],
+      gap = 10,
+      padding = 10,
+      alignItems = AlignCenter,
+    )
+    ui.resize(200, 120)
+    ui.solve()
+
+    checkFrame left, 10, 10, 50, 20
+    checkFrame center, 65, 40, 70, 20
+    checkFrame right, 110, 70, 80, 20
+
   test "pin constrains all edges with an inset":
     let ui = newLayout()
     let window = ui.box("window")
