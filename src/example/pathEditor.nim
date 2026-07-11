@@ -126,8 +126,8 @@ proc start() =
     browseButton = nextWidgetID()
     saveButton = nextWidgetID()
 
-  application AppConfig.init(width = 640, height = 480, title = "Path Editor"):
-    ui.layout(updateContext, drawContext):
+  application AppConfig.init(width = 640, height = 480, title = "Path Editor"), ui:
+    ui.layout:
       ui.events:
         if ui.clicked(newButton):
           let newPath = app.newPath.text

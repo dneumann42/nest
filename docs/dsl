@@ -1,0 +1,41 @@
+define:
+  newButton (id)
+  browseButton (id)
+  saveButton (id)
+  defaultGap 8.0
+  searchID (id)
+  search (LineInputState "")
+events:
+  when (clicked newButton):
+    print "CLICKED"
+  when (clicked browseButton):
+    print "CLICKED"
+  when (clicked saveButton):
+    print "CLICKED"
+column (id):
+  width = (fill)
+  height = (fill)
+  gap = 8.0
+  padding = 16.0
+  alignItems = AlignCenter
+  row (id):
+    label (id):
+      width = (fill)
+      height = (fit)
+      text = "Paths"
+    button saveButton:
+      width = (fit)
+      height = (fit)
+  row (id):
+    width = (prefer 800: min = 400)
+    height = (fit)
+    gap = defaultGap
+    alignItems = AlignCenter
+    label (id):
+      width = (fit)
+      height = (fit)
+      "Search"
+    lineInput searchID search:
+      width = (fill)
+      height = (fit)
+        

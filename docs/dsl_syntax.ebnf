@@ -1,0 +1,33 @@
+; Grammar for docs/dsl.
+; This uses Emacs ebnf-mode / ebnf2ps default syntax:
+; productions end with ".", and sequence is written with whitespace.
+
+program = block.
+
+block = {line}.
+
+line = block_command | simple_statement newline.
+
+block_command = command ":" newline indent block dedent.
+
+simple_statement = assignment | command | value.
+
+command = identifier {value}.
+
+assignment = identifier "=" value.
+
+value = call | identifier | number | string.
+
+call = "(" identifier {value} [":" {assignment}] ")".
+
+identifier = "identifier".
+
+number = "number".
+
+string = "string".
+
+newline = "newline".
+
+indent = "indent".
+
+dedent = "dedent".

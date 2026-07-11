@@ -1,6 +1,6 @@
 import std/[macros, sets, strutils, tables]
 
-import layouts, components, resources, widgets2
+import layouts, components, palette, resources, widgets2
 export layouts, components
 
 type
@@ -49,9 +49,14 @@ type
     justifyContent: Justification
     scrollX, scrollY: bool
 
+  UIContext = object
+    update: UpdateContext
+    draw: DrawContext
+
   UI* = object
     layout*: Layout
     root*, parent*: Widget
+    context: UIContext
     frames*: seq[LayoutFrame]
     childrenWidgets*: seq[Widget]
     components*: seq[ComponentWidget]
@@ -121,8 +126,79 @@ proc init*(T: typedesc[UI]): T =
   result = T(
     layout: ui,
     root: ui.box(nextWidgetID(), width = fill(), height = fill()),
+    context: UIContext(
+      update: UpdateContext(),
+      draw: DrawContext(resources: Resources.new(), palette: Palette.init()),
+    ),
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
   )
+
+proc initContext*(self: var UI, windowWidth, windowHeight: int) =
+  self.context.update.windowWidth = windowWidth
+  self.context.update.windowHeight = windowHeight
+  self.context.draw.windowWidth = windowWidth
+  self.context.draw.windowHeight = windowHeight
+  self.context.draw.palette = Palette.init()
+
+proc resources*(self: UI): Resources =
+  self.context.draw.resources
+
+proc palette*(self: UI): Palette =
+  self.context.draw.palette
+
+proc loadFont*(self: UI, name, path: string, size: Positive) =
+  self.context.draw.resources.loadFont(name, path, size)
+
+proc windowWidth*(self: UI): int =
+  self.context.draw.windowWidth
+
+proc windowHeight*(self: UI): int =
+  self.context.draw.windowHeight
+
+proc wantsTextInput*(self: UI): bool =
+  self.context.draw.focusedWidget != InvalidWidgetID
+
+proc beginInputFrame*(self: var UI) =
+  self.context.update.keyInputs.setLen(0)
+  self.context.update.textInputs.setLen(0)
+  self.context.update.mouseWheelX = 0
+  self.context.update.mouseWheelY = 0
+  self.context.update.submittedWidgets.clear()
+
+proc finishInputFrame*(self: var UI) =
+  self.context.update.mouseLeftPressed = false
+
+proc mouseMove*(self: var UI, x, y: int) =
+  self.context.update.mouseX = x
+  self.context.update.mouseY = y
+  self.context.draw.mouseX = x
+  self.context.draw.mouseY = y
+
+proc mouseDown*(self: var UI) =
+  let last = self.context.update.mouseLeftDown
+  self.context.update.mouseLeftDown = true
+  self.context.update.mouseLeftPressed = not last
+
+proc mouseUp*(self: var UI) =
+  self.context.update.mouseLeftDown = false
+  self.context.update.mouseLeftPressed = false
+
+proc resizeWindow*(self: var UI, width, height: int) =
+  self.context.update.windowWidth = max(width, 0)
+  self.context.update.windowHeight = max(height, 0)
+  self.context.draw.windowWidth = self.context.update.windowWidth
+  self.context.draw.windowHeight = self.context.update.windowHeight
+
+proc keyDown*(self: var UI, key: KeyCode, mods: set[Modifier]) =
+  self.context.update.keyInputs.add KeyInput(key: key, mods: mods)
+
+proc textInput*(self: var UI, text: string) =
+  if text.len > 0:
+    self.context.update.textInputs.add text
+
+proc mouseWheel*(self: var UI, x, y: float64) =
+  self.context.update.mouseWheelX += x
+  self.context.update.mouseWheelY += y
 
 proc stableHash(text: string): uint64 =
   result = 14_695_981_039_346_656_037'u64
@@ -778,6 +854,31 @@ template layout*(
   else:
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
+  ui.reset()
+
+template layout*(ui: var UI, blk: untyped): auto =
+  ui.beginEvents(ui.context.draw)
+  blk
+
+  ui.phase = LayoutPhase
+  var layoutOk {.gensym.} = false
+  try:
+    ui.beginLayout(ui.context.draw.windowWidth, ui.context.draw.windowHeight)
+    blk
+    ui.applyIntrinsicSizes(ui.context.draw.resources)
+    layoutOk = ui.endLayout()
+  except InternalSolverError, UnsatisfiableConstraintError:
+    layoutOk = false
+
+  if layoutOk:
+    ui.context.update.hotWidgets.clear()
+    ui.context.update.activeWidgets.clear()
+    ui.update(ui.context.update)
+    switchState(ui.context.update, ui.context.draw)
+    ui.draw(ui.context.draw)
+  else:
+    ui.context.update.hotWidgets.clear()
+    ui.context.update.activeWidgets.clear()
   ui.reset()
 
 proc updateScrollbarDrag(self: var UI, parent: Widget, context: var UpdateContext) =

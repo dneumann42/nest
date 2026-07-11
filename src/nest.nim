@@ -89,6 +89,45 @@ template application*(cfg: AppConfig, blk: untyped) =
     sleep(16)
   shutdown()
 
+template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
+  let window {.inject.} = cfg.initWindow()
+  var running {.inject.} = true
+  ui.initContext(cfg.width, cfg.height)
+  ui.loadFont("font", "", 18)
+  while running:
+    var e = Event()
+    ui.beginInputFrame()
+    let inputFlags =
+      if ui.wantsTextInput():
+        {WantTextInput}
+      else:
+        {}
+    while pollEvent(e, inputFlags):
+      case e.kind
+      of QuitEvent, WindowCloseEvent:
+        running = false
+      of MouseMoveEvent:
+        ui.mouseMove(e.x, e.y)
+      of MouseDownEvent:
+        ui.mouseDown()
+      of MouseUpEvent:
+        ui.mouseUp()
+      of WindowResizeEvent:
+        ui.resizeWindow(e.x, e.y)
+      of KeyDownEvent:
+        ui.keyDown(e.key, e.mods)
+      of TextInputEvent:
+        ui.textInput(textFromEvent(e.text))
+      of MouseWheelEvent:
+        ui.mouseWheel(e.x.toFloat, e.y.toFloat)
+      else:
+        discard
+    blk
+    ui.finishInputFrame()
+    refresh()
+    sleep(16)
+  shutdown()
+
 const
   CenterStage = WidgetID(101)
   CounterPanel = WidgetID(102)
@@ -109,13 +148,13 @@ type
     changed = 0
     timesReset = 0
 
-proc layoutCounter(ui: var UI, drawContext: DrawContext, counter: var CounterModel) =
+proc layoutCounter(ui: var UI, counter: var CounterModel) =
   ui.events:
-    if drawContext.active(DecrementButton):
+    if ui.clicked(DecrementButton):
       dec counter.count
-    if drawContext.active(ResetButton):
+    if ui.clicked(ResetButton):
       counter.count = 0
-    if drawContext.active(IncrementButton):
+    if ui.clicked(IncrementButton):
       inc counter.count
 
   ui.panel(
@@ -149,10 +188,10 @@ proc start() =
   var ui = UI.init()
   var app = AppModel()
 
-  application AppConfig.init(width = 720, height = 480, title = app.title):
-    ui.layout(updateContext, drawContext):
+  application AppConfig.init(width = 720, height = 480, title = app.title), ui:
+    ui.layout:
       ui.center(CenterStage, fill(), fill()):
-        ui.layoutCounter(drawContext, app.counter)
+        ui.layoutCounter(app.counter)
 
 when isMainModule:
   start()
