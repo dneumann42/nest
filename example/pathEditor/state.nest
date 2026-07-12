@@ -1,0 +1,14 @@
+define:
+  newButton (id)
+  browseButton (id)
+  saveButton (id)
+  execStatusID (id)
+  pathListBoxID (id)
+  pathOutput "pathEditor.paths"
+  paths (split (env "PATH") ":")
+  defaultGap 8.0
+  searchID (id)
+  search (LineInputState "")
+  newPathID (id)
+  newPath (LineInputState "")
+  pathLineEdit (EditLineState)

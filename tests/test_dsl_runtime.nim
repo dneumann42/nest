@@ -1,6 +1,6 @@
 import std/[os, sets, streams, tables, unittest]
 
-import nest/[layouts, ui]
+import nest/[layouts, palette, resources, ui]
 import nest_dsl/[nodes, reader, runtime]
 
 proc parseDsl(source: string): Program =
@@ -56,7 +56,15 @@ suite "DSL runtime":
     var captured = ""
     runtime.registerCommand(
       "capture",
-      proc(runtime: DslRuntime, ui: var UI, args: seq[DslValue], body: Block): DslValue =
+      proc(
+          runtime: DslRuntime,
+          ui: var UI,
+          command: Command,
+          args: seq[DslValue],
+          body: Block,
+      ): DslValue =
+        discard command
+        discard body
         if args.len > 0:
           captured = $args[0]
         nilValue(),
@@ -101,7 +109,15 @@ suite "DSL runtime":
     var captured = ""
     runtime.registerCommand(
       "capture",
-      proc(runtime: DslRuntime, ui: var UI, args: seq[DslValue], body: Block): DslValue =
+      proc(
+          runtime: DslRuntime,
+          ui: var UI,
+          command: Command,
+          args: seq[DslValue],
+          body: Block,
+      ): DslValue =
+        discard command
+        discard body
         if args.len > 0:
           captured = $args[0]
         nilValue(),
@@ -126,7 +142,7 @@ suite "DSL runtime":
     check app.runtime.loadedFiles.hasKey(modulePath.normalizedPath)
     check not app.runtime.dependenciesChanged()
 
-    sleep(1100)
+    os.sleep(1100)
     writeFile(modulePath, "export ready changed\n")
 
     check app.runtime.dependenciesChanged()
@@ -143,7 +159,7 @@ suite "DSL runtime":
       runtime.pollExec()
       if runtime.exec.isNil or not runtime.exec.running:
         break
-      sleep(20)
+      os.sleep(20)
 
     check not runtime.exec.isNil
     check not runtime.exec.running
@@ -151,14 +167,14 @@ suite "DSL runtime":
 
   test "path editor DSL files parse":
     check parseDslFile("docs/dsl").body.lines.len > 0
-    check parseDslFile("src/example/pathEditor/pathEditor.nest").body.lines.len > 0
-    check parseDslFile("src/example/layerShellBar/layerShellBar.nest").body.lines.len > 0
+    check parseDslFile("example/pathEditor/pathEditor.nest").body.lines.len > 0
+    check parseDslFile("example/layerShellBar/layerShellBar.nest").body.lines.len > 0
 
   test "path editor renders through Nest modules":
     var ui = UI.init()
     ui.initContext(640, 480)
     ui.loadFont("font", "", 18)
-    let app = DslApp.init("src/example/pathEditor/pathEditor.nest")
+    let app = DslApp.init("example/pathEditor/pathEditor.nest")
 
     app.render(ui)
 
@@ -167,15 +183,75 @@ suite "DSL runtime":
     check "pathListBox" in app.runtime.exported
     check app.runtime.get("paths").kind == List
 
+  test "path editor row enters edit mode on click":
+    let program = parseDsl(
+      "define:\n" &
+        "  paths (split \"alpha:beta:gamma\" \":\")\n" &
+        "  search (LineInputState \"\")\n" &
+        "  pathLineEdit (EditLineState)\n" &
+        "events:\n" &
+        "  forLines paths item index key search:\n" &
+        "    scope key:\n" &
+        "      when (clicked (id \"edit\")):\n" &
+        "        beginEdit pathLineEdit key item\n" &
+        "column (id):\n" &
+        "  panel (id \"list\"):\n" &
+        "    width = (prefer 800: min = 400)\n" &
+        "    height = (fill)\n" &
+        "    forLines paths item index key search:\n" &
+        "      scope key:\n" &
+        "        when (editing pathLineEdit key):\n" &
+        "          row (id \"edit-row\"):\n" &
+        "            lineInput (editInputID pathLineEdit) (editInput pathLineEdit):\n" &
+        "              width = (fill)\n" &
+        "              height = (fixed 28)\n" &
+        "            button (id \"cancel\") \"Cancel\":\n" &
+        "              width = (fit)\n" &
+        "              height = (fit)\n" &
+        "            button (id \"save\") \"Save\":\n" &
+        "              width = (fit)\n" &
+        "              height = (fit)\n" &
+        "        when (not (editing pathLineEdit key)):\n" &
+        "          row (id \"row\"):\n" &
+        "            label (id \"label\") item:\n" &
+        "              width = (fill)\n" &
+        "              height = (fit)\n" &
+        "            button (id \"edit\") \"Edit\":\n" &
+        "              width = (fit)\n" &
+        "              height = (fit)\n",
+    )
+
+    var ui = UI.init()
+    var updateContext = UpdateContext(windowWidth: 640, windowHeight: 480)
+    var drawContext = DrawContext(
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 640, windowHeight: 480
+    )
+    drawContext.resources.loadFont("font", "", 18)
+    let runtime = DslRuntime.init()
+
+    ui.layout(updateContext, drawContext):
+      runtime.renderBlock(ui, program.body)
+
+    var betaEditID: WidgetID
+    ui.scope(listKey(1, "beta")):
+      betaEditID = ui.id("edit")
+    drawContext.activeWidgets.incl betaEditID
+
+    ui.layout(updateContext, drawContext):
+      runtime.renderBlock(ui, program.body)
+
+    check runtime.get("pathLineEdit").kind == EditInput
+    check runtime.get("pathLineEdit").editLineValue.editing(listKey(1, "beta"))
+
   test "layer shell bar renders through Nest modules":
     var ui = UI.init()
     ui.initContext(1280, 34)
     ui.loadFont("font", "", 18)
-    let app = DslApp.init("src/example/layerShellBar/layerShellBar.nest")
+    let app = DslApp.init("example/layerShellBar/layerShellBar.nest")
 
     app.render(ui)
 
     check app.lastError == ""
     check not app.runtime.hasError
-    check app.runtime.widgetID("rootID") != InvalidWidgetID
     check app.runtime.widgetID("openButton") != InvalidWidgetID
+    check app.runtime.widgetID("quitButton") != InvalidWidgetID

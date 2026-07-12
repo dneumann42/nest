@@ -1,0 +1,20 @@
+events:
+  when (clicked newButton):
+    addPath newPath
+  when (clicked browseButton):
+    browseFolder newPath
+  when (clicked saveButton):
+    savePaths
+    exec "printf 'saved paths to pathEditor.paths\n'"
+  forLines paths item index key search:
+    scope key:
+      when (clicked (id "edit")):
+        beginEdit pathLineEdit key item
+      when (clicked (id "save")):
+        when (editing pathLineEdit key):
+          setLine paths index (saveEdit pathLineEdit)
+      when (clicked (id "cancel")):
+        when (editing pathLineEdit key):
+          cancelEdit pathLineEdit
+      when (clicked (id "delete")):
+        deleteLine paths index

@@ -1,4 +1,4 @@
-import "pathEditorActions.nest"
+import "actions.nest"
 define:
   newButton (id)
   browseButton (id)

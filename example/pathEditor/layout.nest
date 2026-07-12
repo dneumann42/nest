@@ -1,0 +1,83 @@
+column (id):
+  width = (fill)
+  height = (fill)
+  gap = defaultGap
+  padding = 16.0
+  alignItems = AlignCenter
+  row (id):
+    width = (fill)
+    height = (fit)
+    gap = defaultGap
+    alignItems = AlignCenter
+    label (id) "Path Editor":
+      width = (fill)
+      height = (fit)
+    button saveButton "Save":
+      width = (fit)
+      height = (fit)
+  row (id):
+    width = (prefer 800: min = 400)
+    height = (fit)
+    gap = defaultGap
+    alignItems = AlignCenter
+    label (id) "Search":
+      width = (fit)
+      height = (fit)
+    lineInput searchID search:
+      width = (fill)
+      height = (fit)
+  execStatus execStatusID
+  panel pathListBoxID:
+    width = (prefer 800: min = 400)
+    height = (fill)
+    gap = 12.0
+    alignItems = AlignStretch
+    justifyContent = JustifyStart
+    scrollX = true
+    scrollY = true
+    forLines paths item index key search:
+      scope key:
+        when (editing pathLineEdit key):
+          row (id "edit-row"):
+            width = (fill)
+            height = (fit)
+            gap = 12.0
+            alignItems = AlignCenter
+            lineInput (editInputID pathLineEdit) (editInput pathLineEdit):
+              width = (fill)
+              height = (fixed 28)
+            button (id "cancel") "Cancel":
+              width = (fit)
+              height = (fit)
+            button (id "save") "Save":
+              width = (fit)
+              height = (fit)
+        when (not (editing pathLineEdit key)):
+          row (id "row"):
+            width = (fill)
+            height = (fit)
+            gap = 12.0
+            alignItems = AlignCenter
+            justifyContent = JustifyCenter
+            label (id "label") item:
+              width = (fill)
+              height = (fit)
+            button (id "edit") "Edit":
+              width = (fit)
+              height = (fit)
+            button (id "delete") "Delete":
+              width = (fit)
+              height = (fit)
+  row (id):
+    width = (prefer 800: min = 400)
+    height = (fit)
+    gap = defaultGap
+    lineInput newPathID newPath:
+      width = (fill)
+      height = (fit)
+    button browseButton "Browse":
+      width = (fit)
+      height = (fit)
+    button newButton "New":
+      width = (fit)
+      height = (fit)

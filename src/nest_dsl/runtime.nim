@@ -55,14 +55,9 @@ type
     output*: string
     exitCode*: int
 
-  UserCommand = object
-    params: seq[string]
-    body: Block
-
   DslRuntime* = ref object
     env*: Table[string, DslValue]
     commands: Table[string, DslCommand]
-    userCommands: Table[string, UserCommand]
     exported*: HashSet[string]
     loadedFiles*: Table[string, Time]
     moduleStack: seq[string]
@@ -79,6 +74,7 @@ type
   DslCommand* = proc(
     runtime: DslRuntime,
     ui: var UI,
+    command: Command,
     args: seq[DslValue],
     body: Block,
   ): DslValue {.closure.}
@@ -227,6 +223,52 @@ proc defineValue*(runtime: DslRuntime; name: string; value: DslValue) =
 
 proc registerCommand*(runtime: DslRuntime; name: string; command: DslCommand) =
   runtime.commands[name] = command
+
+proc invokeScriptCommand(
+    runtime: DslRuntime;
+    ui: var UI;
+    args: seq[DslValue];
+    params: openArray[string];
+    commandBody: Block,
+): DslValue =
+  var oldValues: Table[string, DslValue]
+  var hadOldValue: Table[string, bool]
+  for index, param in params:
+    oldValues[param] = runtime.env.getOrDefault(param)
+    hadOldValue[param] = runtime.env.hasKey(param)
+    runtime.env[param] =
+      if index < args.len:
+        args[index]
+      else:
+        nilValue()
+
+  runtime.renderBlock(ui, commandBody)
+
+  for param in params:
+    if hadOldValue.getOrDefault(param):
+      runtime.env[param] = oldValues[param]
+    else:
+      runtime.env.del(param)
+  nilValue()
+
+proc registerScriptCommand*(
+    runtime: DslRuntime; name: string; params: seq[string]; commandBody: Block
+) =
+  let capturedParams = params
+  let capturedBody = commandBody
+  runtime.registerCommand(
+    name,
+    proc(
+        runtime: DslRuntime;
+        ui: var UI;
+        command: Command;
+        args: seq[DslValue];
+        callBody: Block,
+    ): DslValue {.closure.} =
+      discard command
+      discard callBody
+      runtime.invokeScriptCommand(ui, args, capturedParams, capturedBody),
+  )
 
 proc currentDir(runtime: DslRuntime): string =
   if runtime.moduleStack.len > 0:
@@ -546,80 +588,81 @@ proc startExec(runtime: DslRuntime; command: string): DslValue =
   runtime.exec.running = true
   boolValue(true)
 
-proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block = nil): DslValue =
-  if command.isNil:
-    return nilValue()
+proc registerBuiltinCommands(runtime: DslRuntime) =
+  proc appendLineCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard runtime
+    discard ui
+    discard command
+    discard body
+    if args.len < 2:
+      return runtime.fail("appendLine requires list and value")
+    let list = listFromValue(args[0])
+    if list.isNil:
+      return runtime.fail("appendLine requires a list")
+    list.items.add runtime.asString(args[1])
+    nilValue()
 
-  let args = runtime.evalArgs(ui, command.values)
-  if runtime.userCommands.hasKey(command.identifier):
-    let userCommand = runtime.userCommands[command.identifier]
-    var oldValues: Table[string, DslValue]
-    var hadOldValue: Table[string, bool]
-    for index, param in userCommand.params:
-      oldValues[param] = runtime.env.getOrDefault(param)
-      hadOldValue[param] = runtime.env.hasKey(param)
-      runtime.env[param] =
-        if index < args.len:
-          args[index]
-        else:
-          nilValue()
-    runtime.renderBlock(ui, userCommand.body)
-    for param in userCommand.params:
-      if hadOldValue.getOrDefault(param):
-        runtime.env[param] = oldValues[param]
-      else:
-        runtime.env.del(param)
-    return nilValue()
-
-  if runtime.commands.hasKey(command.identifier):
-    return runtime.commands[command.identifier](runtime, ui, args, body)
-
-  case command.identifier
-  of "id":
+  proc idCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard body
     if args.len > 0:
       var parts: seq[string]
       for arg in args:
         parts.add runtime.asString(arg)
       return widgetIDValue(ui.id(parts))
-    return widgetIDValue(nextWidgetID())
-  of "LineInputState":
+    widgetIDValue(nextWidgetID())
+
+  proc lineInputStateCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard runtime
+    discard ui
+    discard command
+    discard body
     if args.len > 0:
-      return lineInputValue(LineInputState.new(runtime.asString(args[0])))
-    return lineInputValue(LineInputState.new(""))
-  of "EditLineState":
-    return editLineValue(editLineState())
-  of "fill":
-    return sizePolicyValue(fill())
-  of "fit":
-    return sizePolicyValue(fit())
-  of "fixed":
-    if args.len > 0:
-      return sizePolicyValue(fixed(runtime.asNumber(args[0])))
-    return sizePolicyValue(fixed(0))
-  of "hug":
-    if args.len > 0:
-      return sizePolicyValue(hug(runtime.asNumber(args[0])))
-    return sizePolicyValue(hug(0))
-  of "prefer":
-    if args.len == 0:
-      return sizePolicyValue(prefer(0))
-    var minValue = 0.0
-    if command.values.len > 0 and command.values[0] of CallValue:
-      discard
-    return sizePolicyValue(prefer(runtime.asNumber(args[0]), min = minValue))
-  of "clicked":
-    if args.len == 0:
-      return boolValue(false)
-    return boolValue(ui.inEventPhase() and ui.clicked(runtime.asWidgetID(ui, args[0])))
-  of "submitted":
-    if args.len == 0:
-      return boolValue(false)
-    return boolValue(ui.inEventPhase() and ui.submitted(runtime.asWidgetID(ui, args[0])))
-  of "env":
-    if args.len == 0:
-      return stringValue("")
-    return stringValue(getEnv(runtime.asString(args[0])))
-  of "split":
+      return lineInputValue(LineInputState.new($args[0]))
+    lineInputValue(LineInputState.new(""))
+
+  proc editLineStateCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard runtime
+    discard ui
+    discard command
+    discard args
+    discard body
+    editLineValue(editLineState())
+
+  proc splitCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     if args.len == 0:
       return listValue()
     let separator =
@@ -627,27 +670,134 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
         runtime.asString(args[1])
       else:
         "\n"
-    return listValue(splitText(runtime.asString(args[0]), separator))
-  of "loadLines":
+    listValue(splitText(runtime.asString(args[0]), separator))
+
+  proc loadLinesCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     if args.len == 0:
       return listValue()
-    return listValue(readLinesFile(runtime.asString(args[0])))
-  of "writeLines":
-    if args.len < 2:
-      return runtime.fail("writeLines requires path and list")
-    let list = listFromValue(args[1])
-    if list.isNil:
-      return runtime.fail("writeLines requires a list")
-    return boolValue(writeLinesFile(runtime.asString(args[0]), list.items))
-  of "appendLine":
-    if args.len < 2:
-      return runtime.fail("appendLine requires list and value")
-    let list = listFromValue(args[0])
-    if list.isNil:
-      return runtime.fail("appendLine requires a list")
-    list.items.add runtime.asString(args[1])
-    return nilValue()
-  of "insertLine":
+    listValue(readLinesFile(runtime.asString(args[0])))
+
+  proc boolFromWidgetCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard body
+    if args.len == 0:
+      return boolValue(false)
+    return boolValue(ui.inEventPhase() and ui.clicked(runtime.asWidgetID(ui, args[0])))
+
+  proc submittedCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard body
+    if args.len == 0:
+      return boolValue(false)
+    return boolValue(ui.inEventPhase() and ui.submitted(runtime.asWidgetID(ui, args[0])))
+
+  proc envCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
+    if args.len == 0:
+      return stringValue("")
+    stringValue(getEnv(runtime.asString(args[0])))
+
+  proc notCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard runtime
+    discard ui
+    discard command
+    discard body
+    if args.len == 0:
+      return boolValue(true)
+    boolValue(not runtime.asBool(args[0]))
+
+  proc editingCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
+    if args.len == 0:
+      return boolValue(false)
+    let edit = editLineFromValue(args[0])
+    if args.len > 1:
+      return boolValue(edit.editing(runtime.asString(args[1])))
+    boolValue(edit.editing)
+
+  proc editInputIDCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard runtime
+    discard ui
+    discard command
+    discard body
+    if args.len == 0:
+      return widgetIDValue(InvalidWidgetID)
+    widgetIDValue(editLineFromValue(args[0]).inputID)
+
+  proc editInputCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard runtime
+    discard ui
+    discard command
+    discard body
+    if args.len == 0:
+      return lineInputValue(LineInputState.new(""))
+    lineInputValue(editLineFromValue(args[0]).input)
+
+  proc insertLineCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     if args.len < 3:
       return runtime.fail("insertLine requires list, index, and value")
     let list = listFromValue(args[0])
@@ -655,8 +805,18 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       return runtime.fail("insertLine requires a list")
     let index = runtime.asNumber(args[1]).int.clamp(0, list.items.len)
     list.items.insert(runtime.asString(args[2]), index)
-    return nilValue()
-  of "setLine":
+    nilValue()
+
+  proc setLineCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     if args.len < 3:
       return runtime.fail("setLine requires list, index, and value")
     let list = listFromValue(args[0])
@@ -665,8 +825,18 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     let index = runtime.asNumber(args[1]).int
     if index >= 0 and index < list.items.len:
       list.items[index] = runtime.asString(args[2])
-    return nilValue()
-  of "deleteLine":
+    nilValue()
+
+  proc deleteLineCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     if args.len < 2:
       return runtime.fail("deleteLine requires list and index")
     let list = listFromValue(args[0])
@@ -675,23 +845,68 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     let index = runtime.asNumber(args[1]).int
     if index >= 0 and index < list.items.len:
       list.items.delete(index)
-    return nilValue()
-  of "setText":
+    nilValue()
+
+  proc setTextCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     if args.len < 2:
       return runtime.fail("setText requires input and value")
     if args[0].kind != Input:
       return runtime.fail("setText requires a line input")
     args[0].lineInputValue.setInputText(runtime.asString(args[1]))
-    return nilValue()
-  of "browseFolder":
+    nilValue()
+
+  proc browseFolderCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard body
     if args.len == 0 or args[0].kind != Input:
       return runtime.fail("browseFolder requires a line input")
     let input = args[0].lineInputValue
     if ui.inEventPhase():
       dialogs.browseFolder proc(path: string) =
         input.setInputText(path)
-    return nilValue()
-  of "import":
+    nilValue()
+
+  proc writeLinesCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
+    if args.len < 2:
+      return runtime.fail("writeLines requires path and list")
+    let list = listFromValue(args[1])
+    if list.isNil:
+      return runtime.fail("writeLines requires a list")
+    boolValue(writeLinesFile(runtime.asString(args[0]), list.items))
+
+  proc importCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard body
     if args.len == 0:
       return runtime.fail("import requires a path")
     let path = runtime.resolveModulePath(runtime.asString(args[0]))
@@ -704,14 +919,33 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     runtime.moduleStack.add path
     runtime.renderBlock(ui, Program(read.node).body)
     runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
-    return nilValue()
-  of "export":
+    nilValue()
+
+  proc exportCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard args
+    discard body
     for value in command.values:
       let name = identifierName(value)
       if name.len > 0:
         runtime.exported.incl name
-    return nilValue()
-  of "define":
+    nilValue()
+
+  proc defineCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard args
     if body.isNil:
       return nilValue()
     for line in body.lines:
@@ -733,42 +967,81 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
         let assignment = Assignment(statement)
         if not runtime.env.hasKey(assignment.identifier):
           runtime.defineValue(assignment.identifier, runtime.evalAssignmentValue(ui, assignment))
-    return nilValue()
-  of "command":
+    nilValue()
+
+  proc commandCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard args
     if body.isNil:
       return runtime.fail("command requires a block")
     if command.values.len == 0:
       return runtime.fail("command requires a name")
-    if not (command.values[0] of IdentifierValue):
+    let name = identifierName(command.values[0])
+    if name.len == 0:
       return runtime.fail("command name must be an identifier")
-    let name = IdentifierValue(command.values[0]).identifier
     var params: seq[string]
     for index in 1 ..< command.values.len:
-      if not (command.values[index] of IdentifierValue):
+      let param = identifierName(command.values[index])
+      if param.len == 0:
         return runtime.fail("command parameters must be identifiers")
-      params.add IdentifierValue(command.values[index]).identifier
-    runtime.userCommands[name] = UserCommand(params: params, body: body)
-    return nilValue()
-  of "events":
+      params.add param
+    runtime.registerScriptCommand(name, params, body)
+    nilValue()
+
+  proc eventsCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard args
     if ui.inEventPhase():
       runtime.renderBlock(ui, body)
-    return nilValue()
-  of "when":
+    nilValue()
+
+  proc whenCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     if args.len > 0 and runtime.asBool(args[0]):
       runtime.renderBlock(ui, body)
-    return nilValue()
-  of "not":
-    if args.len == 0:
-      return boolValue(true)
-    return boolValue(not runtime.asBool(args[0]))
-  of "scope":
+    nilValue()
+
+  proc scopeCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     if args.len == 0:
       runtime.renderBlock(ui, body)
     else:
       ui.scope(runtime.asString(args[0])):
         runtime.renderBlock(ui, body)
-    return nilValue()
-  of "forLines":
+    nilValue()
+
+  proc forLinesCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     if args.len < 4:
       return runtime.fail("forLines requires list, item name, index name, and key name")
     let list = listFromValue(args[0])
@@ -802,15 +1075,17 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
         runtime.env[name] = oldValues[name]
       else:
         runtime.env.del(name)
-    return nilValue()
-  of "editing":
-    if args.len == 0:
-      return boolValue(false)
-    let edit = editLineFromValue(args[0])
-    if args.len > 1:
-      return boolValue(edit.editing(runtime.asString(args[1])))
-    return boolValue(edit.editing)
-  of "beginEdit":
+    nilValue()
+
+  proc beginEditCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard body
     if args.len < 3:
       return runtime.fail("beginEdit requires edit state, key, and value")
     var edit = editLineFromValue(args[0])
@@ -819,8 +1094,17 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       let name = identifierName(command.values[0])
       if name.len > 0:
         runtime.defineValue(name, editLineValue(edit))
-    return nilValue()
-  of "cancelEdit":
+    nilValue()
+
+  proc cancelEditCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard body
     if args.len == 0:
       return runtime.fail("cancelEdit requires edit state")
     var edit = editLineFromValue(args[0])
@@ -829,8 +1113,17 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       let name = identifierName(command.values[0])
       if name.len > 0:
         runtime.defineValue(name, editLineValue(edit))
-    return nilValue()
-  of "saveEdit":
+    nilValue()
+
+  proc saveEditCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard body
     if args.len == 0:
       return runtime.fail("saveEdit requires edit state")
     var edit = editLineFromValue(args[0])
@@ -840,26 +1133,47 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       if name.len > 0:
         runtime.defineValue(name, editLineValue(edit))
     return
-  of "editInputID":
-    if args.len == 0:
-      return widgetIDValue(InvalidWidgetID)
-    return widgetIDValue(editLineFromValue(args[0]).inputID)
-  of "editInput":
-    if args.len == 0:
-      return lineInputValue(LineInputState.new(""))
-    return lineInputValue(editLineFromValue(args[0]).input)
-  of "print":
+
+  proc printCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     var parts: seq[string]
     for arg in args:
       parts.add runtime.asString(arg)
     echo parts.join(" ")
-    return nilValue()
-  of "exec":
+    nilValue()
+
+  proc execCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard ui
+    discard command
+    discard body
     var parts: seq[string]
     for arg in args:
       parts.add runtime.asString(arg)
-    return runtime.startExec(parts.join(" "))
-  of "execStatus":
+    runtime.startExec(parts.join(" "))
+
+  proc execStatusCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
+    discard body
     if not runtime.exec.isNil and runtime.exec.running:
       let id =
         if args.len > 0:
@@ -867,8 +1181,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
         else:
           ui.id("exec-status")
       ui.label(id, "Running: " & runtime.exec.command, fit(), fit())
-    return nilValue()
-  of "row":
+    nilValue()
+
+  proc rowCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     let id =
       if args.len > 0:
         runtime.asWidgetID(ui, args[0])
@@ -877,8 +1199,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     let config = runtime.evalBoxConfig(ui, body)
     ui.row(id, config):
       runtime.renderChildLines(ui, body)
-    return nilValue()
-  of "column":
+    nilValue()
+
+  proc columnCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     let id =
       if args.len > 0:
         runtime.asWidgetID(ui, args[0])
@@ -887,8 +1217,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     let config = runtime.evalBoxConfig(ui, body)
     ui.column(id, config):
       runtime.renderChildLines(ui, body)
-    return nilValue()
-  of "panel":
+    nilValue()
+
+  proc panelCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     let id =
       if args.len > 0:
         runtime.asWidgetID(ui, args[0])
@@ -897,8 +1235,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     let config = runtime.evalBoxConfig(ui, body)
     ui.panel(id, config):
       runtime.renderChildLines(ui, body)
-    return nilValue()
-  of "label":
+    nilValue()
+
+  proc labelCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     let id =
       if args.len > 0:
         runtime.asWidgetID(ui, args[0])
@@ -911,8 +1257,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       else:
         runtime.textFromBody(ui, body)
     ui.label(id, text, config.width, config.height, alignSelf = config.alignSelf)
-    return nilValue()
-  of "button":
+    nilValue()
+
+  proc buttonCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     let id =
       if args.len > 0:
         runtime.asWidgetID(ui, args[0])
@@ -925,8 +1279,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       else:
         runtime.textFromBody(ui, body)
     discard ui.button(id, text, config.width, config.height, alignSelf = config.alignSelf)
-    return nilValue()
-  of "spacer":
+    nilValue()
+
+  proc spacerCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     let id =
       if args.len > 0:
         runtime.asWidgetID(ui, args[0])
@@ -934,8 +1296,16 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
         nextWidgetID()
     let config = runtime.evalBoxConfig(ui, body)
     ui.spacer(id, config.width, config.height, alignSelf = config.alignSelf)
-    return nilValue()
-  of "lineInput":
+    nilValue()
+
+  proc lineInputCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
+    discard command
     if args.len < 2:
       return runtime.fail("lineInput requires id and state")
     let config = runtime.evalBoxConfig(ui, body)
@@ -946,8 +1316,15 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       config.height,
       alignSelf = config.alignSelf,
     )
-    return nilValue()
-  of "pathListBox":
+    nilValue()
+
+  proc pathListBoxCommand(
+      runtime: DslRuntime;
+      ui: var UI;
+      command: Command;
+      args: seq[DslValue];
+      body: Block,
+  ): DslValue =
     if args.len < 4:
       return runtime.fail("pathListBox requires id, list, edit state, and search")
     let list = listFromValue(args[1])
@@ -1035,9 +1412,57 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
           discard
     if editName.len > 0:
       runtime.defineValue(editName, editLineValue(edit))
+    nilValue()
+
+  runtime.registerCommand("appendLine", appendLineCommand)
+  runtime.registerCommand("id", idCommand)
+  runtime.registerCommand("LineInputState", lineInputStateCommand)
+  runtime.registerCommand("EditLineState", editLineStateCommand)
+  runtime.registerCommand("split", splitCommand)
+  runtime.registerCommand("loadLines", loadLinesCommand)
+  runtime.registerCommand("clicked", boolFromWidgetCommand)
+  runtime.registerCommand("submitted", submittedCommand)
+  runtime.registerCommand("env", envCommand)
+  runtime.registerCommand("not", notCommand)
+  runtime.registerCommand("editing", editingCommand)
+  runtime.registerCommand("editInputID", editInputIDCommand)
+  runtime.registerCommand("editInput", editInputCommand)
+  runtime.registerCommand("insertLine", insertLineCommand)
+  runtime.registerCommand("setLine", setLineCommand)
+  runtime.registerCommand("deleteLine", deleteLineCommand)
+  runtime.registerCommand("setText", setTextCommand)
+  runtime.registerCommand("browseFolder", browseFolderCommand)
+  runtime.registerCommand("writeLines", writeLinesCommand)
+  runtime.registerCommand("import", importCommand)
+  runtime.registerCommand("export", exportCommand)
+  runtime.registerCommand("define", defineCommand)
+  runtime.registerCommand("command", commandCommand)
+  runtime.registerCommand("events", eventsCommand)
+  runtime.registerCommand("when", whenCommand)
+  runtime.registerCommand("scope", scopeCommand)
+  runtime.registerCommand("forLines", forLinesCommand)
+  runtime.registerCommand("beginEdit", beginEditCommand)
+  runtime.registerCommand("cancelEdit", cancelEditCommand)
+  runtime.registerCommand("saveEdit", saveEditCommand)
+  runtime.registerCommand("print", printCommand)
+  runtime.registerCommand("exec", execCommand)
+  runtime.registerCommand("execStatus", execStatusCommand)
+  runtime.registerCommand("row", rowCommand)
+  runtime.registerCommand("column", columnCommand)
+  runtime.registerCommand("panel", panelCommand)
+  runtime.registerCommand("label", labelCommand)
+  runtime.registerCommand("button", buttonCommand)
+  runtime.registerCommand("spacer", spacerCommand)
+  runtime.registerCommand("lineInput", lineInputCommand)
+  runtime.registerCommand("pathListBox", pathListBoxCommand)
+
+proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block = nil): DslValue =
+  if command.isNil:
     return nilValue()
-  else:
-    return runtime.fail("unknown command: " & command.identifier)
+  let args = runtime.evalArgs(ui, command.values)
+  if runtime.commands.hasKey(command.identifier):
+    return runtime.commands[command.identifier](runtime, ui, command, args, body)
+  return runtime.fail("unknown command: " & command.identifier)
 
 proc renderLine(runtime: DslRuntime; ui: var UI; line: Line) =
   if line of BlockCommandLine:
@@ -1071,6 +1496,7 @@ proc render*(runtime: DslRuntime; ui: var UI; program: Program) =
 
 proc init*(T: typedesc[DslRuntime]): T =
   result = T(exec: DslExec())
+  result.registerBuiltinCommands()
 
 proc dependenciesChanged*(runtime: DslRuntime): bool =
   for path, lastTime in runtime.loadedFiles:

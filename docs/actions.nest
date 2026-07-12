@@ -1,9 +1,14 @@
 command addPath input:
   appendLine paths input
   setText input ""
-command insertPath index input:
-  insertLine paths index input
-  setText input ""
+command beginPathEdit edit key value:
+  beginEdit edit key value
+command savePathEdit list index edit:
+  setLine list index (saveEdit edit)
+command cancelPathEdit edit:
+  cancelEdit edit
+command deletePathLine list index:
+  deleteLine list index
 command savePaths:
   writeLines pathOutput paths
 command pathListBox id list edit search:
@@ -11,15 +16,15 @@ command pathListBox id list edit search:
     forLines list item index key search:
       scope key:
         when (clicked (id "edit")):
-          beginEdit edit key item
+          beginPathEdit edit key item
         when (clicked (id "save")):
           when (editing edit key):
-            setLine list index (saveEdit edit)
+            savePathEdit list index edit
         when (clicked (id "cancel")):
           when (editing edit key):
-            cancelEdit edit
+            cancelPathEdit edit
         when (clicked (id "delete")):
-          deleteLine list index
+          deletePathLine list index
   panel id:
     width = (prefer 800: min = 400)
     height = (fill)
@@ -61,4 +66,4 @@ command pathListBox id list edit search:
             button (id "delete") "Delete":
               width = (fit)
               height = (fit)
-export addPath insertPath savePaths pathListBox
+export addPath beginPathEdit savePathEdit cancelPathEdit deletePathLine savePaths pathListBox
