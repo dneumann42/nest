@@ -1,3 +1,4 @@
+import "pathEditorActions.nest"
 define:
   newButton (id)
   browseButton (id)
@@ -12,14 +13,6 @@ define:
   newPathID (id)
   newPath (LineInputState "")
   pathLineEdit (EditLineState)
-command addPath input:
-  appendLine paths input
-  setText input ""
-command insertPath index input:
-  insertLine paths index input
-  setText input ""
-command savePaths:
-  writeLines pathOutput paths
 events:
   when (clicked newButton):
     addPath newPath

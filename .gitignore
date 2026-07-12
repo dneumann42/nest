@@ -10,5 +10,8 @@ tests/test_layout
 /nest
 /tests/test_ui
 /tests/test_dsl_reader
-/src/example/pathEditor
+/src/example/pathEditor/pathEditor
+/src/example/layerShellBar/layerShellBar
 /tests/test_dsl_runtime
+example/layerShellBar/layerShellBar
+*.out

@@ -1,0 +1,46 @@
+define:
+  rootID (id)
+  barRowID (id)
+  titleID (id)
+  spacerID (id)
+  statusID (id)
+  openButton (id)
+  reloadButton (id)
+  quitButton (id)
+  defaultGap 6.0
+events:
+  when (clicked openButton):
+    exec "printf 'nest layer shell open\n'"
+  when (clicked reloadButton):
+    exec "printf 'nest layer shell reload\n'"
+  when (clicked quitButton):
+    exec "printf 'quit button clicked\n'"
+panel rootID:
+  width = (fill)
+  height = (fill)
+  padding = 5.0
+  alignItems = AlignCenter
+  justifyContent = JustifyCenter
+  row barRowID:
+    width = (fill)
+    height = (fixed 24)
+    gap = defaultGap
+    alignItems = AlignCenter
+    label titleID "Nest, Hello World!":
+      width = (fit)
+      height = (fit)
+    button openButton "Open":
+      width = (fixed 66)
+      height = (fixed 24)
+    button reloadButton "Reload":
+      width = (fixed 78)
+      height = (fixed 24)
+    spacer spacerID:
+      width = (fill)
+      height = (fixed 1)
+    label statusID "Layer shell proof":
+      width = (fixed 150)
+      height = (fit)
+    button quitButton "Quit":
+      width = (fixed 58)
+      height = (fixed 24)

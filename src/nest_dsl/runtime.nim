@@ -1,7 +1,7 @@
-import std/[os, osproc, sets, streams, strutils, tables]
+import std/[os, osproc, sets, streams, strutils, tables, times]
 
 import nest/[dialogs, ui]
-import nodes
+import nodes, reader
 
 type
   DslValueKind* = enum
@@ -63,9 +63,18 @@ type
     env*: Table[string, DslValue]
     commands: Table[string, DslCommand]
     userCommands: Table[string, UserCommand]
+    exported*: HashSet[string]
+    loadedFiles*: Table[string, Time]
+    moduleStack: seq[string]
     error*: DslError
     hasError*: bool
     exec*: DslExec
+
+  DslApp* = ref object
+    rootPath*: string
+    runtime*: DslRuntime
+    program*: Program
+    lastError*: string
 
   DslCommand* = proc(
     runtime: DslRuntime,
@@ -218,6 +227,43 @@ proc defineValue*(runtime: DslRuntime; name: string; value: DslValue) =
 
 proc registerCommand*(runtime: DslRuntime; name: string; command: DslCommand) =
   runtime.commands[name] = command
+
+proc currentDir(runtime: DslRuntime): string =
+  if runtime.moduleStack.len > 0:
+    runtime.moduleStack[^1].parentDir
+  else:
+    getCurrentDir()
+
+proc resolveModulePath(runtime: DslRuntime; path: string): string =
+  if path.isAbsolute:
+    path.normalizedPath
+  else:
+    (runtime.currentDir / path).normalizedPath
+
+proc rememberFile(runtime: DslRuntime; path: string) =
+  try:
+    runtime.loadedFiles[path] = getLastModificationTime(path)
+  except OSError:
+    discard
+
+proc readProgramFile*(path: string): ReadResult =
+  let stream = newFileStream(path)
+  if stream.isNil:
+    return ReadResult(
+      ok: false,
+      error: ReaderError(line: 1, column: 1, message: "could not open file: " & path),
+    )
+  defer: stream.close()
+  readProgram(stream)
+
+proc loadProgram*(runtime: DslRuntime; path: string): Program =
+  let resolved = runtime.resolveModulePath(path)
+  let read = readProgramFile(resolved)
+  if not read.ok:
+    discard runtime.fail(resolved & ": " & $read.error)
+    return nil
+  runtime.rememberFile(resolved)
+  Program(read.node)
 
 proc get*(runtime: DslRuntime; name: string): DslValue =
   runtime.env.getOrDefault(name)
@@ -410,6 +456,12 @@ proc lineInputFromValue(runtime: DslRuntime; value: DslValue): LineInputState =
   else:
     LineInputState.new(runtime.asString(value))
 
+proc editLineFromValue(value: DslValue): EditLineState =
+  if value.kind == EditInput:
+    value.editLineValue
+  else:
+    editLineState()
+
 proc listFromValue(value: DslValue): DslList =
   if value.kind == List:
     value.listValue
@@ -524,6 +576,11 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
 
   case command.identifier
   of "id":
+    if args.len > 0:
+      var parts: seq[string]
+      for arg in args:
+        parts.add runtime.asString(arg)
+      return widgetIDValue(ui.id(parts))
     return widgetIDValue(nextWidgetID())
   of "LineInputState":
     if args.len > 0:
@@ -634,6 +691,26 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       dialogs.browseFolder proc(path: string) =
         input.setInputText(path)
     return nilValue()
+  of "import":
+    if args.len == 0:
+      return runtime.fail("import requires a path")
+    let path = runtime.resolveModulePath(runtime.asString(args[0]))
+    if path in runtime.moduleStack:
+      return nilValue()
+    let read = readProgramFile(path)
+    if not read.ok:
+      return runtime.fail(path & ": " & $read.error)
+    runtime.rememberFile(path)
+    runtime.moduleStack.add path
+    runtime.renderBlock(ui, Program(read.node).body)
+    runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
+    return nilValue()
+  of "export":
+    for value in command.values:
+      let name = identifierName(value)
+      if name.len > 0:
+        runtime.exported.incl name
+    return nilValue()
   of "define":
     if body.isNil:
       return nilValue()
@@ -680,6 +757,97 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
     if args.len > 0 and runtime.asBool(args[0]):
       runtime.renderBlock(ui, body)
     return nilValue()
+  of "not":
+    if args.len == 0:
+      return boolValue(true)
+    return boolValue(not runtime.asBool(args[0]))
+  of "scope":
+    if args.len == 0:
+      runtime.renderBlock(ui, body)
+    else:
+      ui.scope(runtime.asString(args[0])):
+        runtime.renderBlock(ui, body)
+    return nilValue()
+  of "forLines":
+    if args.len < 4:
+      return runtime.fail("forLines requires list, item name, index name, and key name")
+    let list = listFromValue(args[0])
+    if list.isNil:
+      return runtime.fail("forLines requires a list")
+    let itemName = runtime.asString(args[1])
+    let indexName = runtime.asString(args[2])
+    let keyName = runtime.asString(args[3])
+    let filterText =
+      if args.len > 4:
+        runtime.asString(args[4])
+      else:
+        ""
+    var oldValues: Table[string, DslValue]
+    var hadOldValue: Table[string, bool]
+    for name in [itemName, indexName, keyName]:
+      oldValues[name] = runtime.env.getOrDefault(name)
+      hadOldValue[name] = runtime.env.hasKey(name)
+    for index, item in list.items:
+      if filterText.len > 0 and not item.contains(filterText):
+        continue
+      let key = listKey(index, item)
+      runtime.env[itemName] = stringValue(item)
+      runtime.env[indexName] = numberValue(index.float64)
+      runtime.env[keyName] = stringValue(key)
+      runtime.renderBlock(ui, body)
+      if runtime.hasError:
+        break
+    for name in [itemName, indexName, keyName]:
+      if hadOldValue.getOrDefault(name):
+        runtime.env[name] = oldValues[name]
+      else:
+        runtime.env.del(name)
+    return nilValue()
+  of "editing":
+    if args.len == 0:
+      return boolValue(false)
+    let edit = editLineFromValue(args[0])
+    if args.len > 1:
+      return boolValue(edit.editing(runtime.asString(args[1])))
+    return boolValue(edit.editing)
+  of "beginEdit":
+    if args.len < 3:
+      return runtime.fail("beginEdit requires edit state, key, and value")
+    var edit = editLineFromValue(args[0])
+    edit.beginEdit(runtime.asString(args[1]), runtime.asString(args[2]))
+    if command.values.len > 0:
+      let name = identifierName(command.values[0])
+      if name.len > 0:
+        runtime.defineValue(name, editLineValue(edit))
+    return nilValue()
+  of "cancelEdit":
+    if args.len == 0:
+      return runtime.fail("cancelEdit requires edit state")
+    var edit = editLineFromValue(args[0])
+    edit.cancelEdit()
+    if command.values.len > 0:
+      let name = identifierName(command.values[0])
+      if name.len > 0:
+        runtime.defineValue(name, editLineValue(edit))
+    return nilValue()
+  of "saveEdit":
+    if args.len == 0:
+      return runtime.fail("saveEdit requires edit state")
+    var edit = editLineFromValue(args[0])
+    result = stringValue(edit.saveEdit())
+    if command.values.len > 0:
+      let name = identifierName(command.values[0])
+      if name.len > 0:
+        runtime.defineValue(name, editLineValue(edit))
+    return
+  of "editInputID":
+    if args.len == 0:
+      return widgetIDValue(InvalidWidgetID)
+    return widgetIDValue(editLineFromValue(args[0]).inputID)
+  of "editInput":
+    if args.len == 0:
+      return lineInputValue(LineInputState.new(""))
+    return lineInputValue(editLineFromValue(args[0]).input)
   of "print":
     var parts: seq[string]
     for arg in args:
@@ -757,6 +925,15 @@ proc evalCommand(runtime: DslRuntime; ui: var UI; command: Command; body: Block 
       else:
         runtime.textFromBody(ui, body)
     discard ui.button(id, text, config.width, config.height, alignSelf = config.alignSelf)
+    return nilValue()
+  of "spacer":
+    let id =
+      if args.len > 0:
+        runtime.asWidgetID(ui, args[0])
+      else:
+        nextWidgetID()
+    let config = runtime.evalBoxConfig(ui, body)
+    ui.spacer(id, config.width, config.height, alignSelf = config.alignSelf)
     return nilValue()
   of "lineInput":
     if args.len < 2:
@@ -887,8 +1064,49 @@ proc renderBlock*(runtime: DslRuntime; ui: var UI; body: Block) =
 proc render*(runtime: DslRuntime; ui: var UI; program: Program) =
   if program.isNil:
     return
+  runtime.hasError = false
+  runtime.error = DslError()
   ui.layout:
     runtime.renderBlock(ui, program.body)
 
 proc init*(T: typedesc[DslRuntime]): T =
   result = T(exec: DslExec())
+
+proc dependenciesChanged*(runtime: DslRuntime): bool =
+  for path, lastTime in runtime.loadedFiles:
+    try:
+      if getLastModificationTime(path) != lastTime:
+        return true
+    except OSError:
+      return true
+  false
+
+proc reload*(app: DslApp): bool {.discardable.} =
+  app.runtime.hasError = false
+  app.runtime.error = DslError()
+  app.runtime.loadedFiles.clear()
+  let path = app.rootPath.normalizedPath
+  let read = readProgramFile(path)
+  if not read.ok:
+    app.lastError = path & ": " & $read.error
+    return false
+  app.runtime.rememberFile(path)
+  app.program = Program(read.node)
+  app.lastError = ""
+  true
+
+proc init*(T: typedesc[DslApp]; rootPath: string): T =
+  result = T(rootPath: rootPath.normalizedPath, runtime: DslRuntime.init())
+  discard result.reload()
+
+proc render*(app: DslApp; ui: var UI) =
+  if app.isNil:
+    return
+  if app.program.isNil or app.runtime.dependenciesChanged():
+    discard app.reload()
+  if not app.program.isNil:
+    app.runtime.moduleStack.add app.rootPath
+    app.runtime.render(ui, app.program)
+    app.runtime.moduleStack.setLen(app.runtime.moduleStack.len - 1)
+    if app.runtime.hasError:
+      app.lastError = $app.runtime.error

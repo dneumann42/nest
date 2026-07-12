@@ -1,4 +1,4 @@
-import std/[os, streams, unittest]
+import std/[os, sets, streams, tables, unittest]
 
 import nest/[layouts, ui]
 import nest_dsl/[nodes, reader, runtime]
@@ -92,6 +92,47 @@ suite "DSL runtime":
     check readFile(output) == "alpha\nbeta\ngamma\ndelta"
     removeFile(output)
 
+  test "imports modules and exposes exported commands":
+    let modulePath = "/tmp/nest-dsl-module-actions.nest"
+    writeFile(modulePath, "command greet value:\n  capture value\nexport greet\n")
+    let program = parseDsl("import \"" & modulePath & "\"\ngreet \"hello\"\n")
+    var ui = UI.init()
+    let runtime = DslRuntime.init()
+    var captured = ""
+    runtime.registerCommand(
+      "capture",
+      proc(runtime: DslRuntime, ui: var UI, args: seq[DslValue], body: Block): DslValue =
+        if args.len > 0:
+          captured = $args[0]
+        nilValue(),
+    )
+
+    runtime.renderBlock(ui, program.body)
+
+    check captured == "hello"
+    check "greet" in runtime.exported
+    removeFile(modulePath)
+
+  test "DslApp tracks imported files for hot reload":
+    let rootPath = "/tmp/nest-dsl-hot-root.nest"
+    let modulePath = "/tmp/nest-dsl-hot-module.nest"
+    writeFile(rootPath, "import \"nest-dsl-hot-module.nest\"\n")
+    writeFile(modulePath, "export ready\n")
+    var ui = UI.init()
+    let app = DslApp.init(rootPath)
+
+    app.render(ui)
+    check app.runtime.loadedFiles.hasKey(rootPath.normalizedPath)
+    check app.runtime.loadedFiles.hasKey(modulePath.normalizedPath)
+    check not app.runtime.dependenciesChanged()
+
+    sleep(1100)
+    writeFile(modulePath, "export ready changed\n")
+
+    check app.runtime.dependenciesChanged()
+    removeFile(rootPath)
+    removeFile(modulePath)
+
   test "exec runs asynchronously and captures stdout":
     let program = parseDsl("exec \"printf dsl-runtime\"\n")
     var ui = UI.init()
@@ -110,4 +151,31 @@ suite "DSL runtime":
 
   test "path editor DSL files parse":
     check parseDslFile("docs/dsl").body.lines.len > 0
-    check parseDslFile("src/example/pathEditor.nest").body.lines.len > 0
+    check parseDslFile("src/example/pathEditor/pathEditor.nest").body.lines.len > 0
+    check parseDslFile("src/example/layerShellBar/layerShellBar.nest").body.lines.len > 0
+
+  test "path editor renders through Nest modules":
+    var ui = UI.init()
+    ui.initContext(640, 480)
+    ui.loadFont("font", "", 18)
+    let app = DslApp.init("src/example/pathEditor/pathEditor.nest")
+
+    app.render(ui)
+
+    check app.lastError == ""
+    check not app.runtime.hasError
+    check "pathListBox" in app.runtime.exported
+    check app.runtime.get("paths").kind == List
+
+  test "layer shell bar renders through Nest modules":
+    var ui = UI.init()
+    ui.initContext(1280, 34)
+    ui.loadFont("font", "", 18)
+    let app = DslApp.init("src/example/layerShellBar/layerShellBar.nest")
+
+    app.render(ui)
+
+    check app.lastError == ""
+    check not app.runtime.hasError
+    check app.runtime.widgetID("rootID") != InvalidWidgetID
+    check app.runtime.widgetID("openButton") != InvalidWidgetID

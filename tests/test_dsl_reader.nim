@@ -12,12 +12,13 @@ suite "DSL reader":
     check read.ok
 
     let program = Program(read.node)
-    check program.body.lines.len == 6
-    check BlockCommandLine(program.body.lines[0]).command.identifier == "define"
-    check BlockCommandLine(program.body.lines[1]).command.identifier == "command"
-    check BlockCommandLine(program.body.lines[4]).command.identifier == "events"
+    check program.body.lines.len == 4
+    check SimpleStatementLine(program.body.lines[0]).statement of Command
+    check Command(SimpleStatementLine(program.body.lines[0]).statement).identifier == "import"
+    check BlockCommandLine(program.body.lines[1]).command.identifier == "define"
+    check BlockCommandLine(program.body.lines[2]).command.identifier == "events"
 
-    let column = BlockCommandLine(program.body.lines[5])
+    let column = BlockCommandLine(program.body.lines[3])
     check column.command.identifier == "column"
     check column.command.values.len == 1
     check CallValue(column.command.values[0]).identifier == "id"

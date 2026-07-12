@@ -1,0 +1,64 @@
+command addPath input:
+  appendLine paths input
+  setText input ""
+command insertPath index input:
+  insertLine paths index input
+  setText input ""
+command savePaths:
+  writeLines pathOutput paths
+command pathListBox id list edit search:
+  events:
+    forLines list item index key search:
+      scope key:
+        when (clicked (id "edit")):
+          beginEdit edit key item
+        when (clicked (id "save")):
+          when (editing edit key):
+            setLine list index (saveEdit edit)
+        when (clicked (id "cancel")):
+          when (editing edit key):
+            cancelEdit edit
+        when (clicked (id "delete")):
+          deleteLine list index
+  panel id:
+    width = (prefer 800: min = 400)
+    height = (fill)
+    gap = 12.0
+    alignItems = AlignStretch
+    justifyContent = JustifyStart
+    scrollX = true
+    scrollY = true
+    forLines list item index key search:
+      scope key:
+        when (editing edit key):
+          row (id "edit-row"):
+            width = (fill)
+            height = (fit)
+            gap = 12.0
+            alignItems = AlignCenter
+            lineInput (editInputID edit) (editInput edit):
+              width = (fill)
+              height = (fixed 28)
+            button (id "cancel") "Cancel":
+              width = (fit)
+              height = (fit)
+            button (id "save") "Save":
+              width = (fit)
+              height = (fit)
+        when (not (editing edit key)):
+          row (id "row"):
+            width = (fill)
+            height = (fit)
+            gap = 12.0
+            alignItems = AlignCenter
+            justifyContent = JustifyCenter
+            label (id "label") item:
+              width = (fill)
+              height = (fit)
+            button (id "edit") "Edit":
+              width = (fit)
+              height = (fit)
+            button (id "delete") "Delete":
+              width = (fit)
+              height = (fit)
+export addPath insertPath savePaths pathListBox

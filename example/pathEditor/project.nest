@@ -1,0 +1,6 @@
+main = "pathEditor.nest"
+title = "Path Editor"
+width = 800
+height = 600
+layerShell = "none"
+namespace = "path-editor"
