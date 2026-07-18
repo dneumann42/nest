@@ -1,0 +1,6 @@
+title = "Mailbox"
+width = 420
+height = 260
+layerShell = "top-right"
+namespace = "nest-notifications"
+exclusiveZone = -1

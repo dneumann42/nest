@@ -1,11 +1,14 @@
 define:
   selectedDate = (today-date)
+  clickedDate = nothing
 
 import "components/calendar.nest"
 
 events:
   when (keyPressed "escape"):
     closeDialog ""
+  when (not (= clickedDate nothing)):
+    closeDialog clickedDate
 
 card (id "start-popover"):
   width = fill
@@ -27,4 +30,4 @@ card (id "start-popover"):
     padding = 0
     gap = 0
     alignItems = AlignStretch
-    dateSelector "clock-calendar" selectedDate
+    dateSelectorWithSignal "clock-calendar" selectedDate clickedDate

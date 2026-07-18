@@ -1,0 +1,31 @@
+fun volumeStatusCommand:
+  string "if pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -qi yes; then printf 'VOL muted'; else pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR==1 {gsub(/[^0-9]/,\"\",$2); if ($2 == \"\") print \"VOL n/a\"; else printf \"VOL %s%%\", $2; exit} END {if (NR == 0) printf \"VOL n/a\"}'; fi"
+
+fun volumeActionCommand action:
+  if (= action "toggle"):
+    then:
+      string "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+    else:
+      if (= action "down"):
+        then:
+          string "pactl set-sink-volume @DEFAULT_SINK@ -5%"
+        else:
+          if (= action "up"):
+            then:
+              string "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+            else:
+              string "pavucontrol"
+
+component volumeWidget key:
+  define:
+    keyText = (eval key)
+    buttonID = (id keyText "volume")
+    status = (shellAsync (id keyText "volume-query") (volumeStatusCommand) 1000)
+
+  events:
+    when (and (clicked buttonID) (not (dialogOpen? "volume"))):
+      openDialog "volume" "./volume" ""
+
+  button buttonID status:
+    width = fit
+    height = fit

@@ -1,0 +1,62 @@
+import "components/volume.nest"
+
+define:
+  muteID = (id "volume" "mute")
+  downID = (id "volume" "down")
+  upID = (id "volume" "up")
+  mixerID = (id "volume" "mixer")
+  closeID = (id "volume" "close")
+  status = (shellAsync (id "volume" "query") (volumeStatusCommand) 500)
+
+events:
+  when (keyPressed "escape"):
+    closeDialog ""
+  when (clicked muteID):
+    shellAsync (id "volume" "action" "mute") (volumeActionCommand "toggle") 0
+  when (clicked downID):
+    shellAsync (id "volume" "action" "down") (volumeActionCommand "down") 0
+  when (clicked upID):
+    shellAsync (id "volume" "action" "up") (volumeActionCommand "up") 0
+  when (clicked mixerID):
+    shellAsync (id "volume" "action" "mixer") (volumeActionCommand "mixer") 0
+  when (clicked closeID):
+    closeDialog ""
+
+card (id "volume" "panel"):
+  width = fill
+  height = fill
+  padding = 10
+  gap = 8
+  alignItems = AlignStretch
+  dialogHeader (id "volume" "header"):
+    width = fill
+    height = fixed 32
+    padding = 8
+    alignItems = AlignCenter
+    label (id "volume" "title") "Volume":
+      width = fill
+      height = fit
+    button closeID "x":
+      width = fixed 28
+      height = fit
+  label (id "volume" "status") status:
+    width = fill
+    height = fit
+  row (id "volume" "actions"):
+    width = fill
+    height = fit
+    gap = 8
+    alignItems = AlignCenter
+    justifyContent = JustifyCenter
+    button downID "-":
+      width = fixed 56
+      height = fit
+    button muteID "Mute":
+      width = fixed 86
+      height = fit
+    button upID "+":
+      width = fixed 56
+      height = fit
+  button mixerID "Open mixer":
+    width = fill
+    height = fit

@@ -1,0 +1,55 @@
+import "lib/components/media.nest"
+
+component mediaWidget key:
+  define:
+    keyText = eval key
+    previousID = (id keyText "previous")
+    titleID = (id keyText "title")
+    playPauseID = (id keyText "play-pause")
+    nextID = (id keyText "next")
+    title = ""
+    status = ""
+    statusOverride = ""
+    displayStatus = ""
+    playPauseLabel = "Play"
+
+  set title (mediaQuery (id keyText "query" "title") "metadata --format '{{artist}} - {{title}}' 2>/dev/null || printf 'No media'")
+  set status (mediaQuery (id keyText "query" "status") "status 2>/dev/null || printf 'Stopped'")
+  when (= status statusOverride):
+    set statusOverride ""
+  set displayStatus (pick (= statusOverride "") status statusOverride)
+  set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
+
+  redrawAfter 2000
+
+  events:
+    when (clicked previousID):
+      mediaAction (id keyText "action" "previous") "previous 2>/dev/null"
+    when (and (clicked titleID) (not (dialogOpen? "media"))):
+      openDialog "media" "./media" ""
+    when (clicked playPauseID):
+      set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
+      set displayStatus statusOverride
+      set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
+      mediaAction (id keyText "action" "play-pause") "play-pause 2>/dev/null"
+    when (clicked nextID):
+      mediaAction (id keyText "action" "next") "next 2>/dev/null"
+
+  row (id keyText "media"):
+    width = fit
+    height = fit
+    gap = 6
+    alignItems = AlignCenter
+    button previousID "<":
+      width = (fixed 28)
+      height = fit
+    button titleID title:
+      width = (fixed 220)
+      height = fit
+      textScroll = true
+    button playPauseID playPauseLabel:
+      width = (fixed 76)
+      height = fit
+    button nextID ">":
+      width = (fixed 28)
+      height = fit

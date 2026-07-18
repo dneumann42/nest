@@ -196,6 +196,47 @@ proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
 proc effectiveAlignment(child: Widget, parentAlignment: Alignment): Alignment =
   if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
 
+proc overlay*(
+    ui: Layout,
+    parent: Widget,
+    children: openArray[Widget],
+    padding = 0.0,
+    alignItems = AlignStretch,
+    justifyContent = JustifyCenter,
+) =
+  for child in children:
+    case child.effectiveAlignment(alignItems)
+    of AlignAuto, AlignStretch:
+      discard ui.constrain(child.left == parent.left + padding)
+      if child.stretchWidth:
+        discard ui.constrain(child.right == parent.right - padding)
+    of AlignStart:
+      discard ui.constrain(child.left == parent.left + padding)
+      discard ui.constrain(child.right <= parent.right - padding)
+    of AlignCenter:
+      discard ui.constrain(child.left >= parent.left + padding)
+      discard ui.constrain(child.right <= parent.right - padding)
+      discard ui.constrain(child.centerX == parent.centerX)
+    of AlignEnd:
+      discard ui.constrain(child.left >= parent.left + padding)
+      discard ui.constrain(child.right == parent.right - padding)
+
+    if child.stretchHeight:
+      discard ui.constrain(child.top == parent.top + padding)
+      discard ui.constrain(child.bottom == parent.bottom - padding)
+    else:
+      case justifyContent
+      of JustifyStart:
+        discard ui.constrain(child.top == parent.top + padding)
+        discard ui.constrain(child.bottom <= parent.bottom - padding)
+      of JustifyCenter:
+        discard ui.constrain(child.top >= parent.top + padding)
+        discard ui.constrain(child.bottom <= parent.bottom - padding)
+        discard ui.constrain(child.centerY == parent.centerY)
+      of JustifyEnd:
+        discard ui.constrain(child.top >= parent.top + padding)
+        discard ui.constrain(child.bottom == parent.bottom - padding)
+
 proc alignRowChild(
     ui: Layout,
     parent,

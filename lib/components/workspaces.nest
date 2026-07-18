@@ -1,0 +1,42 @@
+fun workspaceLabel workspace:
+  define:
+    name = (dict-get workspace "name")
+  cond:
+    when (dict-get workspace "urgent"):
+      string "! " name
+    when (dict-get workspace "focused"):
+      string "[" name "]"
+    when (dict-get workspace "visible"):
+      string "(" name ")"
+    when T:
+      name
+
+fun workspaceQuery key:
+  swayWorkspaceSubscription key
+
+component workspaces key:
+  define:
+    keyText = (eval key)
+    workspaceList = (workspaceQuery (id keyText "query"))
+
+  row (id keyText "workspaces"):
+    width = fit
+    height = fit
+    gap = 4
+    alignItems = AlignCenter
+    if (empty? workspaceList):
+      then:
+        label (id keyText "empty") "-":
+          width = (fixed 24)
+          height = fit
+      else:
+        for workspace (iter workspaceList):
+          define:
+            name = (dict-get workspace "name")
+            workspaceID = (id keyText "workspace" name)
+          events:
+            when (clicked workspaceID):
+              shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) 0
+          button workspaceID (workspaceLabel workspace):
+            width = fit
+            height = fit

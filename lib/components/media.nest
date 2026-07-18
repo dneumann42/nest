@@ -1,0 +1,32 @@
+fun mediaPlayerCommand command:
+  string "p=$(playerctl -l 2>/dev/null | while IFS= read -r n; do if [ \"$(playerctl -p \"$n\" status 2>/dev/null)\" = Playing ]; then printf '%s\n' \"$n\"; exit; fi; done); if [ -z \"$p\" ]; then p=$(playerctl -l 2>/dev/null | sed -n '1p'); fi; if [ -n \"$p\" ]; then playerctl -p \"$p\" " command "; else playerctl " command "; fi"
+
+fun mediaQuery key command:
+  shellAsync key (mediaPlayerCommand command) 2000
+
+fun mediaAction key command:
+  shellAsync key (mediaPlayerCommand command) 0
+
+fun mediaArtwork key:
+  mediaQuery key "metadata mpris:artUrl 2>/dev/null | while IFS= read -r p; do case \"$p\" in file://*) src=${p#file://}; key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); bmp=/tmp/nest-media-art-$key.bmp; if [ -f \"$bmp\" ] && [ \"$bmp\" -nt \"$src\" ]; then printf '%s' \"$bmp\"; else magick \"$src\" \"$bmp\" >/dev/null 2>&1 && printf '%s' \"$bmp\"; fi;; http://*|https://*) key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); src=/tmp/nest-media-art-$key.src; bmp=/tmp/nest-media-art-$key.bmp; if [ ! -f \"$bmp\" ]; then curl -L -s --max-time 10 -o \"$src\" \"$p\" >/dev/null 2>&1 && magick \"$src\" \"$bmp\" >/dev/null 2>&1; fi; [ -f \"$bmp\" ] && printf '%s' \"$bmp\";; esac; done"
+
+fun mediaMetadataRow key labelText valueText:
+  tableRow (id key "metadata" labelText):
+    width = fill
+    height = (fixed 38)
+    alignItems = AlignCenter
+    tableCell (id key "metadata-label-cell" labelText):
+      width = (fixed 110)
+      height = fill
+      padding = 8
+      label (id key "metadata-label" labelText) labelText:
+        width = fill
+        height = fit
+    tableCell (id key "metadata-value-cell" labelText):
+      width = fill
+      height = fill
+      padding = 8
+      label (id key "metadata-value" labelText) valueText:
+        width = fill
+        height = fit
+        textScroll = true

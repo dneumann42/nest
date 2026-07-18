@@ -1,0 +1,22 @@
+fun notificationCountCommand:
+  string "python3 -c 'import json,subprocess; total=0\nfor cmd in ((\"makoctl\",\"list\",\"-j\"),(\"makoctl\",\"history\",\"-j\")):\n    try:\n        total += len(json.loads(subprocess.check_output(cmd, stderr=subprocess.DEVNULL) or b\"[]\"))\n    except Exception:\n        pass\nprint(total, end=\"\")'"
+
+fun notificationListCommand:
+  string "python3 -c 'import json,subprocess\nrows=[]\nfor cmd in ((\"makoctl\",\"list\",\"-j\"),(\"makoctl\",\"history\",\"-j\")):\n    try:\n        rows += json.loads(subprocess.check_output(cmd, stderr=subprocess.DEVNULL) or b\"[]\")\n    except Exception:\n        pass\nif not rows:\n    print(\"No mail\")\nelse:\n    for item in rows[:5]:\n        summary=(item.get(\"summary\") or \"Notification\").replace(\"\\n\",\" \")\n        body=(item.get(\"body\") or \"\").replace(\"\\n\",\" \")\n        print((summary + (\" - \" + body if body else \"\"))[:96])'"
+
+fun notificationClearCommand:
+  string "makoctl dismiss --all --no-history 2>/dev/null; n=$(python3 -c 'import json,subprocess\ntry: print(len(json.loads(subprocess.check_output((\"makoctl\",\"history\",\"-j\"), stderr=subprocess.DEVNULL) or b\"[]\")))\nexcept Exception: print(0)'); while [ \"$n\" -gt 0 ]; do makoctl restore 2>/dev/null; makoctl dismiss --no-history 2>/dev/null; n=$((n-1)); done"
+
+component notificationWidget key:
+  define:
+    keyText = (eval key)
+    buttonID = (id keyText "notifications")
+    count = (shellAsync (id keyText "notification-count") (notificationCountCommand) 1000)
+
+  events:
+    when (and (clicked buttonID) (not (dialogOpen? "notifications"))):
+      openDialog "notifications" "./notifications" ""
+
+  button buttonID (string "MAIL " count):
+    width = fit
+    height = fit

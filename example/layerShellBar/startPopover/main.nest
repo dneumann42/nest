@@ -1,50 +1,119 @@
 define:
-  appsID = (id "apps")
-  filesID = (id "files")
-  settingsID = (id "settings")
-  logoutID = (id "logout")
+  packagesID = (id "menu" "packages")
+  wallpaperID = (id "menu" "wallpaper")
+  monitorsID = (id "menu" "monitors")
+  floatRulesID = (id "menu" "float-rules")
+  emacsID = (id "menu" "emacs")
+  officeID = (id "menu" "office")
+  filesID = (id "menu" "files")
+  maindoID = (id "menu" "maindo")
+  logoutID = (id "menu" "logout")
+  shutdownID = (id "menu" "shutdown")
+  restartID = (id "menu" "restart")
 
 events:
   when (keyPressed "escape"):
     closeDialog ""
-  when (clicked appsID):
-    closeDialog "applications"
+  when (clicked packagesID):
+    shellAsync (id "menu" "run" "packages") "shelly-ui" 0
+    closeDialog "packages"
+  when (clicked wallpaperID):
+    shellAsync (id "menu" "run" "wallpaper") "~/.config/sway/scripts/wallpapers pick" 0
+    closeDialog "wallpaper"
+  when (clicked monitorsID):
+    shellAsync (id "menu" "run" "monitors") "~/.config/sway/scripts/monitors.sh pick" 0
+    closeDialog "monitors"
+  when (clicked floatRulesID):
+    shellAsync (id "menu" "run" "float-rules") "sway-float-rules" 0
+    closeDialog "float-rules"
+  when (clicked emacsID):
+    shellAsync (id "menu" "run" "emacs") "emacsclient -c -a emacs" 0
+    closeDialog "emacs"
+  when (clicked officeID):
+    shellAsync (id "menu" "run" "office") "libreoffice" 0
+    closeDialog "office"
   when (clicked filesID):
+    shellAsync (id "menu" "run" "files") "pcmanfm" 0
     closeDialog "files"
-  when (clicked settingsID):
-    closeDialog "settings"
+  when (clicked maindoID):
+    shellAsync (id "menu" "run" "maindo") "wish ~/.projects/maindo_tcl/main.tcl" 0
+    closeDialog "maindo"
   when (clicked logoutID):
     closeDialog "logout"
+  when (clicked shutdownID):
+    shellAsync (id "menu" "run" "shutdown") "systemctl shutdown now" 0
+    closeDialog "shutdown"
+  when (clicked restartID):
+    shellAsync (id "menu" "run" "restart") "reboot" 0
+    closeDialog "restart"
 
-card (id "start-popover"):
+card (id "menu" "panel"):
   width = fill
   height = fill
-  padding = 0
-  gap = 0
+  padding = 14
+  gap = 12
   alignItems = AlignStretch
-  dialogHeader (id "start-popover" "header"):
-    width = fill
-    height = (fixed 32)
-    padding = 8
-    alignItems = AlignCenter
-    label (id "start-popover" "title") (dialogData):
-      width = fit
-      height = fit
-  column (id "start-popover" "actions"):
+  image (id "menu" "banner") "example/layerShellBar/assets/nomicon.bmp":
+    width = fixed 256
+    height = fixed 70
+    alignSelf = AlignCenter
+  label (id "menu" "title") (dialogData):
     width = fill
     height = fit
-    padding = 8
-    gap = 6
+  label (id "menu" "subtitle") "Applications and desktop controls":
+    width = fill
+    height = fit
+  row (id "menu" "apps"):
+    width = fill
+    height = fill
+    gap = 12
     alignItems = AlignStretch
-    button appsID "Applications":
+    column (id "menu" "left"):
       width = fill
       height = fit
-    button filesID "Files":
+      gap = 8
+      alignItems = AlignStretch
+      button packagesID "Packages":
+        width = fill
+        height = fit
+      button wallpaperID "Pick wallpaper":
+        width = fill
+        height = fit
+      button monitorsID "Monitors":
+        width = fill
+        height = fit
+      button floatRulesID "Float rules":
+        width = fill
+        height = fit
+    column (id "menu" "right"):
       width = fill
       height = fit
-    button settingsID "Settings":
-      width = fill
+      gap = 8
+      alignItems = AlignStretch
+      button emacsID "Emacs":
+        width = fill
+        height = fit
+      button officeID "Libre Office":
+        width = fill
+        height = fit
+      button filesID "Files":
+        width = fill
+        height = fit
+      button maindoID "Maindo":
+        width = fill
+        height = fit
+  row (id "menu" "power"):
+    width = fill
+    height = fit
+    gap = 8
+    alignItems = AlignCenter
+    justifyContent = JustifyCenter
+    button logoutID "Logout":
+      width = fixed 116
       height = fit
-    button logoutID "Log out":
-      width = fill
+    button shutdownID "Shutdown":
+      width = fixed 116
+      height = fit
+    button restartID "Restart":
+      width = fixed 116
       height = fit

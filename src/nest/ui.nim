@@ -9,6 +9,7 @@ type
   LayoutKind = enum
     RowLayout
     ColumnLayout
+    OverlayLayout
 
   UIPhase = enum
     LayoutPhase
@@ -39,6 +40,7 @@ type
     justifyContent*: Justification
     alignSelf*: Alignment
     scrollX*, scrollY*: bool
+    textScroll*: bool
 
   PendingLayout = object
     kind: LayoutKind
@@ -114,6 +116,7 @@ proc cfg*(
     alignSelf = AlignAuto,
     scrollX = false,
     scrollY = false,
+    textScroll = false,
 ): BoxConfig =
   BoxConfig(
     width: width,
@@ -125,6 +128,7 @@ proc cfg*(
     alignSelf: alignSelf,
     scrollX: scrollX,
     scrollY: scrollY,
+    textScroll: textScroll,
   )
 
 proc init*(T: typedesc[UI]): T =
@@ -170,6 +174,12 @@ proc requestRedrawAfter*(self: var UI, ms: int) =
     self.scheduledRedrawTicks = ticks
     self.hasScheduledRedraw = true
 
+proc requestRedrawAfterSafe(self: var UI, ms: int) {.raises: [].} =
+  try:
+    self.requestRedrawAfter(ms)
+  except Exception:
+    discard
+
 proc redrawDelayMs*(self: UI): int =
   if not self.hasScheduledRedraw:
     return -1
@@ -188,6 +198,9 @@ proc markDirty*(self: var UI, id: WidgetID) {.raises: [].} =
 proc redrewFrame*(self: UI): bool {.raises: [].} =
   self.frameRedrawn
 
+proc setDrawTicks*(self: var UI, ticks: int) =
+  self.context.draw.ticks = ticks
+
 proc setRenderKey*(self: var UI, id: WidgetID, key: string) =
   let previous = self.renderKeys.getOrDefault(id)
   if previous != key:
@@ -200,7 +213,7 @@ proc setRenderKey*(self: var UI, id: WidgetID, key: string) =
 proc renderKey(kind: string, config: BoxConfig): string =
   kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
     $config.padding & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
-    $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY
+    $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" & $config.textScroll
 
 proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): string =
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
@@ -598,6 +611,11 @@ proc preferredWidth(
     for child in pending.children:
       width = max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
     width.clampPolicy(widget.widthPolicy)
+  of OverlayLayout:
+    var width = widget.widthPolicy.min
+    for child in pending.children:
+      width = max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
+    width.clampPolicy(widget.widthPolicy)
 
 proc preferredHeight(
     self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
@@ -618,6 +636,11 @@ proc preferredHeight(
     var height = pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
     for child in pending.children:
       height += self.preferredHeight(child, pendingByParent)
+    height.clampPolicy(widget.heightPolicy)
+  of OverlayLayout:
+    var height = widget.heightPolicy.min
+    for child in pending.children:
+      height = max(height, self.preferredHeight(child, pendingByParent) + pending.padding * 2.0)
     height.clampPolicy(widget.heightPolicy)
 
 proc assignDirectStack(
@@ -732,6 +755,44 @@ proc assignDirectStack(
       if pendingByParent.hasKey(child.id):
         self.assignDirectStack(pendingByParent[child.id], pendingByParent)
       x += childWidth + pending.gap
+  of OverlayLayout:
+    let
+      availableWidth = max(parentFrame.width - pending.padding * 2.0, 0.0)
+      availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
+    for child in pending.children:
+      var childWidth =
+        if child.widthPolicy.kind == WidgetFill or
+            (child.directAlignment(pending.alignItems) == AlignStretch and child.stretchWidth):
+          availableWidth.clampPolicy(child.widthPolicy)
+        else:
+          self.preferredWidth(child, pendingByParent)
+      childWidth = max(childWidth, 0.0)
+      var childHeight =
+        if child.heightPolicy.kind == WidgetFill or child.stretchHeight:
+          availableHeight.clampPolicy(child.heightPolicy)
+        else:
+          self.preferredHeight(child, pendingByParent)
+      childHeight = max(childHeight, 0.0)
+      let alignment = child.directAlignment(pending.alignItems)
+      let x =
+        case alignment
+        of AlignCenter:
+          parentFrame.x + (parentFrame.width - childWidth) / 2.0
+        of AlignEnd:
+          parentFrame.x + parentFrame.width - pending.padding - childWidth
+        else:
+          parentFrame.x + pending.padding
+      let y =
+        case pending.justifyContent
+        of JustifyCenter:
+          parentFrame.y + (parentFrame.height - childHeight) / 2.0
+        of JustifyEnd:
+          parentFrame.y + parentFrame.height - pending.padding - childHeight
+        of JustifyStart:
+          parentFrame.y + pending.padding
+      child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
+      if pendingByParent.hasKey(child.id):
+        self.assignDirectStack(pendingByParent[child.id], pendingByParent)
 
 proc endLayout*(self: var UI): bool {.discardable.} =
   if self.frames.len == 1 and self.frames[0].children.len > 0:
@@ -794,7 +855,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
         scrollX = pending.scrollX,
-        scrollY = pending.scrollY,
+          scrollY = pending.scrollY,
       )
     of ColumnLayout:
       self.layout.column(
@@ -805,7 +866,15 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
         scrollX = pending.scrollX,
-        scrollY = pending.scrollY,
+          scrollY = pending.scrollY,
+      )
+    of OverlayLayout:
+      self.layout.overlay(
+        pending.parent,
+        pending.children,
+        padding = pending.padding,
+        alignItems = pending.alignItems,
+        justifyContent = pending.justifyContent,
       )
 
   result = self.layout.solve()
@@ -1178,6 +1247,20 @@ proc column*(self: var UI, config: BoxConfig) {.layoutOnly.} =
     scrollY: config.scrollY,
   )
 
+proc overlay*(self: var UI, config: BoxConfig) {.layoutOnly.} =
+  let components = self.takeChildren()
+  self.pendingLayouts.add PendingLayout(
+    kind: OverlayLayout,
+    parent: self.currentParent(),
+    children: components,
+    gap: config.gap,
+    padding: config.padding,
+    alignItems: config.alignItems,
+    justifyContent: config.justifyContent,
+    scrollX: config.scrollX,
+    scrollY: config.scrollY,
+  )
+
 template row*(self: var UI, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
@@ -1197,6 +1280,16 @@ template column*(self: var UI, config: BoxConfig, body: untyped) =
       body
       discard
       self.column(config)
+
+template overlay*(self: var UI, config: BoxConfig, body: untyped) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      body
+      discard
+      self.overlay(config)
 
 template row*(
     self: var UI,
@@ -1236,6 +1329,26 @@ template column*(
       body
       discard
       self.column(config)
+      discard self.popLayout()
+
+template overlay*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("overlay", config))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.overlay(config)
       discard self.popLayout()
 
 template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyped) =
@@ -1329,6 +1442,94 @@ template dialogHeader*(
       self.row(config)
       discard self.popLayout()
 
+template table*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("table", config))
+      let component = TableView.new()
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.column(config)
+      discard self.popLayout()
+
+template tableHeader*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("tableHeader", config))
+      let component = TableHeaderView.new()
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.row(config)
+      discard self.popLayout()
+
+template tableRow*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("tableRow", config))
+      let component = TableRowView.new()
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.row(config)
+      discard self.popLayout()
+
+template tableCell*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("tableCell", config))
+      let component = TableCellView.new()
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.column(config)
+      discard self.popLayout()
+
 proc box*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget =
@@ -1360,12 +1561,16 @@ proc button*(
     label: string,
     width, height: SizePolicy,
     alignSelf = AlignAuto,
+    textScroll = false,
 ): bool {.discardable.} =
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("button:" & label, width, height, alignSelf))
-  let btn = Button.new(label)
+  ui.setRenderKey(id, renderKey("button:" & label & ":" & $textScroll, width, height, alignSelf))
+  if textScroll:
+    ui.markDirty(id)
+    ui.requestRedrawAfterSafe(33)
+  let btn = Button.new(label, textScroll)
   ui.attach(box, Component(btn))
   ui.addChild(box)
 
@@ -1385,10 +1590,14 @@ proc label*(
     width, height: SizePolicy,
     fontName = "font",
     alignSelf = AlignAuto,
+    textScroll = false,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("label:" & text & ":" & fontName, width, height, alignSelf))
-  let lbl = Label.new(text, fontName)
+  ui.setRenderKey(id, renderKey("label:" & text & ":" & fontName & ":" & $textScroll, width, height, alignSelf))
+  if textScroll:
+    ui.markDirty(id)
+    ui.requestRedrawAfterSafe(33)
+  let lbl = Label.new(text, fontName, textScroll = textScroll)
   ui.attach(box, Component(lbl))
   ui.addChild(box)
 
@@ -1427,6 +1636,34 @@ proc diagnosticLabel*(
   )
   let lbl = DiagnosticLabel.new(text, fontName, color, hasColor = true)
   ui.attach(box, Component(lbl))
+  ui.addChild(box)
+
+proc image*(
+    ui: var UI,
+    id: WidgetID,
+    path: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("image:" & path, width, height, alignSelf))
+  let img = ImageView.new(path)
+  ui.attach(box, Component(img))
+  ui.addChild(box)
+
+proc imageButton*(
+    ui: var UI,
+    id: WidgetID,
+    path: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  if ui.phase == EventPhase:
+    return ui.clicked(id)
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("imageButton:" & path, width, height, alignSelf))
+  let img = ImageButton.new(path)
+  ui.attach(box, Component(img))
   ui.addChild(box)
 
 proc lineInput*(

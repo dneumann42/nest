@@ -63,6 +63,7 @@ type
     submittedWidgets*: HashSet[WidgetID]
     dirtyWidgets*: HashSet[WidgetID]
     dirtyAll*: bool
+    ticks*: int
     palette*: Palette
 
   UpdateContext* = object

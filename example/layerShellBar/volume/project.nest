@@ -1,0 +1,6 @@
+title = "Volume"
+width = 260
+height = 170
+layerShell = "top-right"
+namespace = "nest-volume"
+exclusiveZone = -1

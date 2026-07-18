@@ -4,9 +4,9 @@ define:
   lastAction = ""
 
 fun startMenu lbl:  
-  button startID lbl:
-    width = fit
-    height = fit
+  imageButton startID "example/layerShellBar/assets/nomicon-small.bmp":
+    width = fixed 28
+    height = fixed 28
 
 fun dateTime:
   button clockID (clock "MMM d, yyyy   hh:mm:ss tt"):
@@ -20,6 +20,12 @@ fun defaultConfig:
 define:
   cfg = defaultConfig
 
+import "components/workspaces.nest"
+import "components/activeWindow.nest"
+import "components/volume.nest"
+import "components/metrics.nest"
+import "components/notifications.nest"
+
 events:
   when (and (clicked startID) (not (dialogOpen? "start"))):
     openDialog "start" "./startPopover" (dict-get cfg "start-label")
@@ -28,7 +34,8 @@ events:
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"
-  print (dialogResult "clock")
+  when (= lastAction "logout"):
+    closeDialog "logout"
 
 column (id "root"):
   width = fill
@@ -36,41 +43,46 @@ column (id "root"):
   alignItems = AlignStretch
   panel (id "bar"):
     width = fill
-    height = (fixed 36)
+    height = fixed 36
     padding = 6
     alignItems = AlignStretch
-    row (id "content"):
+    overlay (id "content"):
       width = fill
       height = fill
-      gap = 12
       alignItems = AlignCenter
-      row (id "left"):
-        width = (fixed 280)
-        height = fit
-        gap = 8
-        alignItems = AlignCenter
-        startMenu (dict-get cfg "start-label")
-        label (id "workspace") "1":
-          width = (fixed 24)
-          height = fit
-      row (id "center"):
+      row (id "bar-row"):
         width = fill
-        height = fit
+        height = fill
+        gap = 14
+        alignItems = AlignCenter
+        alignSelf = AlignStretch
+        row (id "left"):
+          width = fill
+          height = fit
+          gap = 14
+          alignItems = AlignCenter
+          startMenu (dict-get cfg "start-label")
+          workspaces "bar"
+          activeWindow "bar"
+        spacer (id "clock-reserve"):
+          width = fixed 260
+          height = fit
+        row (id "right"):
+          width = fill
+          height = fit
+          gap = 14
+          alignItems = AlignCenter
+          justifyContent = JustifyEnd
+          volumeWidget "bar"
+          cpuMeter "bar"
+          memoryMeter "bar"
+          storageMeter "bar"
+          notificationWidget "bar"
+          networkMeter "bar"
+      row (id "clock-center"):
+        width = fill
+        height = fill
         alignItems = AlignCenter
         justifyContent = JustifyCenter
-	dateTime
-      row (id "right"):
-        width = (fixed 280)
-        height = fit
-        gap = 10
-        alignItems = AlignCenter
-        justifyContent = JustifyEnd
-        label (id "network") "NET":
-          width = fit
-          height = fit
-        label (id "volume") "VOL 72%":
-          width = fit
-          height = fit
-        label (id "battery") "BAT 86%":
-          width = fit
-          height = fit
+        alignSelf = AlignStretch
+        dateTime

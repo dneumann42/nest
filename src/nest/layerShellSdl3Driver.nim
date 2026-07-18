@@ -763,6 +763,11 @@ proc sdlWaitEvent(e: var input.Event; timeoutMs: int;
 
 proc sdlGetTicks(): int = sdl3.getTicks().int
 proc sdlDelay(ms: int) = sdl3.delay(ms.uint32)
+proc wakeEventLoop*() {.gcsafe, raises: [].} =
+  var event: sdl3.Event
+  event.user.`type` = uint32(EVENT_USER)
+  discard pushEvent(event)
+
 proc sdlQuitRequest() =
   if win != nil:
     discard stopTextInput(win)

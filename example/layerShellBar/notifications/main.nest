@@ -1,0 +1,55 @@
+import "components/notifications.nest"
+
+define:
+  closeID = (id "notifications" "close")
+  clearID = (id "notifications" "clear")
+  restoreID = (id "notifications" "restore")
+  rows = (textLines (shellAsync (id "notifications" "list-query") (notificationListCommand) 1000))
+
+events:
+  when (keyPressed "escape"):
+    closeDialog ""
+  when (clicked closeID):
+    closeDialog ""
+  when (clicked clearID):
+    shellAsync (id "notifications" "clear-action") (notificationClearCommand) 0
+  when (clicked restoreID):
+    shellAsync (id "notifications" "restore-action") "makoctl restore" 0
+
+card (id "notifications" "panel"):
+  width = fill
+  height = fill
+  padding = 10
+  gap = 8
+  alignItems = AlignStretch
+  dialogHeader (id "notifications" "header"):
+    width = fill
+    height = fixed 32
+    padding = 8
+    alignItems = AlignCenter
+    label (id "notifications" "title") "Mailbox":
+      width = fill
+      height = fit
+    button closeID "x":
+      width = fixed 28
+      height = fit
+  column (id "notifications" "list"):
+    width = fill
+    height = fill
+    gap = 4
+    scrollY = true
+    for rowText (iter rows):
+      label (id "notifications" "row" rowText) rowText:
+        width = fill
+        height = fit
+        textScroll = true
+  row (id "notifications" "actions"):
+    width = fill
+    height = fit
+    gap = 8
+    button restoreID "Restore latest":
+      width = fill
+      height = fit
+    button clearID "Empty mailbox":
+      width = fill
+      height = fit

@@ -1,4 +1,4 @@
-import std/[tables]
+import std/[os, tables, times]
 import uirelays/[coords, screen]
 export coords, screen
 
@@ -12,12 +12,18 @@ type
     resources: TableRef[string, int]
     fontMetrics: TableRef[string, FontMetrics]
     textMeasurements: TableRef[string, TextMeasurement]
+    images: TableRef[string, Image]
+    imageMeasurements: TableRef[string, TextExtent]
+    imageTimes: TableRef[string, Time]
 
 proc new*(T: typedesc[Resources]): T =
   T(
     fontMetrics: newTable[string, FontMetrics](),
     resources: newTable[string, int](),
     textMeasurements: newTable[string, TextMeasurement](),
+    images: newTable[string, Image](),
+    imageMeasurements: newTable[string, TextExtent](),
+    imageTimes: newTable[string, Time](),
   )
 
 proc loadFont*(resources: Resources, name, path: string, size: Positive) =
@@ -51,3 +57,24 @@ proc measureText*(resources: Resources, fontName, text: string): TextMeasurement
     lineHeight: metrics.lineHeight,
   )
   resources.textMeasurements[key] = result
+
+proc loadImage*(resources: Resources, path: string): Image =
+  if path.len == 0:
+    return Image(0)
+  let modified =
+    try:
+      getLastModificationTime(path)
+    except OSError:
+      Time()
+  if resources.images.hasKey(path) and resources.imageTimes.getOrDefault(path) == modified:
+    return resources.images[path]
+  if resources.images.hasKey(path):
+    screen.freeImage(resources.images[path])
+  result = screen.loadImage(path)
+  resources.images[path] = result
+  resources.imageMeasurements[path] = screen.imageSize(result)
+  resources.imageTimes[path] = modified
+
+proc measureImage*(resources: Resources, path: string): TextExtent =
+  discard resources.loadImage(path)
+  resources.imageMeasurements.getOrDefault(path)

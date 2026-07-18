@@ -1,0 +1,9 @@
+component activeWindow key:
+  define:
+    keyText = (eval key)
+    title = (swayActiveWindowSubscription (id keyText "active-window-query"))
+
+  label (id keyText "active-window") title:
+    width = fill
+    height = fit
+    textScroll = true

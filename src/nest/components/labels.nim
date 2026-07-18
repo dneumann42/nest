@@ -1,12 +1,13 @@
 import ../[resources, widgets2]
 import component
-import uirelays/screen
+import uirelays/[coords, screen]
 
 type Label* = ref object of Component
   text: string
   fontName: string
   hasColor: bool
   fg: Color
+  textScroll: bool
 
 type DiagnosticLabel* = ref object of Interactive
   text: string
@@ -14,8 +15,15 @@ type DiagnosticLabel* = ref object of Interactive
   hasColor: bool
   fg: Color
 
-proc new*(T: typedesc[Label], text = "", fontName = "font", fg = color(0, 0, 0, 0), hasColor = false): T =
-  T(text: text, fontName: fontName, fg: fg, hasColor: hasColor)
+proc new*(
+    T: typedesc[Label],
+    text = "",
+    fontName = "font",
+    fg = color(0, 0, 0, 0),
+    hasColor = false,
+    textScroll = false,
+): T =
+  T(text: text, fontName: fontName, fg: fg, hasColor: hasColor, textScroll: textScroll)
 
 proc new*(T: typedesc[DiagnosticLabel], text = "", fontName = "font", fg = color(0, 0, 0, 0), hasColor = false): T =
   T(text: text, fontName: fontName, fg: fg, hasColor: hasColor)
@@ -42,14 +50,28 @@ method draw*(self: Label, widget: Widget, ctx: DrawContext) =
   let
     f = widget.frame
     (font, _) = ctx.resources.get(self.fontName)
-  discard drawText(
-    Font(font),
-    f.x.toInt,
-    f.y.toInt,
-    self.text,
-    if self.hasColor: self.fg else: ctx.palette.textColor,
-    color(0, 0, 0, 0), #ctx.palette.panelBackground,
-  )
+    fg = if self.hasColor: self.fg else: ctx.palette.textColor
+    textExtent = ctx.resources.measureText(self.fontName, self.text)
+    textWidth = max(f.width.toInt, 0)
+  if self.textScroll and textExtent.width > textWidth and textWidth > 0:
+    let
+      gap = 32
+      cycle = textExtent.width + gap
+      offset = (ctx.ticks div 24) mod cycle
+    saveState()
+    setClipRect(rect(f.x.toInt, f.y.toInt, textWidth, f.height.toInt))
+    discard drawText(Font(font), f.x.toInt - offset, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
+    discard drawText(Font(font), f.x.toInt - offset + cycle, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
+    restoreState()
+  else:
+    discard drawText(
+      Font(font),
+      f.x.toInt,
+      f.y.toInt,
+      self.text,
+      fg,
+      color(0, 0, 0, 0),
+    )
 
 method draw*(self: DiagnosticLabel, widget: Widget, ctx: DrawContext) =
   let

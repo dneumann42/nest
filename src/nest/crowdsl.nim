@@ -1,4 +1,4 @@
-import std/[os, osproc, streams, strformat, strutils, tables, times]
+import std/[json, locks, os, osproc, streams, strformat, strutils, tables, times]
 
 import crow
 import ui
@@ -19,12 +19,33 @@ type
 
   DialogProcess = ref object
     process: Process
+    resultPath: string
+
+  ShellProcess = ref object
+    process: Process
+
+  ShellCache = object
+    output: string
+    ticks: int
+
+  WorkspaceSubscription = ref object
+    lock: Lock
+    thread: Thread[WorkspaceSubscription]
+    process: Process
+    output: string
+    generation: int
+    stopping: bool
+    event: string
+    query: string
 
   NestCrowRuntime* = ref object
     evaluator*: Evaluator
     loadedFiles*: Table[string, Time]
     dialogProcesses*: Table[string, DialogProcess]
     dialogResults*: Table[string, string]
+    shellProcesses*: Table[string, ShellProcess]
+    shellCache*: Table[string, ShellCache]
+    workspaceSubscriptions*: Table[string, WorkspaceSubscription]
     dialogData*: string
     dialogCloseValue*: string
     requestQuit*: bool
@@ -150,6 +171,8 @@ proc evalConfig(env: Environment; body: seq[SyntaxNode]): BoxConfig {.raises: [E
       result.scrollX = value.isTruthy
     of "scrollY":
       result.scrollY = value.isTruthy
+    of "textScroll":
+      result.textScroll = value.isTruthy
     else:
       discard
 
@@ -227,6 +250,300 @@ proc requestRedrawAfter(runtime: NestCrowRuntime, ms: int) {.raises: [EvaluatorE
   except Exception:
     discard
 
+proc shellOutput(command: string): string {.raises: [].} =
+  try:
+    result = execProcess("sh", args = @["-c", command], options = {poUsePath}).strip
+  except OSError:
+    result = ""
+  except IOError:
+    result = ""
+
+proc shellSingleQuote(value: string): string {.raises: [].} =
+  "'" & value.replace("'", "'\\''") & "'"
+
+proc workspaceField(node: JsonNode; name: string; fallback = ""): string {.raises: [].} =
+  try:
+    if node.kind == JObject and node.hasKey(name):
+      let field = node[name]
+      if field.kind == JString:
+        return field.getStr
+      if field.kind in {JInt, JFloat, JBool}:
+        return $field
+  except KeyError:
+    discard
+  fallback
+
+proc workspaceBoolField(node: JsonNode; name: string): bool {.raises: [].} =
+  try:
+    node.kind == JObject and node.hasKey(name) and node[name].kind == JBool and node[name].getBool
+  except KeyError:
+    false
+
+proc workspaceNumField(node: JsonNode; name: string): float64 {.raises: [].} =
+  try:
+    if node.kind == JObject and node.hasKey(name):
+      let field = node[name]
+      if field.kind == JInt:
+        return field.getInt.float64
+      if field.kind == JFloat:
+        return field.getFloat
+  except KeyError:
+    discard
+  0
+
+proc parseSwayWorkspaceValues(output: string): Value {.raises: [].} =
+  var items: seq[Value]
+  try:
+    let root = parseJson(output)
+    if root.kind != JArray:
+      return list(items)
+    for node in root.items:
+      if node.kind != JObject:
+        continue
+      var entry = initTable[string, Value]()
+      entry["name"] = text(workspaceField(node, "name"))
+      entry["num"] = number(workspaceNumField(node, "num"))
+      entry["focused"] = boolean(workspaceBoolField(node, "focused"))
+      entry["visible"] = boolean(workspaceBoolField(node, "visible"))
+      entry["urgent"] = boolean(workspaceBoolField(node, "urgent"))
+      items.add dictionary(entry)
+  except JsonParsingError:
+    discard
+  except ValueError:
+    discard
+  except IOError:
+    discard
+  except OSError:
+    discard
+  list(items)
+
+type RuntimeWakeProc = proc() {.gcsafe, raises: [].}
+
+var runtimeWake*: RuntimeWakeProc = proc() {.gcsafe, raises: [].} =
+  discard
+
+proc wakeRuntimeUi() {.gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    runtimeWake()
+
+proc stopRequested(subscription: WorkspaceSubscription): bool {.raises: [].} =
+  withLock subscription.lock:
+    result = subscription.stopping
+
+proc setWorkspaceProcess(subscription: WorkspaceSubscription; process: Process) {.raises: [].} =
+  withLock subscription.lock:
+    subscription.process = process
+
+proc clearWorkspaceProcess(subscription: WorkspaceSubscription; process: Process) {.raises: [].} =
+  withLock subscription.lock:
+    if subscription.process == process:
+      subscription.process = nil
+
+proc publishWorkspaceOutput(subscription: WorkspaceSubscription; output: string) {.raises: [].} =
+  var changed = false
+  withLock subscription.lock:
+    if subscription.output != output:
+      subscription.output = output
+      inc subscription.generation
+      changed = true
+  if changed:
+    wakeRuntimeUi()
+
+proc currentWorkspaceOutput(subscription: WorkspaceSubscription): string {.raises: [].} =
+  withLock subscription.lock:
+    result = subscription.output
+
+proc focusedTreeTitle(node: JsonNode): string {.raises: [].} =
+  try:
+    if node.kind != JObject:
+      return ""
+    if node.hasKey("focused") and node["focused"].kind == JBool and node["focused"].getBool:
+      if node.hasKey("name") and node["name"].kind == JString:
+        return node["name"].getStr
+      return ""
+    for field in ["nodes", "floating_nodes"]:
+      if node.hasKey(field) and node[field].kind == JArray:
+        for child in node[field].items:
+          let title = focusedTreeTitle(child)
+          if title.len > 0:
+            return title
+  except KeyError:
+    discard
+  ""
+
+proc querySwayJson(kind: string): string {.raises: [].} =
+  try:
+    let output = execProcess("swaymsg", args = @["-t", kind, "-r"], options = {poUsePath}).strip
+    if kind != "get_tree":
+      return output
+    result =
+      try:
+        focusedTreeTitle(parseJson(output))
+      except JsonParsingError:
+        ""
+      except ValueError:
+        ""
+      except IOError:
+        ""
+      except OSError:
+        ""
+  except OSError:
+    result = ""
+  except IOError:
+    result = ""
+
+proc runWorkspaceSubscription(subscription: WorkspaceSubscription) {.thread.} =
+  while not subscription.stopRequested:
+    subscription.publishWorkspaceOutput(querySwayJson(subscription.query))
+    if subscription.stopRequested:
+      break
+
+    var process: Process
+    try:
+      process = startProcess(
+        "swaymsg",
+        args = @["-t", "subscribe", "-m", "[\"" & subscription.event & "\"]"],
+        options = {poUsePath, poStdErrToStdOut},
+      )
+      subscription.setWorkspaceProcess(process)
+      let stream = process.outputStream
+      while not subscription.stopRequested:
+        let line =
+          try:
+            stream.readLine()
+          except IOError:
+            break
+        if line.len == 0 and not process.running:
+          break
+        subscription.publishWorkspaceOutput(querySwayJson(subscription.query))
+    except OSError:
+      discard
+    except IOError:
+      discard
+    finally:
+      if process != nil:
+        subscription.clearWorkspaceProcess(process)
+        try:
+          if process.running:
+            process.terminate
+          process.close
+        except OSError:
+          discard
+        except IOError:
+          discard
+
+    if not subscription.stopRequested:
+      os.sleep(1000)
+
+proc startWorkspaceSubscription(event, query: string): WorkspaceSubscription {.raises: [].} =
+  try:
+    result = WorkspaceSubscription(event: event, query: query, output: querySwayJson(query))
+    initLock(result.lock)
+    createThread(result.thread, runWorkspaceSubscription, result)
+  except CatchableError:
+    result = nil
+
+proc stopWorkspaceSubscription(subscription: WorkspaceSubscription) {.raises: [].} =
+  var process: Process
+  withLock subscription.lock:
+    subscription.stopping = true
+    process = subscription.process
+  if process != nil:
+    try:
+      if process.running:
+        process.terminate
+    except OSError:
+      discard
+
+  try:
+    joinThread(subscription.thread)
+  except Exception:
+    discard
+  deinitLock(subscription.lock)
+
+proc subscribedSwayWorkspaces(runtime: NestCrowRuntime; key: string): Value {.raises: [].} =
+  let subscriptionKey = "workspace:" & key
+  if subscriptionKey notin runtime.workspaceSubscriptions:
+    let subscription = startWorkspaceSubscription("workspace", "get_workspaces")
+    if subscription == nil:
+      return list(@[])
+    runtime.workspaceSubscriptions[subscriptionKey] = subscription
+  let subscription = runtime.workspaceSubscriptions.getOrDefault(subscriptionKey)
+  if subscription == nil:
+    return list(@[])
+  parseSwayWorkspaceValues(subscription.currentWorkspaceOutput())
+
+proc subscribedSwayActiveWindow(runtime: NestCrowRuntime; key: string): string {.raises: [].} =
+  let subscriptionKey = "window:" & key
+  if subscriptionKey notin runtime.workspaceSubscriptions:
+    let subscription = startWorkspaceSubscription("window", "get_tree")
+    if subscription == nil:
+      return ""
+    runtime.workspaceSubscriptions[subscriptionKey] = subscription
+  let subscription = runtime.workspaceSubscriptions.getOrDefault(subscriptionKey)
+  if subscription == nil:
+    return ""
+  subscription.currentWorkspaceOutput()
+
+proc currentTicks(): int {.raises: [].} =
+  try:
+    input.getTicks()
+  except Exception:
+    0
+
+proc pollShellProcesses*(runtime: NestCrowRuntime; ui: var UI) =
+  var finished: seq[string]
+  for key, shell in runtime.shellProcesses.pairs:
+    if not shell.process.running:
+      let output = shell.process.outputStream.readAll.strip
+      if runtime.shellCache.getOrDefault(key).output != output:
+        ui.markAllDirty()
+      runtime.shellCache[key] = ShellCache(output: output, ticks: currentTicks())
+      shell.process.close
+      finished.add key
+  for key in finished:
+    runtime.shellProcesses.del key
+
+proc closeShellProcesses*(runtime: NestCrowRuntime) =
+  for shell in runtime.shellProcesses.values:
+    if shell.process.running:
+      shell.process.terminate
+    shell.process.close
+  runtime.shellProcesses.clear()
+
+proc closeWorkspaceSubscriptions*(runtime: NestCrowRuntime) =
+  for subscription in runtime.workspaceSubscriptions.values:
+    subscription.stopWorkspaceSubscription()
+  runtime.workspaceSubscriptions.clear()
+
+proc asyncShellOutput(runtime: NestCrowRuntime; key, command: string; intervalMs: int): string {.raises: [].} =
+  let
+    nowTicks = currentTicks()
+    cache = runtime.shellCache.getOrDefault(key)
+    stale = key notin runtime.shellCache or intervalMs <= 0 or nowTicks - cache.ticks >= intervalMs
+
+  if key notin runtime.shellProcesses and stale:
+    try:
+      runtime.shellProcesses[key] = ShellProcess(
+        process: startProcess(
+          "sh",
+          args = @["-c", command],
+          options = {poUsePath, poStdErrToStdOut},
+        )
+      )
+    except OSError:
+      discard
+    except IOError:
+      discard
+
+  if key in runtime.shellProcesses:
+    try:
+      runtime.requestRedrawAfter(50)
+    except Exception:
+      discard
+
+  runtime.shellCache.getOrDefault(key).output
+
 proc parseDateText(value: string): tuple[ok: bool, year, month, day: int] =
   let parts = value.split("-")
   if parts.len != 3:
@@ -261,6 +578,15 @@ proc addMonths(value: string; delta: int): string =
   let day = min(parsed.day, daysInMonth(year, month))
   dateText(year, month, day)
 
+proc dialogResultPath(key: string): string =
+  var safeKey: string
+  for ch in key:
+    if ch.isAlphaNumeric:
+      safeKey.add ch
+    else:
+      safeKey.add '-'
+  getTempDir() / ("nest-dialog-" & $getCurrentProcessId() & "-" & $currentTicks() & "-" & safeKey)
+
 proc launchDialogProcess(runtime: NestCrowRuntime; key, projectDir, data: string) {.raises: [EvaluatorError].} =
   if key in runtime.dialogProcesses:
     return
@@ -271,25 +597,40 @@ proc launchDialogProcess(runtime: NestCrowRuntime; key, projectDir, data: string
       raise newException(EvaluatorError, projectDir & ": " & error.msg)
   if not dirExists(resolvedProjectDir):
     raise newException(EvaluatorError, "dialog project directory does not exist: " & resolvedProjectDir)
+  let resultPath = dialogResultPath(key)
   let process =
     try:
       startProcess(
         getAppFilename(),
-        args = @["dialog", resolvedProjectDir, data],
-        options = {poUsePath, poStdErrToStdOut},
+        args = @["dialog", resolvedProjectDir, data, resultPath],
+        options = {poUsePath, poParentStreams},
       )
     except OSError as error:
       raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
     except IOError as error:
       raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
-  runtime.dialogProcesses[key] = DialogProcess(process: process)
+  runtime.dialogProcesses[key] = DialogProcess(process: process, resultPath: resultPath)
 
 proc pollDialogProcesses*(runtime: NestCrowRuntime) =
   var finished: seq[string]
   for key, dialog in runtime.dialogProcesses.pairs:
     if not dialog.process.running:
-      let output = dialog.process.outputStream.readAll.strip
+      let output =
+        try:
+          if fileExists(dialog.resultPath):
+            readFile(dialog.resultPath).strip
+          else:
+            ""
+        except OSError:
+          ""
+        except IOError:
+          ""
       runtime.dialogResults[key] = output
+      try:
+        if fileExists(dialog.resultPath):
+          removeFile(dialog.resultPath)
+      except OSError:
+        discard
       dialog.process.close
       finished.add key
   for key in finished:
@@ -299,8 +640,15 @@ proc closeDialogProcesses*(runtime: NestCrowRuntime) =
   for dialog in runtime.dialogProcesses.values:
     if dialog.process.running:
       dialog.process.terminate
+    try:
+      if fileExists(dialog.resultPath):
+        removeFile(dialog.resultPath)
+    except OSError:
+      discard
     dialog.process.close
   runtime.dialogProcesses.clear()
+  runtime.closeShellProcesses()
+  runtime.closeWorkspaceSubscriptions()
 
 proc crowErrorLines*(message: string; maxLineLen = 68; maxLines = 7): seq[string] =
   for rawLine in message.splitLines:
@@ -544,6 +892,89 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     runtime.requestRedrawAfter(60 * 60 * 1000)
     text(now().format("yyyy-MM-dd"))
 
+  runtime.evaluator.native "redrawAfter":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "redrawAfter expects milliseconds")
+    runtime.requestRedrawAfter(values[0].asNumber.int)
+    nothing()
+
+  runtime.evaluator.native "shell":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "shell expects one command")
+    text(shellOutput(values[0].asString))
+
+  runtime.evaluator.native "shellAsync":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len < 2 or values.len > 3:
+      raise newException(EvaluatorError, "shellAsync expects key, command, and optional interval milliseconds")
+    let intervalMs =
+      if values.len == 3:
+        values[2].asNumber.int
+      else:
+        0
+    text(runtime.asyncShellOutput(values[0].asString, values[1].asString, intervalMs))
+
+  runtime.evaluator.native "swayWorkspaces":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "swayWorkspaces expects swaymsg JSON output")
+    parseSwayWorkspaceValues(values[0].asString)
+
+  runtime.evaluator.native "swayWorkspaceSubscription":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "swayWorkspaceSubscription expects one key")
+    runtime.subscribedSwayWorkspaces(values[0].asString)
+
+  runtime.evaluator.native "swayActiveWindowSubscription":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "swayActiveWindowSubscription expects one key")
+    text(runtime.subscribedSwayActiveWindow(values[0].asString))
+
+  runtime.evaluator.native "swayWorkspaceCommand":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "swayWorkspaceCommand expects one workspace name")
+    text("swaymsg workspace " & shellSingleQuote(values[0].asString))
+
+  runtime.evaluator.native "string":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    var output: string
+    for value in values:
+      output.add value.asString
+    text(output)
+
+  runtime.evaluator.native "textLines":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "textLines expects one text value")
+    var items: seq[Value]
+    for line in values[0].asString.splitLines:
+      if line.len > 0:
+        items.add text(line)
+    list(items)
+
   runtime.evaluator.native "date":
     discard layout
     discard bodyNodes
@@ -769,6 +1200,46 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
+  runtime.evaluator.native "table":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].table(id, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "tableHeader":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].tableHeader(id, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "tableRow":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].tableRow(id, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "tableCell":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].tableCell(id, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    nothing()
+
   runtime.evaluator.native "row":
     discard layout
     let values = env.evalArgs(arguments)
@@ -786,6 +1257,16 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].column(id, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "overlay":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].overlay(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
@@ -809,7 +1290,14 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         ""
     let config = env.evalConfig(bodyNodes)
-    runtime.currentUi[].label(id, labelText, config.width, config.height, alignSelf = config.alignSelf)
+    runtime.currentUi[].label(
+      id,
+      labelText,
+      config.width,
+      config.height,
+      alignSelf = config.alignSelf,
+      textScroll = config.textScroll,
+    )
     nothing()
 
   runtime.evaluator.native "button":
@@ -823,7 +1311,43 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         ""
     let config = env.evalConfig(bodyNodes)
-    boolean(runtime.currentUi[].button(id, labelText, config.width, config.height, config.alignSelf))
+    boolean(
+      runtime.currentUi[].button(
+        id,
+        labelText,
+        config.width,
+        config.height,
+        config.alignSelf,
+        textScroll = config.textScroll,
+      )
+    )
+
+  runtime.evaluator.native "image":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let path =
+      if values.len > 1:
+        values[1].asString
+      else:
+        ""
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].image(id, path, config.width, config.height, config.alignSelf)
+    nothing()
+
+  runtime.evaluator.native "imageButton":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let path =
+      if values.len > 1:
+        values[1].asString
+      else:
+        ""
+    let config = env.evalConfig(bodyNodes)
+    boolean(runtime.currentUi[].imageButton(id, path, config.width, config.height, config.alignSelf))
 
   runtime.evaluator.env.define("AlignAuto", alignValue(AlignAuto))
   runtime.evaluator.env.define("AlignStart", alignValue(AlignStart))
@@ -839,6 +1363,9 @@ proc init*(T: typedesc[NestCrowRuntime]): T =
     evaluator: Evaluator.init(),
     dialogProcesses: initTable[string, DialogProcess](),
     dialogResults: initTable[string, string](),
+    shellProcesses: initTable[string, ShellProcess](),
+    shellCache: initTable[string, ShellCache](),
+    workspaceSubscriptions: initTable[string, WorkspaceSubscription](),
   )
   result.registerNestCommands()
 
@@ -857,6 +1384,8 @@ proc dependenciesChanged*(runtime: NestCrowRuntime): bool =
       return true
 
 proc reload*(app: NestCrowApp): bool {.discardable.} =
+  if app.runtime != nil:
+    app.runtime.closeDialogProcesses()
   app.runtime = NestCrowRuntime.init()
   app.runtime.loadedFiles.clear()
   try:
@@ -875,6 +1404,7 @@ proc init*(T: typedesc[NestCrowApp]; rootPath: string): T =
 proc render*(runtime: NestCrowRuntime; ui: var UI; program: SyntaxNode) =
   if program.isNil:
     return
+  runtime.pollShellProcesses(ui)
   runtime.pollDialogProcesses()
   runtime.hasError = false
   runtime.lastError = ""
@@ -929,6 +1459,7 @@ proc renderLayoutOnly*(
 ) =
   if program.isNil:
     return
+  runtime.pollShellProcesses(ui)
   runtime.pollDialogProcesses()
   runtime.hasError = false
   runtime.lastError = ""

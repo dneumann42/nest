@@ -9,9 +9,10 @@ const
 
 type Button* = ref object of Interactive
   label: string
+  textScroll: bool
 
-proc new*(T: typedesc[Button], label = ""): T =
-  T(label: label)
+proc new*(T: typedesc[Button], label = "", textScroll = false): T =
+  T(label: label, textScroll: textScroll)
 
 method measure*(self: Button, resources: Resources): IntrinsicSize =
   let measurement = resources.measureText("font", self.label)
@@ -46,12 +47,28 @@ method draw*(self: Button, widget: Widget, ctx: DrawContext) =
     else:
       ctx.palette.background,
   )
-  let (font, _) = ctx.resources.get("font")
-  discard drawText(
-    Font(font),
-    f.x.toInt + ButtonPaddingX,
-    f.y.toInt + ButtonPaddingY,
-    self.label,
-    ctx.palette.textColor,
-    color(0, 0, 0, 0),
-  )
+  let
+    (font, _) = ctx.resources.get("font")
+    textExtent = ctx.resources.measureText("font", self.label)
+    textX = f.x.toInt + ButtonPaddingX
+    textY = f.y.toInt + ButtonPaddingY
+    textWidth = max(f.width.toInt - ButtonPaddingX * 2, 0)
+  if self.textScroll and textExtent.width > textWidth and textWidth > 0:
+    let
+      gap = 32
+      cycle = textExtent.width + gap
+      offset = (ctx.ticks div 24) mod cycle
+    saveState()
+    setClipRect(rect(textX, f.y.toInt, textWidth, f.height.toInt))
+    discard drawText(Font(font), textX - offset, textY, self.label, ctx.palette.textColor, color(0, 0, 0, 0))
+    discard drawText(Font(font), textX - offset + cycle, textY, self.label, ctx.palette.textColor, color(0, 0, 0, 0))
+    restoreState()
+  else:
+    discard drawText(
+      Font(font),
+      textX,
+      textY,
+      self.label,
+      ctx.palette.textColor,
+      color(0, 0, 0, 0),
+    )

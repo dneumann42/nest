@@ -107,6 +107,7 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
     initLayerShellSdl3Driver()
   else:
     initBackend()
+  crowdsl.runtimeWake = layerShellSdl3Driver.wakeEventLoop
   result = createWindow(cfg.width, cfg.height)
   setWindowTitle(cfg.title)
 
@@ -235,6 +236,26 @@ proc appConfig(config: ProjectConfig): AppConfig =
           keyboard: KeyboardOnDemand,
         )
       )
+  of "top-right", "topright":
+    AppConfig
+      .init(
+        width = positive(config.width),
+        height = positive(config.height),
+        title = config.title,
+      )
+      .layerShell(
+        LayerShellConfig(
+          namespace: config.namespace,
+          layer: LayerTop,
+          anchors: {EdgeTop, EdgeRight},
+          exclusiveZone: config.exclusiveZone.int32,
+          marginTop: config.marginTop.int32,
+          marginRight: config.marginRight.int32,
+          marginBottom: config.marginBottom.int32,
+          marginLeft: config.marginLeft.int32,
+          keyboard: KeyboardOnDemand,
+        )
+      )
   of "top-center", "top-middle", "topcenter", "topmiddle":
     AppConfig
       .init(
@@ -351,7 +372,10 @@ proc textFromEvent(chars: array[4, char]): string =
     result.add(ch)
 
 proc handleEvent(
-    e: Event, running: var bool, updateContext: var UpdateContext, drawContext: var DrawContext
+    e: Event,
+    running: var bool,
+    updateContext: var UpdateContext,
+    drawContext: var DrawContext,
 ) =
   case e.kind
   of QuitEvent, WindowCloseEvent:
@@ -545,6 +569,7 @@ template application*(cfg: AppConfig, blk: untyped) =
       handleEvent(e, running, updateContext, drawContext)
     while pollEvent(e, inputFlags):
       handleEvent(e, running, updateContext, drawContext)
+    drawContext.ticks = input.getTicks()
     blk
     updateContext.mouseLeftPressed = false
     refresh()
@@ -582,6 +607,7 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
       handleEvent(e, running, ui)
     while pollEvent(e, inputFlags):
       handleEvent(e, running, ui)
+    ui.setDrawTicks(input.getTicks())
     blk
     ui.finishInputFrame()
     if ui.redrewFrame():
@@ -599,7 +625,9 @@ proc runCrowErrorDialog(message: string) =
   ), ui:
     drawCrowErrorDialog(ui, message, copied, running)
 
-proc runProject(projectDir: string, dialogData = "", dialogMode = false): string =
+proc runProject(
+    projectDir: string, dialogData = "", dialogMode = false, dialogResultPath = ""
+): string =
   discard dialogMode
   let dir = projectDir.normalizedPath
   if not dirExists(dir):
@@ -647,8 +675,15 @@ proc main() =
         args[2]
       else:
         ""
-    let value = runProject(args[1], dialogData = data, dialogMode = true)
-    if value.len > 0:
+    let resultPath =
+      if args.len >= 4:
+        args[3]
+      else:
+        ""
+    let value = runProject(args[1], dialogData = data, dialogMode = true, dialogResultPath = resultPath)
+    if resultPath.len > 0:
+      writeFile(resultPath, value)
+    elif value.len > 0:
       echo value
   of "error-dialog":
     if args.len < 2:

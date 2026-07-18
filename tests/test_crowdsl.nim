@@ -1,4 +1,4 @@
-import std/[tables, unittest]
+import std/[os, tables, unittest]
 
 import crow
 import nest/[crowdsl, resources, ui]
@@ -33,6 +33,29 @@ events:
 
     check runtime.get("count").kind == Number
     check runtime.get("count").number == 2
+
+  test "async shell output can refresh state after first render":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+    ui.loadFont("font", "", 18)
+
+    let source = """
+define:
+  value = ""
+set value (shellAsync "async-test" "printf ready" 1000)
+label (id "value") value:
+  width = fit
+  height = fit
+"""
+
+    for _ in 0 ..< 10:
+      runtime.render(ui, source)
+      if runtime.get("value").text == "ready":
+        break
+      os.sleep(20)
+
+    check runtime.get("value").text == "ready"
 
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays
@@ -181,8 +204,9 @@ panel (id "root"):
       drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
         TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
+    var app: NestCrowApp = nil
     try:
-      let app = NestCrowApp.init("example/layerShellBar/main.nest")
+      app = NestCrowApp.init("example/layerShellBar/main.nest")
       var ui = UI.init()
       ui.initContext(800, 36)
       ui.loadFont("font", "", 18)
@@ -194,10 +218,50 @@ panel (id "root"):
         check app.runtime.get("startID").kind == Native
         check app.runtime.get("clock").kind == Command
         check ui.widget(ui.id("bar")).frame.height == 36
-        check ui.widget(ui.id("left")).frame.width > 0
-        check ui.widget(ui.id("center")).frame.width > 0
+        check ui.widget(ui.id("content")).frame.width > 0
+        let clockFrame = ui.widget(ui.id("clock")).frame
+        check abs((clockFrame.x + clockFrame.width / 2) - 400) <= 2
         check ui.widget(ui.id("right")).frame.width > 0
+        check ui.widget(ui.id("bar", "active-window")).frame.width > 0
+        check ui.widget(ui.id("bar", "volume")).frame.width > 0
+        check ui.widget(ui.id("bar", "cpu")).frame.width > 0
+        check ui.widget(ui.id("bar", "memory")).frame.width > 0
+        check ui.widget(ui.id("bar", "storage")).frame.width > 0
+        check ui.widget(ui.id("bar", "notifications")).frame.width > 0
+        check ui.widget(ui.id("bar", "network")).frame.width > 0
+
+      let mediaApp = NestCrowApp.init("example/layerShellBar/media/main.nest")
+      var mediaUi = UI.init()
+      mediaUi.initContext(420, 560)
+      mediaUi.loadFont("font", "", 18)
+
+      mediaApp.runtime.renderLayoutOnly(mediaUi, mediaApp.program, 420, 560)
+
+      check mediaApp.runtime.lastError == ""
+      if mediaApp.runtime.lastError == "":
+        let artworkFrame = mediaUi.widget(mediaUi.id("media", "artwork")).frame
+        let tableFrame = mediaUi.widget(mediaUi.id("media", "metadata-table")).frame
+        check artworkFrame.height == 250
+        check tableFrame.width > 0
+        check tableFrame.x > artworkFrame.x + artworkFrame.width
+
+      for spec in [
+        ("example/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu", "panel")),
+        ("example/layerShellBar/volume/main.nest", 260, 170, ui.id("volume", "panel")),
+        ("example/layerShellBar/notifications/main.nest", 420, 260, ui.id("notifications", "panel")),
+      ]:
+        let (path, width, height, rootID) = spec
+        let dialogApp = NestCrowApp.init(path)
+        var dialogUi = UI.init()
+        dialogUi.initContext(width, height)
+        dialogUi.loadFont("font", "", 18)
+        dialogApp.runtime.renderLayoutOnly(dialogUi, dialogApp.program, width, height)
+        check dialogApp.runtime.lastError == ""
+        if dialogApp.runtime.lastError == "":
+          check dialogUi.widget(rootID).frame.width > 0
     finally:
+      if app != nil:
+        app.runtime.closeDialogProcesses()
       fontRelays = originalFontRelays
 
   test "dialog commands expose launch data and close value":
@@ -292,6 +356,22 @@ panel (id "root"):
     check runtime.evaluator.exec(parse("date-month-title 2026 7\n")).text == "July 2026"
     check runtime.evaluator.exec(parse("date-add-months \"2026-03-31\" -1\n")).text == "2026-02-28"
 
+  test "sway workspace intrinsics parse state and quote activation commands":
+    var runtime = NestCrowRuntime.init()
+
+    let parsed = runtime.evaluator.exec(parse("""
+swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"urgent\":false},{\"name\":\"dev's\",\"num\":2,\"focused\":false,\"visible\":false,\"urgent\":true}]"
+"""))
+
+    check parsed.kind == List
+    check parsed.items.len == 2
+    check parsed.items[0].entries["name"].text == "1"
+    check parsed.items[0].entries["num"].number == 1
+    check parsed.items[0].entries["focused"].boolean
+    check parsed.items[1].entries["urgent"].boolean
+    check runtime.evaluator.exec(parse("swayWorkspaceCommand \"dev's\"\n")).text ==
+      "swaymsg workspace 'dev'\\''s'"
+
   test "crow calendar component renders and selects previous month":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -320,6 +400,7 @@ import "lib/components/calendar.nest"
 dateSelector "cal" selectedDate
 """), 320, 320)
 
+      check runtime.lastError == ""
       check not runtime.hasError
       check ui.widget(ui.id("cal", "calendar")).frame.width > 0
       check ui.widget(ui.id("cal", "day", "18")).frame.width > 0
@@ -345,6 +426,50 @@ dateSelector "cal" selectedDate
 """))
 
       check runtime.get("selectedDate").text == "2026-06-18"
+    finally:
+      fontRelays = originalFontRelays
+
+  test "crow calendar component signals selected day clicks":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let runtime = NestCrowRuntime.init()
+      let dayID = UI.init().id("cal", "day", "18")
+      var ui = UI.init()
+      ui.initContext(320, 320)
+      ui.loadFont("font", "", 18)
+
+      runtime.evaluator.native "clicked":
+        discard layout
+        discard bodyNodes
+        if arguments.len == 0:
+          return boolean(false)
+        let value = env.eval(arguments[0])
+        boolean(value.kind == Native and value.native of WidgetIDValue and
+          WidgetIDValue(value.native).value == dayID)
+
+      runtime.render(ui, parse("""
+define:
+  selectedDate = "2026-07-18"
+  clickedDate = nothing
+import "lib/components/calendar.nest"
+dateSelectorWithSignal "cal" selectedDate clickedDate
+"""))
+
+      check runtime.get("selectedDate").text == "2026-07-18"
+      check runtime.get("clickedDate").text == "2026-07-18"
     finally:
       fontRelays = originalFontRelays
 
