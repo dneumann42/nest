@@ -1,0 +1,9 @@
+main = "main.nest"
+title = "Clock"
+width = 300
+height = 320
+layerShell = "top-center"
+namespace = "nest-layer-shell-clock-popover"
+exclusiveZone = 0
+marginTop = 0
+marginLeft = 0

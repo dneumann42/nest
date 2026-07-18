@@ -226,6 +226,22 @@ panel (id "root"):
     let cleared = runtime.evaluator.exec(parse("dialogResult \"start\"\n"))
     check cleared.kind == Nothing
 
+  test "crow events can test pressed keys":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(120, 80)
+    ui.loadFont("font", "", 18)
+    ui.keyDown(KeyEsc, {})
+
+    runtime.render(ui, parse("""
+events:
+  when (keyPressed "escape"):
+    closeDialog "closed"
+"""))
+
+    check runtime.requestQuit
+    check runtime.dialogCloseValue == "closed"
+
   test "openDialog reports missing child projects":
     var runtime = NestCrowRuntime.init()
 
@@ -250,3 +266,122 @@ panel (id "root"):
     check runtime.lastError.len > 0
     expect ValueError:
       discard ui.widget(errorDialogID)
+
+  test "diagnostic locations parse emacs-compatible report lines":
+    let primary = diagnosticLocation("/tmp/app/main.nest:12:7: error: missing field")
+    check primary.ok
+    check primary.path == "/tmp/app/main.nest"
+    check primary.line == 12
+    check primary.column == 7
+
+    let frame = diagnosticLocation("  at /tmp/app/main.nest:20:3 in render")
+    check frame.ok
+    check frame.path == "/tmp/app/main.nest"
+    check frame.line == 20
+    check frame.column == 3
+
+  test "date intrinsics expose minimal calendar math":
+    var runtime = NestCrowRuntime.init()
+
+    check runtime.evaluator.exec(parse("date 2026 7 18\n")).text == "2026-07-18"
+    check runtime.evaluator.exec(parse("date-year \"2026-07-18\"\n")).number == 2026
+    check runtime.evaluator.exec(parse("date-month \"2026-07-18\"\n")).number == 7
+    check runtime.evaluator.exec(parse("date-day \"2026-07-18\"\n")).number == 18
+    check runtime.evaluator.exec(parse("date-days-in-month 2024 2\n")).number == 29
+    check runtime.evaluator.exec(parse("date-first-weekday 2026 7\n")).number == 3
+    check runtime.evaluator.exec(parse("date-month-title 2026 7\n")).text == "July 2026"
+    check runtime.evaluator.exec(parse("date-add-months \"2026-03-31\" -1\n")).text == "2026-02-28"
+
+  test "crow calendar component renders and selects previous month":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(320, 320)
+      ui.loadFont("font", "", 18)
+
+      runtime.renderLayoutOnly(ui, parse("""
+define:
+  selectedDate = "2026-07-18"
+import "lib/components/calendar.nest"
+dateSelector "cal" selectedDate
+"""), 320, 320)
+
+      check not runtime.hasError
+      check ui.widget(ui.id("cal", "calendar")).frame.width > 0
+      check ui.widget(ui.id("cal", "day", "18")).frame.width > 0
+
+      let previousID = ui.id("cal", "previous-month")
+      var eventUi = UI.init()
+      eventUi.initContext(320, 320)
+      eventUi.loadFont("font", "", 18)
+      runtime.evaluator.native "clicked":
+        discard layout
+        discard bodyNodes
+        if arguments.len == 0:
+          return boolean(false)
+        let value = env.eval(arguments[0])
+        boolean(value.kind == Native and value.native of WidgetIDValue and
+          WidgetIDValue(value.native).value == previousID)
+
+      runtime.render(eventUi, parse("""
+define:
+  selectedDate = "2026-07-18"
+import "lib/components/calendar.nest"
+dateSelector "cal" selectedDate
+"""))
+
+      check runtime.get("selectedDate").text == "2026-06-18"
+    finally:
+      fontRelays = originalFontRelays
+
+  test "nim can render a crow-defined component":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let runtime = NestCrowRuntime.init()
+      runtime.evaluator.env.define("selectedDate", text("2026-07-18"))
+      var ui = UI.init()
+      ui.initContext(320, 320)
+      ui.loadFont("font", "", 18)
+
+      ui.beginLayout(320, 320)
+      runtime.renderComponent(
+        ui,
+        "lib/components/calendar.nest",
+        "dateSelector",
+        @[stringLiteral("nim-cal"), symbol("selectedDate")],
+      )
+      ui.applyIntrinsicSizes(ui.resources)
+      discard ui.endLayout()
+
+      check not runtime.hasError
+      check ui.widget(ui.id("nim-cal", "calendar")).frame.width > 0
+      check ui.widget(ui.id("nim-cal", "day", "18")).frame.width > 0
+    finally:
+      fontRelays = originalFontRelays

@@ -254,6 +254,24 @@ proc inEventPhase*(self: UI): bool =
 proc inLayoutPhase*(self: UI): bool =
   self.phase == LayoutPhase
 
+proc normalizedKeyName(value: string): string =
+  for ch in value:
+    if ch notin {'-', '_', ' '}:
+      result.add toLowerAscii(ch)
+
+proc keyPressed*(self: UI; name: string): bool =
+  if self.phase != EventPhase:
+    return false
+  let wanted = normalizedKeyName(name)
+  for input in self.context.update.keyInputs:
+    let keyName = normalizedKeyName($input.key)
+    if keyName == wanted or keyName == "key" & wanted:
+      return true
+    if wanted == "escape" and keyName == "keyesc":
+      return true
+    if wanted == "esc" and keyName == "keyesc":
+      return true
+
 proc listKey*(index: int, value: string): string =
   $index & ":" & value
 
@@ -1233,6 +1251,37 @@ proc label*(
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   let lbl = Label.new(text, fontName)
+  ui.attach(box, Component(lbl))
+  ui.addChild(box)
+
+proc coloredLabel*(
+    ui: var UI,
+    id: WidgetID,
+    text: string,
+    color: Color,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  let lbl = Label.new(text, fontName, color, hasColor = true)
+  ui.attach(box, Component(lbl))
+  ui.addChild(box)
+
+proc diagnosticLabel*(
+    ui: var UI,
+    id: WidgetID,
+    text: string,
+    color: Color,
+    width, height: SizePolicy,
+    clickable = false,
+    fontName = "font",
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  if ui.phase == EventPhase:
+    return clickable and ui.clicked(id)
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  let lbl = DiagnosticLabel.new(text, fontName, color, hasColor = true)
   ui.attach(box, Component(lbl))
   ui.addChild(box)
 

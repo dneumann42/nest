@@ -6,4 +6,4 @@ layerShell = "top-left"
 namespace = "nest-layer-shell-start-popover"
 exclusiveZone = 0
 marginTop = 0
-marginLeft = 6
+marginLeft = 0

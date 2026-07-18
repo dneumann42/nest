@@ -1,9 +1,15 @@
 define:
   startID = (id "start")
+  clockID = (id "clock")
   lastAction = ""
 
 fun startMenu lbl:  
   button startID lbl:
+    width = fit
+    height = fit
+
+fun dateTime:
+  button clockID (clock "MMM d, yyyy   hh:mm tt"):
     width = fit
     height = fit
 
@@ -15,9 +21,10 @@ define:
   cfg = defaultConfig
 
 events:
-  when (clicked startID):
-    when (not (dialogOpen? "start")):
-      openDialog "start" "./startPopover" (dict-get cfg "start-label")
+  when (and (clicked startID) (not (dialogOpen? "start"))):
+    openDialog "start" "./startPopover" (dict-get cfg "start-label")
+  when (and (clicked clockID) (not (dialogOpen? "clock"))):
+    openDialog "clock" "./clock" ""
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"
@@ -45,15 +52,12 @@ column (id "root"):
         label (id "workspace") "1":
           width = (fixed 24)
           height = fit
-
       row (id "center"):
         width = fill
         height = fit
         alignItems = AlignCenter
         justifyContent = JustifyCenter
-        label (id "clock") (clock "ddd HH:mm"):
-          width = fit
-          height = fit
+	dateTime
       row (id "right"):
         width = (fixed 280)
         height = fit

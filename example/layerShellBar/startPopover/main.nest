@@ -5,6 +5,8 @@ define:
   logoutID = (id "logout")
 
 events:
+  when (keyPressed "escape"):
+    closeDialog ""
   when (clicked appsID):
     closeDialog "applications"
   when (clicked filesID):

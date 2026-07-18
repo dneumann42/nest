@@ -1,0 +1,30 @@
+define:
+  selectedDate = (today-date)
+
+import "components/calendar.nest"
+
+events:
+  when (keyPressed "escape"):
+    closeDialog ""
+
+card (id "start-popover"):
+  width = fill
+  height = fill
+  padding = 0
+  gap = 0
+  alignItems = AlignStretch
+  dialogHeader (id "start-popover" "header"):
+    width = fill
+    height = (fixed 32)
+    padding = 8
+    alignItems = AlignCenter
+    label (id "start-popover" "title") (clock "dddd, MMMM d"):
+      width = fit
+      height = fit
+  column (id "start-popover" "actions"):
+    width = fill
+    height = fit
+    padding = 8
+    gap = 6
+    alignItems = AlignStretch
+    dateSelector "clock-calendar" selectedDate

@@ -1,8 +1,8 @@
-import std/[os, osproc, streams, strutils, tables, times]
+import std/[os, osproc, streams, strformat, strutils, tables, times]
 
 import crow
 import ui
-import uirelays/input
+import uirelays/[input, screen]
 
 type
   WidgetIDValue* = ref object of NativeValue
@@ -43,6 +43,7 @@ type
     errorDialogMessage*: string
 
 proc init*(T: typedesc[NestCrowRuntime]): T
+proc renderNodes(runtime: NestCrowRuntime; env: Environment; nodes: seq[SyntaxNode]): Value
 proc renderNodes(runtime: NestCrowRuntime; nodes: seq[SyntaxNode]): Value
 
 proc widgetValue(id: WidgetID): Value =
@@ -165,15 +166,86 @@ proc currentDir(runtime: NestCrowRuntime): string =
 
 proc resolveModulePath(runtime: NestCrowRuntime; path: string): string =
   if path.isAbsolute:
-    path.normalizedPath
-  else:
-    (runtime.currentDir / path).normalizedPath
+    return path.normalizedPath
+
+  let local = (runtime.currentDir / path).normalizedPath
+  if fileExists(local) or dirExists(local):
+    return local
+
+  let library = (getCurrentDir() / "lib" / path).normalizedPath
+  if fileExists(library) or dirExists(library):
+    return library
+
+  (getCurrentDir() / path).normalizedPath
 
 proc rememberFile(runtime: NestCrowRuntime; path: string) =
   try:
     runtime.loadedFiles[path] = getLastModificationTime(path)
   except OSError:
     discard
+
+proc padInt(value, width: int): string =
+  result = $value
+  while result.len < width:
+    result = "0" & result
+
+proc leapYear(year: int): bool =
+  (year mod 4 == 0 and year mod 100 != 0) or year mod 400 == 0
+
+proc daysInMonth(year, month: int): int =
+  case month
+  of 1, 3, 5, 7, 8, 10, 12:
+    31
+  of 4, 6, 9, 11:
+    30
+  of 2:
+    if leapYear(year): 29 else: 28
+  else:
+    0
+
+proc weekday(year, month, day: int): int =
+  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+  var y = year
+  if month < 3:
+    dec y
+  (y + y div 4 - y div 100 + y div 400 + offsets[month - 1] + day) mod 7
+
+proc dateText(year, month, day: int): string =
+  &"{padInt(year, 4)}-{padInt(month, 2)}-{padInt(day, 2)}"
+
+proc parseDateText(value: string): tuple[ok: bool, year, month, day: int] =
+  let parts = value.split("-")
+  if parts.len != 3:
+    return
+  try:
+    result.year = parseInt(parts[0])
+    result.month = parseInt(parts[1])
+    result.day = parseInt(parts[2])
+    result.ok =
+      result.month >= 1 and result.month <= 12 and result.day >= 1 and
+      result.day <= daysInMonth(result.year, result.month)
+  except ValueError:
+    discard
+
+proc monthName(month: int): string =
+  const names = [
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December"
+  ]
+  if month >= 1 and month <= 12:
+    names[month - 1]
+  else:
+    ""
+
+proc addMonths(value: string; delta: int): string =
+  let parsed = parseDateText(value)
+  if not parsed.ok:
+    return value
+  let index = parsed.year * 12 + parsed.month - 1 + delta
+  let year = index div 12
+  let month = index mod 12 + 1
+  let day = min(parsed.day, daysInMonth(year, month))
+  dateText(year, month, day)
 
 proc launchDialogProcess(runtime: NestCrowRuntime; key, projectDir, data: string) {.raises: [EvaluatorError].} =
   if key in runtime.dialogProcesses:
@@ -233,6 +305,62 @@ proc crowErrorLines*(message: string; maxLineLen = 68; maxLines = 7): seq[string
         result[^1] = result[^1] & "..."
       return
 
+proc diagnosticLocation*(line: string): tuple[ok: bool, path: string, line: int, column: int] =
+  var text = line.strip
+  if text.startsWith("at "):
+    text = text[3 .. ^1]
+  let inIndex = text.find(" in ")
+  if inIndex >= 0:
+    text = text[0 ..< inIndex]
+  let errorIndex = text.find(": error:")
+  if errorIndex >= 0:
+    text = text[0 ..< errorIndex]
+  let columnSep = text.rfind(':')
+  if columnSep < 0:
+    return
+  let lineSep = text.rfind(':', 0, columnSep - 1)
+  if lineSep < 0:
+    return
+  try:
+    result.line = parseInt(text[lineSep + 1 ..< columnSep])
+    result.column = parseInt(text[columnSep + 1 .. ^1])
+    result.path = text[0 ..< lineSep]
+    result.ok = result.path.len > 0 and result.line > 0 and result.column > 0
+  except ValueError:
+    discard
+
+proc openDiagnosticLocation*(line: string) =
+  let location = diagnosticLocation(line)
+  if not location.ok:
+    return
+  try:
+    let process = startProcess(
+      "emacsclient",
+      args = @["-n", &"+{location.line}:{location.column}", location.path],
+      options = {poUsePath},
+    )
+    process.close()
+  except OSError:
+    discard
+  except IOError:
+    discard
+
+proc isErrorHighlightLine(line: string): bool =
+  line.contains("error:") or line.strip.startsWith("^")
+
+proc renderCrowErrorLine*(ui: var UI; index: int; line: string; width, height: SizePolicy) =
+  let
+    location = diagnosticLocation(line)
+    fg =
+      if isErrorHighlightLine(line):
+        color(255, 92, 92)
+      elif location.ok:
+        color(255, 150, 150)
+      else:
+        ui.palette.textColor
+  if ui.diagnosticLabel(ui.id("_nest_error_line", $index), line, fg, width, height, clickable = location.ok):
+    openDiagnosticLocation(line)
+
 proc renderErrorDialog*(runtime: NestCrowRuntime; ui: var UI; message: string) =
   if message.len == 0 or runtime.dismissedError == message:
     return
@@ -266,7 +394,7 @@ proc renderErrorDialog*(runtime: NestCrowRuntime; ui: var UI; message: string) =
         cfg(width = fill(), height = fit(), padding = 8, gap = 4, alignItems = AlignStretch),
       ):
         for index, line in crowErrorLines(message):
-          ui.label(ui.id("_nest_error_line", $index), line, fill(), fit())
+          renderCrowErrorLine(ui, index, line, fill(), fit())
       ui.row(
         ui.id("_nest_error_actions"),
         cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd),
@@ -277,26 +405,32 @@ proc loadSyntaxFile*(runtime: NestCrowRuntime; path: string): SyntaxNode {.raise
   var resolved = path
   try:
     resolved = runtime.resolveModulePath(path)
-    result = parse(readFile(resolved))
+    result = crow.parse(readFile(resolved), resolved)
     runtime.rememberFile(resolved)
   except IOError as error:
     raise newException(EvaluatorError, resolved & ": " & error.msg)
   except OSError as error:
     raise newException(EvaluatorError, resolved & ": " & error.msg)
   except ParserError as error:
-    raise newException(EvaluatorError, resolved & ": " & error.msg)
+    let converted = newException(EvaluatorError, error.msg)
+    converted.primary = error.primary
+    converted.frames = error.frames
+    raise converted
 
-proc renderNodes(runtime: NestCrowRuntime; nodes: seq[SyntaxNode]): Value =
+proc renderNodes(runtime: NestCrowRuntime; env: Environment; nodes: seq[SyntaxNode]): Value =
   result = nothing()
   for node in nodes:
     if runtime.hasError:
       return
     try:
-      result = runtime.evaluator.env.eval(node)
+      result = env.eval(node)
     except EvaluatorError as error:
       runtime.hasError = true
-      runtime.lastError = error.msg
+      runtime.lastError = report(error)
       return nothing()
+
+proc renderNodes(runtime: NestCrowRuntime; nodes: seq[SyntaxNode]): Value =
+  runtime.renderNodes(runtime.evaluator.env, nodes)
 
 proc registerNestCommands(runtime: NestCrowRuntime) =
   runtime.evaluator.native "define":
@@ -329,6 +463,13 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       runtime.requireUi().inEventPhase() and
         runtime.requireUi().clicked(runtime.asWidgetID(env.eval(arguments[0])))
     )
+
+  runtime.evaluator.native "keyPressed":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "keyPressed expects one key name")
+    boolean(runtime.requireUi().keyPressed(env.eval(arguments[0]).asString))
 
   runtime.evaluator.native "fill":
     discard env
@@ -374,6 +515,110 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         "HH:mm"
     text(now().format(pattern))
+
+  runtime.evaluator.native "today-date":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    text(now().format("yyyy-MM-dd"))
+
+  runtime.evaluator.native "date":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 3:
+      raise newException(EvaluatorError, "date expects year, month, and day")
+    text(dateText(values[0].asNumber.int, values[1].asNumber.int, values[2].asNumber.int))
+
+  runtime.evaluator.native "date-year":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "date-year expects one date")
+    let parsed = parseDateText(values[0].asString)
+    if not parsed.ok:
+      raise newException(EvaluatorError, "date-year expects YYYY-MM-DD")
+    number(parsed.year.float64)
+
+  runtime.evaluator.native "date-month":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "date-month expects one date")
+    let parsed = parseDateText(values[0].asString)
+    if not parsed.ok:
+      raise newException(EvaluatorError, "date-month expects YYYY-MM-DD")
+    number(parsed.month.float64)
+
+  runtime.evaluator.native "date-day":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "date-day expects one date")
+    let parsed = parseDateText(values[0].asString)
+    if not parsed.ok:
+      raise newException(EvaluatorError, "date-day expects YYYY-MM-DD")
+    number(parsed.day.float64)
+
+  runtime.evaluator.native "date-days-in-month":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "date-days-in-month expects year and month")
+    let count = daysInMonth(values[0].asNumber.int, values[1].asNumber.int)
+    if count == 0:
+      raise newException(EvaluatorError, "date-days-in-month expects month 1..12")
+    number(count.float64)
+
+  runtime.evaluator.native "date-first-weekday":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "date-first-weekday expects year and month")
+    let
+      year = values[0].asNumber.int
+      month = values[1].asNumber.int
+    if month < 1 or month > 12:
+      raise newException(EvaluatorError, "date-first-weekday expects month 1..12")
+    number(weekday(year, month, 1).float64)
+
+  runtime.evaluator.native "date-month-name":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "date-month-name expects one month")
+    let name = monthName(values[0].asNumber.int)
+    if name.len == 0:
+      raise newException(EvaluatorError, "date-month-name expects month 1..12")
+    text(name)
+
+  runtime.evaluator.native "date-month-title":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "date-month-title expects year and month")
+    let
+      year = values[0].asNumber.int
+      name = monthName(values[1].asNumber.int)
+    if name.len == 0:
+      raise newException(EvaluatorError, "date-month-title expects month 1..12")
+    text(&"{name} {year}")
+
+  runtime.evaluator.native "date-add-months":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "date-add-months expects date and month delta")
+    text(addMonths(values[0].asString, values[1].asNumber.int))
 
   runtime.evaluator.native "openDialog":
     discard layout
@@ -452,7 +697,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     let node = runtime.loadSyntaxFile(resolved)
     runtime.moduleStack.add resolved
     try:
-      result = runtime.renderNodes(node.statements)
+      result = runtime.renderNodes(env, node.statements)
     finally:
       runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
 
@@ -461,17 +706,17 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     discard arguments
     discard layout
     if runtime.requireUi().inEventPhase():
-      runtime.renderNodes(bodyNodes)
+      runtime.renderNodes(env, bodyNodes)
     else:
       nothing()
 
   runtime.evaluator.native "scope":
     discard layout
     if arguments.len == 0:
-      return runtime.renderNodes(bodyNodes)
+      return runtime.renderNodes(env, bodyNodes)
     let key = env.eval(arguments[0]).asString
     runtime.currentUi[].scope(key):
-      result = runtime.renderNodes(bodyNodes)
+      result = runtime.renderNodes(env, bodyNodes)
 
   runtime.evaluator.native "panel":
     discard layout
@@ -480,7 +725,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].panel(id, config):
-      discard runtime.renderNodes(bodyNodes.childNodes)
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
   runtime.evaluator.native "card":
@@ -490,7 +735,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].card(id, config):
-      discard runtime.renderNodes(bodyNodes.childNodes)
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
   runtime.evaluator.native "dialogHeader":
@@ -500,7 +745,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].dialogHeader(id, config):
-      discard runtime.renderNodes(bodyNodes.childNodes)
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
   runtime.evaluator.native "row":
@@ -510,7 +755,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].row(id, config):
-      discard runtime.renderNodes(bodyNodes.childNodes)
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
   runtime.evaluator.native "column":
@@ -520,7 +765,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].column(id, config):
-      discard runtime.renderNodes(bodyNodes.childNodes)
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
 
   runtime.evaluator.native "spacer":
@@ -599,7 +844,7 @@ proc reload*(app: NestCrowApp): bool {.discardable.} =
     true
   except EvaluatorError as error:
     app.program = nil
-    app.lastError = error.msg
+    app.lastError = report(error)
     false
 
 proc init*(T: typedesc[NestCrowApp]; rootPath: string): T =
@@ -618,6 +863,45 @@ proc render*(runtime: NestCrowRuntime; ui: var UI; program: SyntaxNode) =
       discard runtime.renderNodes(program.statements)
   finally:
     runtime.currentUi = nil
+
+proc loadComponentLibrary*(runtime: NestCrowRuntime; path: string) =
+  let resolved = runtime.resolveModulePath(path)
+  let node = runtime.loadSyntaxFile(resolved)
+  runtime.moduleStack.add resolved
+  try:
+    discard runtime.renderNodes(node.statements)
+  finally:
+    runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
+
+proc renderComponent*(
+    runtime: NestCrowRuntime;
+    ui: var UI;
+    libraryPath, componentName: string;
+    arguments: openArray[SyntaxNode],
+) =
+  if runtime.hasError:
+    return
+  runtime.currentUi = addr ui
+  try:
+    if libraryPath.len > 0:
+      runtime.loadComponentLibrary(libraryPath)
+    var nodes: seq[SyntaxNode]
+    for argument in arguments:
+      nodes.add argument
+    discard runtime.renderNodes(@[command(symbol(componentName), nodes)])
+  finally:
+    runtime.currentUi = nil
+
+proc renderComponent*(
+    runtime: NestCrowRuntime;
+    ui: var UI;
+    libraryPath, componentName: string;
+    arguments: openArray[string] = [],
+) =
+  var nodes: seq[SyntaxNode]
+  for argument in arguments:
+    nodes.add stringLiteral(argument)
+  runtime.renderComponent(ui, libraryPath, componentName, nodes)
 
 proc renderLayoutOnly*(
     runtime: NestCrowRuntime; ui: var UI; program: SyntaxNode; width, height: int
