@@ -1,0 +1,6 @@
+main = "main.nest"
+title = "Nest Counter"
+width = 360
+height = 180
+layerShell = "none"
+namespace = "nest-counter"

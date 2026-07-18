@@ -1,6 +1,0 @@
-main = "layerShellBar.nest"
-title = "Layer Shell Bar"
-width = 1920
-height = 32
-layerShell = "top"
-namespace = "layer-shell-bar"

@@ -1,4 +1,4 @@
-import std/[cmdline, os, sets, strutils, streams]
+import std/[cmdline, os, sets, strutils]
 
 import nest/[ui, resources, palette, dialogs]
 export ui
@@ -14,7 +14,8 @@ import nest/layerShellSdl3Driver
 export LayerShellConfig, LayerShellLayer, LayerShellEdge, LayerShellKeyboardMode
 export dockTop, dockBottom, dockLeft, dockRight
 
-import nest_dsl/[runtime, reader, nodes]
+import crow/[parser, syntax]
+import nest/crowdsl
 
 type AppConfig* = object
   title: string
@@ -101,33 +102,34 @@ proc loadProjectConfig(projectDir: string): ProjectConfig =
   if not fileExists(configPath):
     return
 
-  let stream = newFileStream(configPath, fmRead)
-  if stream.isNil:
-    return
-  defer: stream.close()
-
-  let read = readNodeResult(stream)
-  if not read.ok:
+  var program: SyntaxNode
+  try:
+    program = parse(readFile(configPath))
+  except CatchableError:
     return
 
-  let program = Program(read.node)
-  for line in program.body.lines:
-    if not (line of SimpleStatementLine):
-      continue
-    let stmt = SimpleStatementLine(line).statement
-    if not (stmt of Assignment):
-      continue
-    let assignment = Assignment(stmt)
-    let key = assignment.identifier.normalize
-    var valueStr: string
-    if assignment.value of StringValue:
-      valueStr = StringValue(assignment.value).value
-    elif assignment.value of NumberValue:
-      valueStr = NumberValue(assignment.value).lexeme
-    elif assignment.value of IdentifierValue:
-      valueStr = IdentifierValue(assignment.value).identifier
+  proc valueString(node: SyntaxNode): tuple[ok: bool, value: string] =
+    case node.kind
+    of String:
+      (true, node.stringValue)
+    of Symbol:
+      (true, node.symbol)
+    of Command:
+      if node.arguments.len == 0 and node.layout == NoLayout and node.callee.kind == Symbol:
+        (true, node.callee.symbol)
+      else:
+        (false, "")
     else:
+      (false, "")
+
+  for node in program.statements:
+    if node.kind != Binding:
       continue
+    let key = node.bindingSymbol.normalize
+    let parsed = node.value.valueString
+    if not parsed.ok:
+      continue
+    let valueStr = parsed.value
 
     case key
     of "main":
@@ -192,22 +194,39 @@ namespace = "nest-app"
   writeProjectFile(
     dir / "main.nest",
     """define:
-  rootID (id)
-  titleID (id)
-  bodyID (id)
+  count = 0
+  rootID = id
+  titleID = id
+  decrementID = (id "decrement")
+  incrementID = (id "increment")
+events:
+  when (clicked decrementID):
+    -= count 1
+  when (clicked incrementID):
+    += count 1
 panel rootID:
-  width = (fill)
-  height = (fill)
+  width = fill
+  height = fill
   gap = 12.0
   padding = 16.0
   alignItems = AlignCenter
   justifyContent = JustifyCenter
-  label titleID "Nest App":
-    width = (fit)
-    height = (fit)
-  label bodyID "Edit main.nest to start building.":
-    width = (fit)
-    height = (fit)
+  label titleID "Counter":
+    width = fit
+    height = fit
+  row (id "controls"):
+    width = fit
+    height = fit
+    gap = 8
+    button decrementID "-":
+      width = (fixed 32)
+      height = fit
+    label (id "count") count:
+      width = (fixed 80)
+      height = fit
+    button incrementID "+":
+      width = (fixed 32)
+      height = fit
 """,
   )
   echo "Created Nest project in " & dir
@@ -342,7 +361,7 @@ proc runProject(projectDir: string) =
     quit("Nest project main file does not exist: " & mainPath)
 
   var ui = UI.init()
-  let app = DslApp.init(mainPath)
+  let app = NestCrowApp.init(mainPath)
   application appConfig(config), ui:
     app.render(ui)
 

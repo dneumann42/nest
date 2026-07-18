@@ -13,5 +13,6 @@ tests/test_layout
 /src/example/pathEditor/pathEditor
 /src/example/layerShellBar/layerShellBar
 /tests/test_dsl_runtime
+/tests/test_crowdsl
 example/layerShellBar/layerShellBar
 *.out
