@@ -2,7 +2,7 @@ import std/unittest
 
 import crow
 import nest/[crowdsl, resources, ui]
-import uirelays
+import uirelays/[coords, screen]
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -35,12 +35,27 @@ events:
     check runtime.get("count").number == 2
 
   test "layout config bindings render through Nest UI":
-    let runtime = NestCrowRuntime.init()
-    var ui = UI.init()
-    ui.initContext(300, 120)
-    ui.loadFont("font", "", 18)
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(300, 120)
+      ui.loadFont("font", "", 18)
 
-    runtime.renderLayoutOnly(ui, parse("""
+      runtime.renderLayoutOnly(ui, parse("""
 panel (id "root"):
   width = (fixed 200)
   height = (fixed 80)
@@ -53,13 +68,15 @@ panel (id "root"):
     height = fit
 """), 300, 120)
 
-    check not runtime.hasError
-    let root = ui.id("root")
-    let label = ui.id("label")
-    check ui.widget(root).frame.width == 200
-    check ui.widget(root).frame.height == 80
-    check ui.widget(label).frame.width > 0
-    check ui.widget(label).frame.height > 0
+      check not runtime.hasError
+      let root = ui.id("root")
+      let label = ui.id("label")
+      check ui.widget(root).frame.width == 200
+      check ui.widget(root).frame.height == 80
+      check ui.widget(label).frame.width > 0
+      check ui.widget(label).frame.height > 0
+    finally:
+      fontRelays = originalFontRelays
 
   test "counter example renders and button clicks mutate state":
     let app = NestCrowApp.init("example/counter/main.nest")
@@ -147,4 +164,38 @@ panel (id "root"):
       check texts >= 4
     finally:
       drawRelays = originalDrawRelays
+      fontRelays = originalFontRelays
+
+  test "layer shell bar example renders clock and widgets":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let app = NestCrowApp.init("example/layerShellBar/main.nest")
+      var ui = UI.init()
+      ui.initContext(800, 36)
+      ui.loadFont("font", "", 18)
+
+      app.runtime.renderLayoutOnly(ui, app.program, 800, 36)
+
+      check app.lastError == ""
+      if app.lastError == "":
+        check app.runtime.get("startID").kind == Native
+        check app.runtime.get("clock").kind == Command
+        check ui.widget(ui.id("bar")).frame.height == 36
+        check ui.widget(ui.id("left")).frame.width > 0
+        check ui.widget(ui.id("center")).frame.width > 0
+        check ui.widget(ui.id("right")).frame.width > 0
+    finally:
       fontRelays = originalFontRelays

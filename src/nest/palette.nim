@@ -1,4 +1,4 @@
-import uirelays
+import uirelays/screen
 
 type Palette* = object
   primary*: Color

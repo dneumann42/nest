@@ -1,0 +1,58 @@
+define:
+  startID = (id "start")
+
+fun start-menu lbl:  
+  button startID lbl:
+    width = fit
+    height = fit
+
+fun default-config:
+  {}:
+    start-label = "Alatar"
+
+define:
+  cfg = default-config
+
+panel (id "bar"):
+  width = fill
+  height = fill
+  padding = 6
+  alignItems = AlignStretch
+  row (id "content"):
+    width = fill
+    height = fill
+    gap = 12
+    alignItems = AlignCenter
+    row (id "left"):
+      width = (fixed 280)
+      height = fit
+      gap = 8
+      alignItems = AlignCenter
+      start-menu "Nomicon"
+      label (id "workspace") "1":
+        width = (fixed 24)
+        height = fit
+
+    row (id "center"):
+      width = fill
+      height = fit
+      alignItems = AlignCenter
+      justifyContent = JustifyCenter
+      label (id "clock") (clock "ddd HH:mm"):
+        width = fit
+        height = fit
+    row (id "right"):
+      width = (fixed 280)
+      height = fit
+      gap = 10
+      alignItems = AlignCenter
+      justifyContent = JustifyEnd
+      label (id "network") "NET":
+        width = fit
+        height = fit
+      label (id "volume") "VOL 72%":
+        width = fit
+        height = fit
+      label (id "battery") "BAT 86%":
+        width = fit
+        height = fit

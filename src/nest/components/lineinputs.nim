@@ -2,7 +2,7 @@ import std/strutils
 
 import ../[resources, widgets2]
 import component
-import uirelays
+import uirelays/[coords, screen]
 
 const
   InputPaddingX = 8

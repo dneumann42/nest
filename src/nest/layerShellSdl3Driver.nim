@@ -772,7 +772,17 @@ proc sdlQuitRequest() =
 
 # --- Init ---
 
+proc selectWaylandVideoDriver() =
+  putEnv("SDL_VIDEO_DRIVER", "wayland")
+  putEnv("SDL_VIDEODRIVER", "wayland")
+  discard setenvUnsafe(cstring"SDL_VIDEO_DRIVER", cstring"wayland", 1)
+  discard setenvUnsafe(cstring"SDL_VIDEODRIVER", cstring"wayland", 1)
+  discard setHintWithPriority(
+    cstring(HINT_VIDEO_DRIVER), cstring"wayland", HINT_OVERRIDE
+  )
+
 proc initLayerShellSdl3Driver*() =
+  selectWaylandVideoDriver()
   if not sdl3.init(INIT_VIDEO or INIT_EVENTS):
     quit("SDL3 init failed")
   if not sdl3_ttf.init():

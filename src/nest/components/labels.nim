@@ -1,6 +1,6 @@
 import ../[resources, widgets2]
 import component
-import uirelays
+import uirelays/screen
 
 type Label* = ref object of Component
   text: string

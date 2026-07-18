@@ -255,6 +255,16 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       raise newException(EvaluatorError, "prefer expects one size")
     sizeValue(prefer(env.eval(arguments[0]).asNumber))
 
+  runtime.evaluator.native "clock":
+    discard layout
+    discard bodyNodes
+    let pattern =
+      if arguments.len > 0:
+        env.eval(arguments[0]).asString
+      else:
+        "HH:mm"
+    text(now().format(pattern))
+
   runtime.evaluator.native "import":
     discard layout
     discard bodyNodes

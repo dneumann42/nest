@@ -1,5 +1,6 @@
 import std/[hashes, sugar]
-import layout, uirelays
+import layout
+import uirelays/[coords, screen]
 
 type
   WidgetID* = distinct string

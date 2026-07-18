@@ -1,6 +1,6 @@
 import std/[tables]
-import uirelays
-export uirelays
+import uirelays/[coords, screen]
+export coords, screen
 
 type
   ResourceID* = string
@@ -40,7 +40,7 @@ proc measureText*(resources: Resources, fontName, text: string): TextMeasurement
     return resources.textMeasurements[key]
 
   let (font, metrics) = resources.get(fontName)
-  let extent = uirelays.measureText(Font(font), text)
+  let extent = screen.measureText(Font(font), text)
   result = TextMeasurement(
     width: extent.w,
     height:

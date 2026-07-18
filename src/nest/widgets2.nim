@@ -1,5 +1,7 @@
 import std/[atomics, sets]
 import resources
+import uirelays/input
+export input
 import kiwiberry
 import palette
 

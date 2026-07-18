@@ -1,6 +1,6 @@
 import ../[resources, widgets2]
 import component
-import uirelays
+import uirelays/[coords, screen]
 
 const
   ButtonPaddingX = 8
