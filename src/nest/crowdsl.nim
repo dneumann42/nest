@@ -1,7 +1,8 @@
-import std/[os, strutils, tables, times]
+import std/[os, osproc, streams, strutils, tables, times]
 
 import crow
 import ui
+import uirelays/input
 
 type
   WidgetIDValue* = ref object of NativeValue
@@ -16,19 +17,30 @@ type
   JustificationValue* = ref object of NativeValue
     value*: Justification
 
+  DialogProcess = ref object
+    process: Process
+
   NestCrowRuntime* = ref object
     evaluator*: Evaluator
     loadedFiles*: Table[string, Time]
+    dialogProcesses*: Table[string, DialogProcess]
+    dialogResults*: Table[string, string]
+    dialogData*: string
+    dialogCloseValue*: string
+    requestQuit*: bool
     moduleStack: seq[string]
     currentUi: ptr UI
     hasError*: bool
     lastError*: string
+    dismissedError*: string
 
   NestCrowApp* = ref object
     rootPath*: string
     runtime*: NestCrowRuntime
     program*: SyntaxNode
     lastError*: string
+    errorDialogProcess*: Process
+    errorDialogMessage*: string
 
 proc init*(T: typedesc[NestCrowRuntime]): T
 proc renderNodes(runtime: NestCrowRuntime; nodes: seq[SyntaxNode]): Value
@@ -163,6 +175,104 @@ proc rememberFile(runtime: NestCrowRuntime; path: string) =
   except OSError:
     discard
 
+proc launchDialogProcess(runtime: NestCrowRuntime; key, projectDir, data: string) {.raises: [EvaluatorError].} =
+  if key in runtime.dialogProcesses:
+    return
+  let resolvedProjectDir =
+    try:
+      runtime.resolveModulePath(projectDir)
+    except OSError as error:
+      raise newException(EvaluatorError, projectDir & ": " & error.msg)
+  if not dirExists(resolvedProjectDir):
+    raise newException(EvaluatorError, "dialog project directory does not exist: " & resolvedProjectDir)
+  let process =
+    try:
+      startProcess(
+        getAppFilename(),
+        args = @["dialog", resolvedProjectDir, data],
+        options = {poUsePath, poStdErrToStdOut},
+      )
+    except OSError as error:
+      raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
+    except IOError as error:
+      raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
+  runtime.dialogProcesses[key] = DialogProcess(process: process)
+
+proc pollDialogProcesses*(runtime: NestCrowRuntime) =
+  var finished: seq[string]
+  for key, dialog in runtime.dialogProcesses.pairs:
+    if not dialog.process.running:
+      let output = dialog.process.outputStream.readAll.strip
+      runtime.dialogResults[key] = output
+      dialog.process.close
+      finished.add key
+  for key in finished:
+    runtime.dialogProcesses.del key
+
+proc closeDialogProcesses*(runtime: NestCrowRuntime) =
+  for dialog in runtime.dialogProcesses.values:
+    if dialog.process.running:
+      dialog.process.terminate
+    dialog.process.close
+  runtime.dialogProcesses.clear()
+
+proc crowErrorLines*(message: string; maxLineLen = 68; maxLines = 7): seq[string] =
+  for rawLine in message.splitLines:
+    var line = rawLine
+    if line.len == 0:
+      result.add ""
+    while line.len > maxLineLen:
+      result.add line[0 ..< maxLineLen]
+      line = line[maxLineLen .. ^1]
+      if result.len >= maxLines:
+        result[^1] = result[^1] & "..."
+        return
+    result.add line
+    if result.len >= maxLines:
+      if rawLine.len > line.len:
+        result[^1] = result[^1] & "..."
+      return
+
+proc renderErrorDialog*(runtime: NestCrowRuntime; ui: var UI; message: string) =
+  if message.len == 0 or runtime.dismissedError == message:
+    return
+
+  let
+    closeID = ui.id("_nest_error_close")
+    copyID = ui.id("_nest_error_copy")
+
+  ui.events:
+    if ui.clicked(copyID):
+      putClipboardText(message)
+    if ui.clicked(closeID):
+      runtime.dismissedError = message
+
+  if runtime.dismissedError == message:
+    return
+
+  ui.center(ui.id("_nest_error_scrim"), fill(), fill()):
+    ui.card(
+      ui.id("_nest_error_dialog"),
+      cfg(width = fixed(560), height = fit(), padding = 12, gap = 10, alignItems = AlignStretch),
+    ):
+      ui.dialogHeader(
+        ui.id("_nest_error_header"),
+        cfg(width = fill(), height = fit(), padding = 8, gap = 8, alignItems = AlignCenter),
+      ):
+        ui.label(ui.id("_nest_error_title"), "Crow error", fill(), fit())
+        discard ui.button(closeID, "Close", fit(), fit())
+      ui.column(
+        ui.id("_nest_error_body"),
+        cfg(width = fill(), height = fit(), padding = 8, gap = 4, alignItems = AlignStretch),
+      ):
+        for index, line in crowErrorLines(message):
+          ui.label(ui.id("_nest_error_line", $index), line, fill(), fit())
+      ui.row(
+        ui.id("_nest_error_actions"),
+        cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd),
+      ):
+        discard ui.button(copyID, "Copy", fit(), fit())
+
 proc loadSyntaxFile*(runtime: NestCrowRuntime; path: string): SyntaxNode {.raises: [EvaluatorError].} =
   var resolved = path
   try:
@@ -265,6 +375,67 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         "HH:mm"
     text(now().format(pattern))
 
+  runtime.evaluator.native "openDialog":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len < 2 or values.len > 3:
+      raise newException(EvaluatorError, "openDialog expects key, projectDir, and optional data")
+    let
+      key = values[0].asString
+      projectDir = values[1].asString
+      data = if values.len > 2: values[2].asString else: ""
+    runtime.launchDialogProcess(key, projectDir, data)
+    boolean(true)
+
+  runtime.evaluator.native "dialogOpen?":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "dialogOpen? expects key")
+    boolean(values[0].asString in runtime.dialogProcesses)
+
+  runtime.evaluator.native "dialogResult":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "dialogResult expects key")
+    let key = values[0].asString
+    if key in runtime.dialogResults:
+      text(runtime.dialogResults[key])
+    else:
+      nothing()
+
+  runtime.evaluator.native "clearDialogResult":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "clearDialogResult expects key")
+    runtime.dialogResults.del values[0].asString
+    nothing()
+
+  runtime.evaluator.native "dialogData":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    text(runtime.dialogData)
+
+  runtime.evaluator.native "closeDialog":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    runtime.dialogCloseValue =
+      if values.len > 0:
+        values[0].asString
+      else:
+        ""
+    runtime.requestQuit = true
+    text(runtime.dialogCloseValue)
+
   runtime.evaluator.native "import":
     discard layout
     discard bodyNodes
@@ -309,6 +480,26 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     runtime.currentUi[].panel(id, config):
+      discard runtime.renderNodes(bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "card":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].card(id, config):
+      discard runtime.renderNodes(bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "dialogHeader":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].dialogHeader(id, config):
       discard runtime.renderNodes(bodyNodes.childNodes)
     nothing()
 
@@ -378,7 +569,11 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
   runtime.evaluator.env.define("JustifyEnd", justifyValue(JustifyEnd))
 
 proc init*(T: typedesc[NestCrowRuntime]): T =
-  result = T(evaluator: Evaluator.init())
+  result = T(
+    evaluator: Evaluator.init(),
+    dialogProcesses: initTable[string, DialogProcess](),
+    dialogResults: initTable[string, string](),
+  )
   result.registerNestCommands()
 
 proc get*(runtime: NestCrowRuntime; name: string): Value {.raises: [EvaluatorError].} =
@@ -414,6 +609,7 @@ proc init*(T: typedesc[NestCrowApp]; rootPath: string): T =
 proc render*(runtime: NestCrowRuntime; ui: var UI; program: SyntaxNode) =
   if program.isNil:
     return
+  runtime.pollDialogProcesses()
   runtime.hasError = false
   runtime.lastError = ""
   runtime.currentUi = addr ui
@@ -428,6 +624,7 @@ proc renderLayoutOnly*(
 ) =
   if program.isNil:
     return
+  runtime.pollDialogProcesses()
   runtime.hasError = false
   runtime.lastError = ""
   runtime.currentUi = addr ui
@@ -451,3 +648,5 @@ proc render*(app: NestCrowApp; ui: var UI) =
   app.runtime.moduleStack.setLen(app.runtime.moduleStack.len - 1)
   if app.runtime.hasError:
     app.lastError = app.runtime.lastError
+  else:
+    app.lastError = ""

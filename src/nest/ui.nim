@@ -1136,6 +1136,48 @@ template panel*(
       self.column(config)
       discard self.popLayout()
 
+template card*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      let component = Card.new()
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.column(config)
+      discard self.popLayout()
+
+template dialogHeader*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      let component = DialogHeader.new()
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.row(config)
+      discard self.popLayout()
+
 proc box*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget =

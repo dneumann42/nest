@@ -1,0 +1,48 @@
+define:
+  appsID = (id "apps")
+  filesID = (id "files")
+  settingsID = (id "settings")
+  logoutID = (id "logout")
+
+events:
+  when (clicked appsID):
+    closeDialog "applications"
+  when (clicked filesID):
+    closeDialog "files"
+  when (clicked settingsID):
+    closeDialog "settings"
+  when (clicked logoutID):
+    closeDialog "logout"
+
+card (id "start-popover"):
+  width = fill
+  height = fill
+  padding = 0
+  gap = 0
+  alignItems = AlignStretch
+  dialogHeader (id "start-popover" "header"):
+    width = fill
+    height = (fixed 32)
+    padding = 8
+    alignItems = AlignCenter
+    label (id "start-popover" "title") (dialogData):
+      width = fit
+      height = fit
+  column (id "start-popover" "actions"):
+    width = fill
+    height = fit
+    padding = 8
+    gap = 6
+    alignItems = AlignStretch
+    button appsID "Applications":
+      width = fill
+      height = fit
+    button filesID "Files":
+      width = fill
+      height = fit
+    button settingsID "Settings":
+      width = fill
+      height = fit
+    button logoutID "Log out":
+      width = fill
+      height = fit

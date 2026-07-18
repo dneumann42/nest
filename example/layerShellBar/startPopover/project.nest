@@ -1,0 +1,9 @@
+main = "main.nest"
+title = "Start"
+width = 220
+height = 176
+layerShell = "top-left"
+namespace = "nest-layer-shell-start-popover"
+exclusiveZone = 0
+marginTop = 0
+marginLeft = 6

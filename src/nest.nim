@@ -1,4 +1,4 @@
-import std/[cmdline, os, sets, strutils]
+import std/[cmdline, os, osproc, sets, strutils]
 
 import nest/[ui, resources, palette, dialogs]
 export ui
@@ -29,6 +29,8 @@ type ProjectConfig = object
   width, height: int
   layerShell: string
   namespace: string
+  exclusiveZone: int
+  marginTop, marginRight, marginBottom, marginLeft: int
 
 proc init*(T: typedesc[AppConfig], width = 800, height = 600, title = "Nest"): T =
   T(
@@ -71,6 +73,23 @@ proc dockRight*(
     layerShellSdl3Driver.dockRight(width, namespace)
   )
 
+proc overlayDialog*(
+    T: typedesc[AppConfig],
+    width: Positive,
+    height: Positive,
+    title = "Nest Dialog",
+    namespace = "nest-dialog",
+): T =
+  AppConfig.init(width = width, height = height, title = title).layerShell(
+    LayerShellConfig(
+      namespace: namespace,
+      layer: LayerOverlay,
+      anchors: {},
+      exclusiveZone: -1,
+      keyboard: KeyboardOnDemand,
+    )
+  )
+
 proc initWindow*(cfg: AppConfig): ScreenLayout =
   if cfg.layerShell:
     layerShellSdl3Driver.layerShellConfig = cfg.layerShellConfig
@@ -88,6 +107,11 @@ proc defaultProjectConfig(): ProjectConfig =
     height: 600,
     layerShell: "none",
     namespace: "nest",
+    exclusiveZone: low(int),
+    marginTop: 0,
+    marginRight: 0,
+    marginBottom: 0,
+    marginLeft: 0,
   )
 
 proc parseProjectInt(value: string, fallback: int): int =
@@ -144,6 +168,16 @@ proc loadProjectConfig(projectDir: string): ProjectConfig =
       result.layerShell = valueStr.normalize
     of "namespace":
       result.namespace = valueStr
+    of "exclusivezone":
+      result.exclusiveZone = parseProjectInt(valueStr, result.exclusiveZone)
+    of "margintop":
+      result.marginTop = parseProjectInt(valueStr, result.marginTop)
+    of "marginright":
+      result.marginRight = parseProjectInt(valueStr, result.marginRight)
+    of "marginbottom":
+      result.marginBottom = parseProjectInt(valueStr, result.marginBottom)
+    of "marginleft":
+      result.marginLeft = parseProjectInt(valueStr, result.marginLeft)
     else:
       discard
 
@@ -151,15 +185,39 @@ proc positive(value: int): Positive =
   max(value, 1).Positive
 
 proc appConfig(config: ProjectConfig): AppConfig =
+  proc withExclusiveZone(app: AppConfig): AppConfig =
+    result = app
+    if config.exclusiveZone != low(int):
+      result.layerShellConfig.exclusiveZone = config.exclusiveZone.int32
+    result.layerShellConfig.marginTop = config.marginTop.int32
+    result.layerShellConfig.marginRight = config.marginRight.int32
+    result.layerShellConfig.marginBottom = config.marginBottom.int32
+    result.layerShellConfig.marginLeft = config.marginLeft.int32
+
   case config.layerShell.normalize
   of "top":
-    AppConfig.dockTop(positive(config.height), config.title, config.namespace)
+    AppConfig.dockTop(positive(config.height), config.title, config.namespace).withExclusiveZone
   of "bottom":
-    AppConfig.dockBottom(positive(config.height), config.title, config.namespace)
+    AppConfig.dockBottom(positive(config.height), config.title, config.namespace).withExclusiveZone
   of "left":
-    AppConfig.dockLeft(positive(config.width), config.title, config.namespace)
+    AppConfig.dockLeft(positive(config.width), config.title, config.namespace).withExclusiveZone
   of "right":
-    AppConfig.dockRight(positive(config.width), config.title, config.namespace)
+    AppConfig.dockRight(positive(config.width), config.title, config.namespace).withExclusiveZone
+  of "top-left", "topleft":
+    AppConfig.init(width = positive(config.width), height = positive(config.height), title = config.title)
+      .layerShell(
+        LayerShellConfig(
+          namespace: config.namespace,
+          layer: LayerTop,
+          anchors: {EdgeTop, EdgeLeft},
+          exclusiveZone: config.exclusiveZone.int32,
+          marginTop: config.marginTop.int32,
+          marginRight: config.marginRight.int32,
+          marginBottom: config.marginBottom.int32,
+          marginLeft: config.marginLeft.int32,
+          keyboard: KeyboardOnDemand,
+        )
+      )
   else:
     AppConfig.init(
       width = max(config.width, 1), height = max(config.height, 1), title = config.title
@@ -189,6 +247,11 @@ width = 800
 height = 600
 layerShell = "none"
 namespace = "nest-app"
+exclusiveZone = -1
+marginTop = 0
+marginRight = 0
+marginBottom = 0
+marginLeft = 0
 """,
   )
   writeProjectFile(
@@ -235,6 +298,8 @@ proc usage(): string =
   """Usage:
   nest --project DIR
   nest run DIR
+  nest dialog DIR [DATA]
+  nest error-dialog MESSAGE
   nest generate [DIR]
 
 Project files:
@@ -247,6 +312,90 @@ proc textFromEvent(chars: array[4, char]): string =
     if ch == '\0':
       break
     result.add(ch)
+
+proc closeCrowErrorDialog(app: NestCrowApp) =
+  if app.errorDialogProcess != nil:
+    if app.errorDialogProcess.running:
+      app.errorDialogProcess.terminate
+    app.errorDialogProcess.close
+    app.errorDialogProcess = nil
+
+proc pollCrowErrorDialog(app: NestCrowApp) =
+  if app.errorDialogProcess != nil and not app.errorDialogProcess.running:
+    app.errorDialogProcess.close
+    app.errorDialogProcess = nil
+    if app.errorDialogMessage.len > 0:
+      app.runtime.dismissedError = app.errorDialogMessage
+
+proc launchCrowErrorDialog(app: NestCrowApp; message: string) =
+  if message.len == 0 or app.runtime.dismissedError == message:
+    return
+  app.pollCrowErrorDialog()
+  if app.errorDialogProcess != nil and app.errorDialogMessage == message:
+    return
+  app.closeCrowErrorDialog()
+  try:
+    app.errorDialogProcess = startProcess(
+      getAppFilename(),
+      args = @["error-dialog", message],
+      options = {poUsePath},
+    )
+    app.errorDialogMessage = message
+  except OSError:
+    discard
+  except IOError:
+    discard
+
+template crowErrorDialogBody(ui: var UI; message: string; copied: var bool; running: var bool) =
+  ui.events:
+    if ui.clicked(ui.id("_nest_error_copy")):
+      putClipboardText(message)
+      copied = true
+    if ui.clicked(ui.id("_nest_error_close")):
+      running = false
+  ui.card(
+    ui.id("_nest_error_dialog"),
+    cfg(
+      width = fixed(ui.windowWidth.toFloat),
+      height = fixed(ui.windowHeight.toFloat),
+      padding = 12,
+      gap = 10,
+      alignItems = AlignStretch,
+    ),
+  ):
+    ui.dialogHeader(
+      ui.id("_nest_error_header"),
+      cfg(width = fill(), height = fit(), padding = 8, gap = 8, alignItems = AlignCenter),
+    ):
+      ui.label(ui.id("_nest_error_title"), "Crow error", fill(), fit())
+      discard ui.button(ui.id("_nest_error_close"), "Close", fit(), fit())
+    ui.column(
+      ui.id("_nest_error_body"),
+      cfg(width = fill(), height = fill(), padding = 8, gap = 4, alignItems = AlignStretch),
+    ):
+      for index, line in crowErrorLines(message, maxLines = 8):
+        ui.label(ui.id("_nest_error_line", $index), line, fill(), fit())
+      if copied:
+        ui.label(ui.id("_nest_error_copied"), "Copied to clipboard", fill(), fit())
+    ui.row(
+      ui.id("_nest_error_actions"),
+      cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd),
+    ):
+      discard ui.button(ui.id("_nest_error_copy"), "Copy", fit(), fit())
+
+proc drawCrowErrorDialog(ui: var UI; message: string; copied: var bool; running: var bool) =
+  ui.layout:
+    crowErrorDialogBody(ui, message, copied, running)
+
+proc layoutCrowErrorDialogForTest*(ui: var UI; message: string; width, height: int): bool =
+  var
+    copied = false
+    running = true
+  ui.initContext(width, height)
+  ui.beginLayout(width, height)
+  crowErrorDialogBody(ui, message, copied, running)
+  ui.applyIntrinsicSizes(ui.resources)
+  ui.endLayout()
 
 template application*(cfg: AppConfig, blk: untyped) =
   let window {.inject.} = cfg.initWindow()
@@ -350,7 +499,19 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
     input.sleep(16)
   shutdown()
 
-proc runProject(projectDir: string) =
+proc runCrowErrorDialog(message: string) =
+  var ui = UI.init()
+  var copied = false
+  application AppConfig.overlayDialog(
+    width = 620.Positive,
+    height = 300.Positive,
+    title = "Crow Error",
+    namespace = "nest-crow-error-dialog",
+  ), ui:
+    drawCrowErrorDialog(ui, message, copied, running)
+
+proc runProject(projectDir: string; dialogData = ""; dialogMode = false): string =
+  discard dialogMode
   let dir = projectDir.normalizedPath
   if not dirExists(dir):
     quit("Nest project directory does not exist: " & projectDir)
@@ -362,21 +523,48 @@ proc runProject(projectDir: string) =
 
   var ui = UI.init()
   let app = NestCrowApp.init(mainPath)
+  app.runtime.dialogData = dialogData
   application appConfig(config), ui:
     app.render(ui)
+    if app.lastError.len > 0:
+      app.launchCrowErrorDialog(app.lastError)
+    else:
+      app.pollCrowErrorDialog()
+      app.closeCrowErrorDialog()
+    if app.runtime.requestQuit:
+      running = false
+  result = app.runtime.dialogCloseValue
+  app.runtime.closeDialogProcesses()
+  app.closeCrowErrorDialog()
 
 proc main() =
   let args = commandLineParams()
-  echo args
+  if args.len == 0:
+    quit(usage(), 1)
   case args[0]
   of "--project", "-p":
     if args.len < 2:
       quit(usage(), 1)
-    runProject(args[1])
+    discard runProject(args[1])
   of "run":
     if args.len < 2:
       quit(usage(), 1)
-    runProject(args[1])
+    discard runProject(args[1])
+  of "dialog":
+    if args.len < 2:
+      quit(usage(), 1)
+    let data =
+      if args.len >= 3:
+        args[2]
+      else:
+        ""
+    let value = runProject(args[1], dialogData = data, dialogMode = true)
+    if value.len > 0:
+      echo value
+  of "error-dialog":
+    if args.len < 2:
+      quit(usage(), 1)
+    runCrowErrorDialog(args[1])
   of "generate", "gen":
     let dir =
       if args.len >= 2:

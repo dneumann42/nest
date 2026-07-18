@@ -1,5 +1,6 @@
 import std/[sets, strutils, unittest]
 
+import nest as nestApp
 import nest/[palette, resources, ui]
 
 const
@@ -489,6 +490,32 @@ suite "ui layout nesting":
     checkFrame(ui.widget(Panel1), 100, 100, 200, 100)
     checkFrame(ui.widget(Label1), 160, 125, 80, 20)
     checkFrame(ui.widget(Label2), 160, 155, 80, 20)
+
+  test "crow error dialog layout renders visible widgets":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.loadFont("font", "", 18)
+      check nestApp.layoutCrowErrorDialogForTest(ui, "missing field: start-label", 620, 300)
+      check ui.widget(ui.id("_nest_error_dialog")).frame.width == 620
+      check ui.widget(ui.id("_nest_error_dialog")).frame.height == 300
+      check ui.widget(ui.id("_nest_error_header")).frame.height > 0
+      check ui.widget(ui.id("_nest_error_line", "0")).frame.width > 0
+    finally:
+      fontRelays = originalFontRelays
 
   test "slot captures can be placed as a list":
     var ui = UI.init()

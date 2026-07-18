@@ -1,58 +1,71 @@
 define:
   startID = (id "start")
+  lastAction = ""
 
-fun start-menu lbl:  
+fun startMenu lbl:  
   button startID lbl:
     width = fit
     height = fit
 
-fun default-config:
+fun defaultConfig:
   {}:
     start-label = "Alatar"
 
 define:
-  cfg = default-config
+  cfg = defaultConfig
 
-panel (id "bar"):
+events:
+  when (clicked startID):
+    when (not (dialogOpen? "start")):
+      openDialog "start" "./startPopover" (dict-get cfg "start-label")
+  when (not (= (dialogResult "start") nothing)):
+    set lastAction (dialogResult "start")
+    clearDialogResult "start"
+
+column (id "root"):
   width = fill
   height = fill
-  padding = 6
   alignItems = AlignStretch
-  row (id "content"):
+  panel (id "bar"):
     width = fill
-    height = fill
-    gap = 12
-    alignItems = AlignCenter
-    row (id "left"):
-      width = (fixed 280)
-      height = fit
-      gap = 8
-      alignItems = AlignCenter
-      start-menu "Nomicon"
-      label (id "workspace") "1":
-        width = (fixed 24)
-        height = fit
-
-    row (id "center"):
+    height = (fixed 36)
+    padding = 6
+    alignItems = AlignStretch
+    row (id "content"):
       width = fill
-      height = fit
+      height = fill
+      gap = 12
       alignItems = AlignCenter
-      justifyContent = JustifyCenter
-      label (id "clock") (clock "ddd HH:mm"):
-        width = fit
+      row (id "left"):
+        width = (fixed 280)
         height = fit
-    row (id "right"):
-      width = (fixed 280)
-      height = fit
-      gap = 10
-      alignItems = AlignCenter
-      justifyContent = JustifyEnd
-      label (id "network") "NET":
-        width = fit
+        gap = 8
+        alignItems = AlignCenter
+        startMenu (dict-get cfg "start-label")
+        label (id "workspace") "1":
+          width = (fixed 24)
+          height = fit
+
+      row (id "center"):
+        width = fill
         height = fit
-      label (id "volume") "VOL 72%":
-        width = fit
+        alignItems = AlignCenter
+        justifyContent = JustifyCenter
+        label (id "clock") (clock "ddd HH:mm"):
+          width = fit
+          height = fit
+      row (id "right"):
+        width = (fixed 280)
         height = fit
-      label (id "battery") "BAT 86%":
-        width = fit
-        height = fit
+        gap = 10
+        alignItems = AlignCenter
+        justifyContent = JustifyEnd
+        label (id "network") "NET":
+          width = fit
+          height = fit
+        label (id "volume") "VOL 72%":
+          width = fit
+          height = fit
+        label (id "battery") "BAT 86%":
+          width = fit
+          height = fit

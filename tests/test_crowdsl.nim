@@ -1,4 +1,4 @@
-import std/unittest
+import std/[tables, unittest]
 
 import crow
 import nest/[crowdsl, resources, ui]
@@ -189,8 +189,8 @@ panel (id "root"):
 
       app.runtime.renderLayoutOnly(ui, app.program, 800, 36)
 
-      check app.lastError == ""
-      if app.lastError == "":
+      check app.runtime.lastError == ""
+      if app.runtime.lastError == "":
         check app.runtime.get("startID").kind == Native
         check app.runtime.get("clock").kind == Command
         check ui.widget(ui.id("bar")).frame.height == 36
@@ -199,3 +199,54 @@ panel (id "root"):
         check ui.widget(ui.id("right")).frame.width > 0
     finally:
       fontRelays = originalFontRelays
+
+  test "dialog commands expose launch data and close value":
+    var runtime = NestCrowRuntime.init()
+    runtime.dialogData = "Alatar"
+
+    let data = runtime.evaluator.exec(parse("dialogData\n"))
+    check data.kind == Text
+    check data.text == "Alatar"
+
+    let closeValue = runtime.evaluator.exec(parse("closeDialog \"applications\"\n"))
+    check closeValue.kind == Text
+    check closeValue.text == "applications"
+    check runtime.requestQuit
+    check runtime.dialogCloseValue == "applications"
+
+  test "dialog result commands track completed child values":
+    var runtime = NestCrowRuntime.init()
+    runtime.dialogResults["start"] = "files"
+
+    let result = runtime.evaluator.exec(parse("dialogResult \"start\"\n"))
+    check result.kind == Text
+    check result.text == "files"
+
+    discard runtime.evaluator.exec(parse("clearDialogResult \"start\"\n"))
+    let cleared = runtime.evaluator.exec(parse("dialogResult \"start\"\n"))
+    check cleared.kind == Nothing
+
+  test "openDialog reports missing child projects":
+    var runtime = NestCrowRuntime.init()
+
+    expect EvaluatorError:
+      discard runtime.evaluator.exec(parse("openDialog \"missing\" \"./does-not-exist\"\n"))
+
+  test "crow render errors do not add inline error dialogs":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(320, 36)
+    ui.loadFont("font", "", 18)
+    let errorDialogID = ui.id("_nest_error_dialog")
+
+    runtime.renderLayoutOnly(ui, parse("""
+panel (id "root"):
+  width = fill
+  height = fill
+  missingCommand
+"""), 320, 36)
+
+    check runtime.hasError
+    check runtime.lastError.len > 0
+    expect ValueError:
+      discard ui.widget(errorDialogID)
