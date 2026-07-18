@@ -66,10 +66,16 @@ type
     layoutChildren: Table[WidgetID, seq[Widget]]
     scrollStates: Table[WidgetID, ScrollState]
     scrollContainers: HashSet[WidgetID]
+    liveWidgetIDs: HashSet[WidgetID]
+    previousWidgetIDs: HashSet[WidgetID]
+    renderKeys: Table[WidgetID, string]
     idScopes: seq[string]
     eventActiveWidgets: HashSet[WidgetID]
     eventSubmittedWidgets: HashSet[WidgetID]
     eventFocusedWidget: WidgetID
+    scheduledRedrawTicks: int
+    hasScheduledRedraw: bool
+    frameRedrawn: bool
     phase: UIPhase
 
   ListItem*[T] = object
@@ -128,7 +134,7 @@ proc init*(T: typedesc[UI]): T =
     root: ui.box(nextWidgetID(), width = fill(), height = fill()),
     context: UIContext(
       update: UpdateContext(),
-      draw: DrawContext(resources: Resources.new(), palette: Palette.init()),
+      draw: DrawContext(resources: Resources.new(), palette: Palette.init(), dirtyAll: true),
     ),
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
   )
@@ -157,6 +163,47 @@ proc windowHeight*(self: UI): int =
 
 proc wantsTextInput*(self: UI): bool =
   self.context.draw.focusedWidget != InvalidWidgetID
+
+proc requestRedrawAfter*(self: var UI, ms: int) =
+  let ticks = input.getTicks() + max(ms, 0)
+  if not self.hasScheduledRedraw or ticks < self.scheduledRedrawTicks:
+    self.scheduledRedrawTicks = ticks
+    self.hasScheduledRedraw = true
+
+proc redrawDelayMs*(self: UI): int =
+  if not self.hasScheduledRedraw:
+    return -1
+  max(self.scheduledRedrawTicks - input.getTicks(), 0)
+
+proc clearRedrawRequest*(self: var UI) {.raises: [].} =
+  self.hasScheduledRedraw = false
+
+proc markAllDirty*(self: var UI) {.raises: [].} =
+  self.context.draw.dirtyAll = true
+
+proc markDirty*(self: var UI, id: WidgetID) {.raises: [].} =
+  if id != InvalidWidgetID:
+    self.context.draw.dirtyWidgets.incl id
+
+proc redrewFrame*(self: UI): bool {.raises: [].} =
+  self.frameRedrawn
+
+proc setRenderKey*(self: var UI, id: WidgetID, key: string) =
+  let previous = self.renderKeys.getOrDefault(id)
+  if previous != key:
+    if previous.len > 0:
+      self.markAllDirty()
+    else:
+      self.markDirty(id)
+    self.renderKeys[id] = key
+
+proc renderKey(kind: string, config: BoxConfig): string =
+  kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
+    $config.padding & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
+    $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY
+
+proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): string =
+  kind & "|" & $width & "|" & $height & "|" & $alignSelf
 
 proc beginInputFrame*(self: var UI) =
   self.context.update.keyInputs.setLen(0)
@@ -345,6 +392,8 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
+  self.liveWidgetIDs.clear()
+  self.liveWidgetIDs.incl self.root.id
   self.idScopes.setLen(0)
   self.layout.resize(windowWidth.toFloat, windowHeight.toFloat)
 
@@ -761,6 +810,17 @@ proc endLayout*(self: var UI): bool {.discardable.} =
 
   result = self.layout.solve()
   if result:
+    for box in self.layout.boxes:
+      self.liveWidgetIDs.incl box.id
+    if self.liveWidgetIDs != self.previousWidgetIDs:
+      self.markAllDirty()
+      var staleKeys: seq[WidgetID]
+      for id in self.renderKeys.keys:
+        if id notin self.liveWidgetIDs:
+          staleKeys.add id
+      for id in staleKeys:
+        self.renderKeys.del id
+    self.previousWidgetIDs = self.liveWidgetIDs
     for parentID in directParents:
       if parentID in self.scrollContainers and pendingByParent.hasKey(parentID):
         self.assignDirectStack(pendingByParent[parentID], pendingByParent)
@@ -848,6 +908,37 @@ template events*(self: var UI, body: untyped) =
   if self.phase == EventPhase:
     body
 
+proc markStateChanges(
+    ui: var UI,
+    beforeHot, beforeActive, beforeSubmitted: HashSet[WidgetID],
+    beforeFocused: WidgetID,
+    updateContext: UpdateContext,
+) =
+  for id in beforeHot:
+    if id notin updateContext.hotWidgets:
+      ui.markDirty(id)
+  for id in updateContext.hotWidgets:
+    if id notin beforeHot:
+      ui.markDirty(id)
+
+  for id in beforeActive:
+    if id notin updateContext.activeWidgets:
+      ui.markDirty(id)
+  for id in updateContext.activeWidgets:
+    if id notin beforeActive:
+      ui.markDirty(id)
+
+  for id in beforeSubmitted:
+    if id notin updateContext.submittedWidgets:
+      ui.markDirty(id)
+  for id in updateContext.submittedWidgets:
+    if id notin beforeSubmitted:
+      ui.markDirty(id)
+
+  if beforeFocused != updateContext.focusedWidget:
+    ui.markDirty(beforeFocused)
+    ui.markDirty(updateContext.focusedWidget)
+
 template layout*(
     ui: var UI,
     updateContext: var UpdateContext,
@@ -856,6 +947,7 @@ template layout*(
 ): auto =
   # This could totally be done at compile time, the only reason I am
   # avoiding doing that, is I want to allow loading ui from a dynamic module
+  ui.frameRedrawn = false
   ui.beginEvents(drawContext)
   blk
 
@@ -870,17 +962,23 @@ template layout*(
     layoutOk = false
 
   if layoutOk:
+    let beforeHot {.gensym.} = drawContext.hotWidgets
+    let beforeActive {.gensym.} = drawContext.activeWidgets
+    let beforeSubmitted {.gensym.} = drawContext.submittedWidgets
+    let beforeFocused {.gensym.} = drawContext.focusedWidget
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
     ui.update(updateContext)
+    ui.markStateChanges(beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext)
     switchState(updateContext, drawContext)
-    ui.draw(drawContext)
+    ui.frameRedrawn = ui.draw(drawContext)
   else:
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
   ui.reset()
 
 template layout*(ui: var UI, blk: untyped): auto =
+  ui.frameRedrawn = false
   ui.beginEvents(ui.context.draw)
   blk
 
@@ -895,11 +993,16 @@ template layout*(ui: var UI, blk: untyped): auto =
     layoutOk = false
 
   if layoutOk:
+    let beforeHot {.gensym.} = ui.context.draw.hotWidgets
+    let beforeActive {.gensym.} = ui.context.draw.activeWidgets
+    let beforeSubmitted {.gensym.} = ui.context.draw.submittedWidgets
+    let beforeFocused {.gensym.} = ui.context.draw.focusedWidget
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
     ui.update(ui.context.update)
+    ui.markStateChanges(beforeHot, beforeActive, beforeSubmitted, beforeFocused, ui.context.update)
     switchState(ui.context.update, ui.context.draw)
-    ui.draw(ui.context.draw)
+    ui.frameRedrawn = ui.draw(ui.context.draw)
   else:
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
@@ -987,8 +1090,27 @@ proc updateWidgetTree(
 proc update*(self: var UI, context: var UpdateContext) =
   self.updateWidgetTree(self.root, self.componentByID, context)
 
-proc draw*(self: UI, context: DrawContext) =
-  fillRect(rect(0, 0, context.windowWidth, context.windowHeight), color(0, 0, 0))
+proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
+  if not context.dirtyAll and context.dirtyWidgets.len == 0:
+    return false
+
+  var drawContext = context
+  if drawContext.dirtyAll:
+    fillRect(rect(0, 0, drawContext.windowWidth, drawContext.windowHeight), color(0, 0, 0))
+  else:
+    var parentByID: Table[WidgetID, WidgetID]
+    for parent, children in self.layoutChildren.pairs:
+      for child in children:
+        parentByID[child.id] = parent
+    var expanded = drawContext.dirtyWidgets
+    for id in drawContext.dirtyWidgets:
+      var current = id
+      while parentByID.hasKey(current):
+        current = parentByID[current]
+        if current == self.root.id:
+          break
+        expanded.incl current
+    drawContext.dirtyWidgets = expanded
 
   proc drawScrollbars(widget: Widget) =
     if widget.id notin self.scrollContainers:
@@ -997,31 +1119,36 @@ proc draw*(self: UI, context: DrawContext) =
     if state.maxY > 0:
       let track = verticalTrack(widget)
       let thumb = verticalThumb(widget, state)
-      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), context.palette.panelMuted)
-      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), context.palette.cardAccent)
+      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), drawContext.palette.panelMuted)
+      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), drawContext.palette.cardAccent)
     if state.maxX > 0:
       let track = horizontalTrack(widget)
       let thumb = horizontalThumb(widget, state)
-      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), context.palette.panelMuted)
-      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), context.palette.cardAccent)
+      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt), drawContext.palette.panelMuted)
+      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt), drawContext.palette.cardAccent)
 
-  proc drawWidgetTree(widget: Widget) =
-    if self.componentByID.hasKey(widget.id):
-      self.componentByID[widget.id].draw(widget, context)
+  proc drawWidgetTree(widget: Widget, inheritedDirty = false) =
+    let dirty = drawContext.dirtyAll or inheritedDirty or widget.id in drawContext.dirtyWidgets
+    if dirty and self.componentByID.hasKey(widget.id):
+      self.componentByID[widget.id].draw(widget, drawContext)
 
     if widget.id in self.scrollContainers:
       let f = widget.frame
       saveState()
       setClipRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt))
       for child in self.layoutChildren.getOrDefault(widget.id):
-        drawWidgetTree(child)
+        drawWidgetTree(child, dirty)
       restoreState()
-      drawScrollbars(widget)
+      if dirty:
+        drawScrollbars(widget)
     else:
       for child in self.layoutChildren.getOrDefault(widget.id):
-        drawWidgetTree(child)
+        drawWidgetTree(child, dirty)
 
   drawWidgetTree(self.root)
+  context.dirtyWidgets.clear()
+  context.dirtyAll = false
+  true
 
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   let components = self.takeChildren()
@@ -1084,6 +1211,7 @@ template row*(
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("row", config))
       self.pushLayout(layoutParent)
       body
       discard
@@ -1103,6 +1231,7 @@ template column*(
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("column", config))
       self.pushLayout(layoutParent)
       body
       discard
@@ -1116,6 +1245,7 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyp
       discard
     else:
       let layoutParent = self.box(id, width = w, height = h)
+      self.setRenderKey(id, renderKey("center", w, h, AlignAuto))
       self.pushLayout(layoutParent)
       body
       discard
@@ -1146,6 +1276,7 @@ template panel*(
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("panel", config))
       let component = Panel.new()
       self.attach(layoutParent, Component(component))
       self.pushLayout(layoutParent)
@@ -1167,6 +1298,7 @@ template card*(
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("card", config))
       let component = Card.new()
       self.attach(layoutParent, Component(component))
       self.pushLayout(layoutParent)
@@ -1188,6 +1320,7 @@ template dialogHeader*(
     else:
       let layoutParent =
         self.box(id, width = config.width, height = config.height, alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("dialogHeader", config))
       let component = DialogHeader.new()
       self.attach(layoutParent, Component(component))
       self.pushLayout(layoutParent)
@@ -1199,6 +1332,7 @@ template dialogHeader*(
 proc box*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget =
+  self.liveWidgetIDs.incl id
   self.layout.box(id, width = width, height = height).withAlignSelf(alignSelf)
 
 proc container*(
@@ -1209,6 +1343,7 @@ proc container*(
     alignSelf = AlignAuto,
 ): Widget {.discardable, layoutOnly.} =
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
+  self.setRenderKey(id, renderKey("container", width, height, alignSelf))
   self.attach(result, Component(component))
   self.addChild(result)
 
@@ -1216,6 +1351,7 @@ proc spacer*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget {.discardable, layoutOnly.} =
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
+  self.setRenderKey(id, renderKey("spacer", width, height, alignSelf))
   self.addChild(result)
 
 proc button*(
@@ -1228,6 +1364,7 @@ proc button*(
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("button:" & label, width, height, alignSelf))
   let btn = Button.new(label)
   ui.attach(box, Component(btn))
   ui.addChild(box)
@@ -1250,6 +1387,7 @@ proc label*(
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("label:" & text & ":" & fontName, width, height, alignSelf))
   let lbl = Label.new(text, fontName)
   ui.attach(box, Component(lbl))
   ui.addChild(box)
@@ -1264,6 +1402,9 @@ proc coloredLabel*(
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(
+    id, renderKey("coloredLabel:" & text & ":" & fontName & ":" & $color, width, height, alignSelf)
+  )
   let lbl = Label.new(text, fontName, color, hasColor = true)
   ui.attach(box, Component(lbl))
   ui.addChild(box)
@@ -1281,6 +1422,9 @@ proc diagnosticLabel*(
   if ui.phase == EventPhase:
     return clickable and ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(
+    id, renderKey("diagnosticLabel:" & text & ":" & fontName & ":" & $color, width, height, alignSelf)
+  )
   let lbl = DiagnosticLabel.new(text, fontName, color, hasColor = true)
   ui.attach(box, Component(lbl))
   ui.addChild(box)
@@ -1294,6 +1438,7 @@ proc lineInput*(
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("lineInput:" & state.text & ":" & fontName, width, height, alignSelf))
   let input = LineInput.new(state, fontName)
   ui.attach(box, Component(input))
   ui.addChild(box)

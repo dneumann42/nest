@@ -213,6 +213,20 @@ proc weekday(year, month, day: int): int =
 proc dateText(year, month, day: int): string =
   &"{padInt(year, 4)}-{padInt(month, 2)}-{padInt(day, 2)}"
 
+proc clockRedrawMs(pattern: string): int =
+  if pattern.contains("s"):
+    1000
+  else:
+    60_000
+
+proc requestRedrawAfter(runtime: NestCrowRuntime, ms: int) {.raises: [EvaluatorError].} =
+  try:
+    runtime.requireUi().requestRedrawAfter(ms)
+  except EvaluatorError as error:
+    raise error
+  except Exception:
+    discard
+
 proc parseDateText(value: string): tuple[ok: bool, year, month, day: int] =
   let parts = value.split("-")
   if parts.len != 3:
@@ -459,17 +473,22 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     discard bodyNodes
     if arguments.len == 0:
       return boolean(false)
-    boolean(
+    let clicked =
       runtime.requireUi().inEventPhase() and
         runtime.requireUi().clicked(runtime.asWidgetID(env.eval(arguments[0])))
-    )
+    if clicked:
+      runtime.requireUi().markAllDirty()
+    boolean(clicked)
 
   runtime.evaluator.native "keyPressed":
     discard layout
     discard bodyNodes
     if arguments.len != 1:
       raise newException(EvaluatorError, "keyPressed expects one key name")
-    boolean(runtime.requireUi().keyPressed(env.eval(arguments[0]).asString))
+    let pressed = runtime.requireUi().keyPressed(env.eval(arguments[0]).asString)
+    if pressed:
+      runtime.requireUi().markAllDirty()
+    boolean(pressed)
 
   runtime.evaluator.native "fill":
     discard env
@@ -514,6 +533,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         env.eval(arguments[0]).asString
       else:
         "HH:mm"
+    runtime.requestRedrawAfter(clockRedrawMs(pattern))
     text(now().format(pattern))
 
   runtime.evaluator.native "today-date":
@@ -521,6 +541,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     discard arguments
     discard layout
     discard bodyNodes
+    runtime.requestRedrawAfter(60 * 60 * 1000)
     text(now().format("yyyy-MM-dd"))
 
   runtime.evaluator.native "date":

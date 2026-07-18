@@ -23,6 +23,9 @@ type AppConfig* = object
   layerShell*: bool
   layerShellConfig*: LayerShellConfig
 
+type FramePacer = object
+  firstFrame: bool
+
 type ProjectConfig = object
   main: string
   title: string
@@ -89,6 +92,14 @@ proc overlayDialog*(
       keyboard: KeyboardOnDemand,
     )
   )
+
+proc init(T: typedesc[FramePacer]): T =
+  T(firstFrame: true)
+
+proc takeFirstFrame(pacer: var FramePacer): bool =
+  if pacer.firstFrame:
+    pacer.firstFrame = false
+    result = true
 
 proc initWindow*(cfg: AppConfig): ScreenLayout =
   if cfg.layerShell:
@@ -339,6 +350,68 @@ proc textFromEvent(chars: array[4, char]): string =
       break
     result.add(ch)
 
+proc handleEvent(
+    e: Event, running: var bool, updateContext: var UpdateContext, drawContext: var DrawContext
+) =
+  case e.kind
+  of QuitEvent, WindowCloseEvent:
+    running = false
+  of MouseMoveEvent:
+    updateContext.mouseX = e.x
+    updateContext.mouseY = e.y
+    drawContext.mouseX = e.x
+    drawContext.mouseY = e.y
+  of MouseDownEvent:
+    let last = updateContext.mouseLeftDown
+    updateContext.mouseLeftDown = true
+    updateContext.mouseLeftPressed = not last
+  of MouseUpEvent:
+    updateContext.mouseLeftDown = false
+    updateContext.mouseLeftPressed = false
+  of WindowResizeEvent:
+    updateContext.windowWidth = max(e.x, 0)
+    updateContext.windowHeight = max(e.y, 0)
+    drawContext.windowWidth = updateContext.windowWidth
+    drawContext.windowHeight = updateContext.windowHeight
+  of KeyDownEvent:
+    updateContext.keyInputs.add KeyInput(key: e.key, mods: e.mods)
+  of TextInputEvent:
+    let text = textFromEvent(e.text)
+    if text.len > 0:
+      updateContext.textInputs.add text
+  of MouseWheelEvent:
+    updateContext.mouseWheelX += e.x.toFloat
+    updateContext.mouseWheelY += e.y.toFloat
+  else:
+    discard
+
+proc handleEvent(e: Event, running: var bool, ui: var UI) =
+  case e.kind
+  of QuitEvent, WindowCloseEvent:
+    running = false
+  of MouseMoveEvent:
+    ui.mouseMove(e.x, e.y)
+  of MouseDownEvent:
+    ui.mouseDown()
+    ui.requestRedrawAfter(0)
+  of MouseUpEvent:
+    ui.mouseUp()
+    ui.requestRedrawAfter(0)
+  of WindowResizeEvent:
+    ui.resizeWindow(e.x, e.y)
+    ui.markAllDirty()
+  of KeyDownEvent:
+    ui.keyDown(e.key, e.mods)
+    ui.requestRedrawAfter(0)
+  of TextInputEvent:
+    ui.textInput(textFromEvent(e.text))
+    ui.requestRedrawAfter(0)
+  of MouseWheelEvent:
+    ui.mouseWheel(e.x.toFloat, e.y.toFloat)
+    ui.requestRedrawAfter(0)
+  else:
+    discard
+
 proc closeCrowErrorDialog(app: NestCrowApp) =
   if app.errorDialogProcess != nil:
     if app.errorDialogProcess.running:
@@ -442,56 +515,39 @@ template application*(cfg: AppConfig, blk: untyped) =
       palette: Palette.init(),
       windowWidth: window.width,
       windowHeight: window.height,
+      dirtyAll: true,
     )
   drawContext.resources.loadFont("font", "", 18)
+  var framePacer = FramePacer.init()
   while running:
     var e = Event()
-    updateContext.keyInputs.setLen(0)
-    updateContext.textInputs.setLen(0)
-    updateContext.mouseWheelX = 0
-    updateContext.mouseWheelY = 0
-    updateContext.submittedWidgets.clear()
     let inputFlags =
       if drawContext.focusedWidget != InvalidWidgetID:
         {WantTextInput}
       else:
         {}
-    while pollEvent(e, inputFlags):
-      case e.kind
-      of QuitEvent, WindowCloseEvent:
-        running = false
-      of MouseMoveEvent:
-        updateContext.mouseX = e.x
-        updateContext.mouseY = e.y
-        drawContext.mouseX = e.x
-        drawContext.mouseY = e.y
-      of MouseDownEvent:
-        let last = updateContext.mouseLeftDown
-        updateContext.mouseLeftDown = true
-        updateContext.mouseLeftPressed = not last
-      of MouseUpEvent:
-        updateContext.mouseLeftDown = false
-        updateContext.mouseLeftPressed = false
-      of WindowResizeEvent:
-        updateContext.windowWidth = max(e.x, 0)
-        updateContext.windowHeight = max(e.y, 0)
-        drawContext.windowWidth = updateContext.windowWidth
-        drawContext.windowHeight = updateContext.windowHeight
-      of KeyDownEvent:
-        updateContext.keyInputs.add KeyInput(key: e.key, mods: e.mods)
-      of TextInputEvent:
-        let text = textFromEvent(e.text)
-        if text.len > 0:
-          updateContext.textInputs.add text
-      of MouseWheelEvent:
-        updateContext.mouseWheelX += e.x.toFloat
-        updateContext.mouseWheelY += e.y.toFloat
+    var shouldRender = framePacer.takeFirstFrame()
+    let frameEvent =
+      if shouldRender:
+        false
       else:
-        discard
+        input.waitEvent(e, -1, inputFlags)
+    if frameEvent:
+      shouldRender = true
+    elif not shouldRender:
+      continue
+    updateContext.keyInputs.setLen(0)
+    updateContext.textInputs.setLen(0)
+    updateContext.mouseWheelX = 0
+    updateContext.mouseWheelY = 0
+    updateContext.submittedWidgets.clear()
+    if frameEvent:
+      handleEvent(e, running, updateContext, drawContext)
+    while pollEvent(e, inputFlags):
+      handleEvent(e, running, updateContext, drawContext)
     blk
     updateContext.mouseLeftPressed = false
     refresh()
-    input.sleep(16)
   shutdown()
 
 template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
@@ -499,38 +555,37 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
   var running {.inject.} = true
   ui.initContext(window.width, window.height)
   ui.loadFont("font", "", 18)
+  var framePacer = FramePacer.init()
   while running:
     var e = Event()
-    ui.beginInputFrame()
     let inputFlags =
       if ui.wantsTextInput():
         {WantTextInput}
       else:
         {}
-    while pollEvent(e, inputFlags):
-      case e.kind
-      of QuitEvent, WindowCloseEvent:
-        running = false
-      of MouseMoveEvent:
-        ui.mouseMove(e.x, e.y)
-      of MouseDownEvent:
-        ui.mouseDown()
-      of MouseUpEvent:
-        ui.mouseUp()
-      of WindowResizeEvent:
-        ui.resizeWindow(e.x, e.y)
-      of KeyDownEvent:
-        ui.keyDown(e.key, e.mods)
-      of TextInputEvent:
-        ui.textInput(textFromEvent(e.text))
-      of MouseWheelEvent:
-        ui.mouseWheel(e.x.toFloat, e.y.toFloat)
+    var shouldRender = framePacer.takeFirstFrame()
+    let waitMs = ui.redrawDelayMs()
+    let frameEvent =
+      if shouldRender:
+        false
       else:
-        discard
+        input.waitEvent(e, waitMs, inputFlags)
+    if frameEvent:
+      shouldRender = true
+    elif waitMs >= 0:
+      shouldRender = true
+      ui.clearRedrawRequest()
+    if not shouldRender:
+      continue
+    ui.beginInputFrame()
+    if frameEvent:
+      handleEvent(e, running, ui)
+    while pollEvent(e, inputFlags):
+      handleEvent(e, running, ui)
     blk
     ui.finishInputFrame()
-    refresh()
-    input.sleep(16)
+    if ui.redrewFrame():
+      refresh()
   shutdown()
 
 proc runCrowErrorDialog(message: string) =

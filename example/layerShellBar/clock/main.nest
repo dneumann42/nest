@@ -24,7 +24,7 @@ card (id "start-popover"):
   column (id "start-popover" "actions"):
     width = fill
     height = fit
-    padding = 8
-    gap = 6
+    padding = 0
+    gap = 0
     alignItems = AlignStretch
     dateSelector "clock-calendar" selectedDate

@@ -61,6 +61,8 @@ type
     activeWidgets*: HashSet[WidgetID]
     focusedWidget*: WidgetID
     submittedWidgets*: HashSet[WidgetID]
+    dirtyWidgets*: HashSet[WidgetID]
+    dirtyAll*: bool
     palette*: Palette
 
   UpdateContext* = object

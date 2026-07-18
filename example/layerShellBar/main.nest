@@ -9,7 +9,7 @@ fun startMenu lbl:
     height = fit
 
 fun dateTime:
-  button clockID (clock "MMM d, yyyy   hh:mm tt"):
+  button clockID (clock "MMM d, yyyy   hh:mm:ss tt"):
     width = fit
     height = fit
 
@@ -28,6 +28,7 @@ events:
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"
+  print (dialogResult "clock")
 
 column (id "root"):
   width = fill
