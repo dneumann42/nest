@@ -28,9 +28,9 @@ import "components/notifications.nest"
 
 events:
   when (and (clicked startID) (not (dialogOpen? "start"))):
-    openDialog "start" "./startPopover" (dict-get cfg "start-label")
+    openDialog "start" "./startPopover" (dict-get cfg "start-label") startID
   when (and (clicked clockID) (not (dialogOpen? "clock"))):
-    openDialog "clock" "./clock" ""
+    openDialog "clock" "./clock" "" clockID
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"
@@ -74,10 +74,10 @@ column (id "root"):
           alignItems = AlignCenter
           justifyContent = JustifyEnd
           volumeWidget "bar"
+          notificationWidget "bar"
           cpuMeter "bar"
           memoryMeter "bar"
           storageMeter "bar"
-          notificationWidget "bar"
           networkMeter "bar"
       row (id "clock-center"):
         width = fill

@@ -68,6 +68,7 @@ type
     layoutChildren: Table[WidgetID, seq[Widget]]
     scrollStates: Table[WidgetID, ScrollState]
     scrollContainers: HashSet[WidgetID]
+    frameByID: Table[WidgetID, Frame]
     liveWidgetIDs: HashSet[WidgetID]
     previousWidgetIDs: HashSet[WidgetID]
     renderKeys: Table[WidgetID, string]
@@ -164,6 +165,17 @@ proc windowWidth*(self: UI): int =
 
 proc windowHeight*(self: UI): int =
   self.context.draw.windowHeight
+
+proc widgetFrame*(self: UI, id: WidgetID): tuple[ok: bool, frame: Frame] {.raises: [].} =
+  for box in self.layout.boxes:
+    if box.id == id:
+      return (true, box.frame)
+  try:
+    if self.frameByID.hasKey(id):
+      return (true, self.frameByID[id])
+  except KeyError:
+    discard
+  (false, Frame())
 
 proc wantsTextInput*(self: UI): bool =
   self.context.draw.focusedWidget != InvalidWidgetID
@@ -894,6 +906,9 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       if parentID in self.scrollContainers and pendingByParent.hasKey(parentID):
         self.assignDirectStack(pendingByParent[parentID], pendingByParent)
     self.applyScrollOffsets()
+    self.frameByID.clear()
+    for box in self.layout.boxes:
+      self.frameByID[box.id] = box.frame
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:

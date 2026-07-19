@@ -7,7 +7,7 @@ fun workspaceLabel workspace:
     when (dict-get workspace "focused"):
       string "[" name "]"
     when (dict-get workspace "visible"):
-      string "(" name ")"
+      name
     when T:
       name
 
@@ -22,7 +22,7 @@ component workspaces key:
   row (id keyText "workspaces"):
     width = fit
     height = fit
-    gap = 4
+    gap = 1
     alignItems = AlignCenter
     if (empty? workspaceList):
       then:

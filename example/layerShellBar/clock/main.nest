@@ -2,7 +2,7 @@ define:
   selectedDate = (today-date)
   clickedDate = nothing
 
-import "components/calendar.nest"
+import "../components/calendar.nest"
 
 events:
   when (keyPressed "escape"):

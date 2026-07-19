@@ -601,6 +601,23 @@ suite "ui layout nesting":
     check ui.layout.boxes.len == 1
     check ui.components.len == 0
 
+  test "widget frames remain available after layout reset":
+    var ui = UI.init()
+    var updateContext = UpdateContext(windowWidth: 200, windowHeight: 80)
+    var drawContext = DrawContext(
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 200, windowHeight: 80
+    )
+    drawContext.resources.loadFont("font", "", 18)
+
+    ui.layout(updateContext, drawContext):
+      ui.button(Button1, "One", width = fixed(50), height = fixed(20))
+
+    check ui.layout.boxes.len == 1
+    let located = ui.widgetFrame(Button1)
+    check located.ok
+    check located.frame.width == 50
+    check located.frame.height == 20
+
   test "event blocks consume the previous frame hit state before layout":
     var ui = UI.init()
     var count = 0

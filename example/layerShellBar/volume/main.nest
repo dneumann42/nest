@@ -1,4 +1,4 @@
-import "components/volume.nest"
+import "../components/volume.nest"
 
 define:
   muteID = (id "volume" "mute")

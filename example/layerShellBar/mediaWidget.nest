@@ -1,4 +1,4 @@
-import "lib/components/media.nest"
+import "components/media.nest"
 
 component mediaWidget key:
   define:
@@ -26,7 +26,7 @@ component mediaWidget key:
     when (clicked previousID):
       mediaAction (id keyText "action" "previous") "previous 2>/dev/null"
     when (and (clicked titleID) (not (dialogOpen? "media"))):
-      openDialog "media" "./media" ""
+      openDialog "media" "./media" "" titleID
     when (clicked playPauseID):
       set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
       set displayStatus statusOverride

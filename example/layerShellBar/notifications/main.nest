@@ -1,4 +1,4 @@
-import "components/notifications.nest"
+import "../components/notifications.nest"
 
 define:
   closeID = (id "notifications" "close")

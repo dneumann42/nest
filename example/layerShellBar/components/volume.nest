@@ -24,7 +24,7 @@ component volumeWidget key:
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "volume"))):
-      openDialog "volume" "./volume" ""
+      openDialog "volume" "./volume" "" buttonID
 
   button buttonID status:
     width = fit

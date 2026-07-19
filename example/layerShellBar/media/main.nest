@@ -1,4 +1,4 @@
-import "lib/components/media.nest"
+import "../components/media.nest"
 
 define:
   artworkID = (id "media" "artwork")

@@ -396,7 +396,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
       runtime.renderLayoutOnly(ui, parse("""
 define:
   selectedDate = "2026-07-18"
-import "lib/components/calendar.nest"
+import "example/layerShellBar/components/calendar.nest"
 dateSelector "cal" selectedDate
 """), 320, 320)
 
@@ -421,7 +421,7 @@ dateSelector "cal" selectedDate
       runtime.render(eventUi, parse("""
 define:
   selectedDate = "2026-07-18"
-import "lib/components/calendar.nest"
+import "example/layerShellBar/components/calendar.nest"
 dateSelector "cal" selectedDate
 """))
 
@@ -464,7 +464,7 @@ dateSelector "cal" selectedDate
 define:
   selectedDate = "2026-07-18"
   clickedDate = nothing
-import "lib/components/calendar.nest"
+import "example/layerShellBar/components/calendar.nest"
 dateSelectorWithSignal "cal" selectedDate clickedDate
 """))
 
@@ -498,7 +498,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
       ui.beginLayout(320, 320)
       runtime.renderComponent(
         ui,
-        "lib/components/calendar.nest",
+        "example/layerShellBar/components/calendar.nest",
         "dateSelector",
         @[stringLiteral("nim-cal"), symbol("selectedDate")],
       )

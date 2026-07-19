@@ -1,4 +1,4 @@
-import std/[cmdline, os, osproc, sets, strutils]
+import std/[cmdline, json, os, osproc, sets, strutils]
 
 import nest/[ui, resources, palette, dialogs]
 export ui
@@ -34,6 +34,11 @@ type ProjectConfig = object
   namespace: string
   exclusiveZone: int
   marginTop, marginRight, marginBottom, marginLeft: int
+
+type DialogAnchor = object
+  ok: bool
+  x, y, width, height: float64
+  windowWidth, windowHeight: int
 
 proc init*(T: typedesc[AppConfig], width = 800, height = 600, title = "Nest"): T =
   T(
@@ -197,6 +202,100 @@ proc loadProjectConfig(projectDir: string): ProjectConfig =
 proc positive(value: int): Positive =
   max(value, 1).Positive
 
+proc numberField(node: JsonNode; name: string): float64 =
+  if node.kind == JObject and node.hasKey(name):
+    let field = node[name]
+    if field.kind == JInt:
+      return field.getInt.float64
+    if field.kind == JFloat:
+      return field.getFloat
+  0.0
+
+proc intField(node: JsonNode; name: string): int =
+  numberField(node, name).int
+
+proc parseDialogAnchor(value: string): DialogAnchor =
+  if value.len == 0:
+    return
+  try:
+    let node = parseJson(value)
+    result = DialogAnchor(
+      ok: node.kind == JObject,
+      x: numberField(node, "x"),
+      y: numberField(node, "y"),
+      width: numberField(node, "width"),
+      height: numberField(node, "height"),
+      windowWidth: intField(node, "windowWidth"),
+      windowHeight: intField(node, "windowHeight"),
+    )
+    result.ok = result.ok and result.windowWidth > 0 and result.windowHeight > 0
+  except JsonParsingError:
+    result = DialogAnchor()
+  except KeyError:
+    result = DialogAnchor()
+
+proc edgeDistance(value: float64): int32 =
+  max(value.int, 0).int32
+
+proc clampDistance(value, size, limit: float64): float64 =
+  value.clamp(0.0, max(limit - size, 0.0))
+
+proc applyDialogAnchor(app: AppConfig; anchor: DialogAnchor): AppConfig =
+  result = app
+  if not anchor.ok:
+    return
+
+  let
+    centerX = anchor.x + anchor.width / 2.0
+    centerY = anchor.y + anchor.height / 2.0
+    leftZone = centerX < anchor.windowWidth.float64 / 3.0
+    rightZone = centerX > anchor.windowWidth.float64 * 2.0 / 3.0
+    topZone = centerY <= anchor.windowHeight.float64 / 2.0
+    horizontalParent = anchor.windowWidth >= anchor.windowHeight
+    desiredLeft =
+      if leftZone:
+        anchor.x
+      elif rightZone:
+        anchor.x + anchor.width - app.width.float64
+      else:
+        centerX - app.width.float64 / 2.0
+    popupLeft = clampDistance(desiredLeft, app.width.float64, anchor.windowWidth.float64)
+
+  result.layerShell = true
+  result.layerShellConfig.layer = LayerOverlay
+  result.layerShellConfig.exclusiveZone = 0
+  result.layerShellConfig.marginTop = 0
+  result.layerShellConfig.marginRight = 0
+  result.layerShellConfig.marginBottom = 0
+  result.layerShellConfig.marginLeft = 0
+  result.layerShellConfig.anchors = {}
+
+  if topZone:
+    result.layerShellConfig.anchors.incl EdgeTop
+    result.layerShellConfig.marginTop =
+      if horizontalParent:
+        0'i32
+      else:
+        edgeDistance(anchor.y + anchor.height)
+  else:
+    result.layerShellConfig.anchors.incl EdgeBottom
+    result.layerShellConfig.marginBottom =
+      if horizontalParent:
+        0'i32
+      else:
+        edgeDistance(anchor.windowHeight.float64 - anchor.y)
+
+  if leftZone:
+    result.layerShellConfig.anchors.incl EdgeLeft
+    result.layerShellConfig.marginLeft = edgeDistance(popupLeft)
+  elif rightZone:
+    result.layerShellConfig.anchors.incl EdgeRight
+    result.layerShellConfig.marginRight =
+      edgeDistance(anchor.windowWidth.float64 - popupLeft - app.width.float64)
+  else:
+    result.layerShellConfig.anchors.incl EdgeLeft
+    result.layerShellConfig.marginLeft = edgeDistance(popupLeft)
+
 proc appConfig(config: ProjectConfig): AppConfig =
   proc withExclusiveZone(app: AppConfig): AppConfig =
     result = app
@@ -356,7 +455,7 @@ proc usage(): string =
   """Usage:
   nest --project DIR
   nest run DIR
-  nest dialog DIR [DATA]
+  nest dialog DIR [DATA] [RESULT_PATH] [ANCHOR_JSON]
   nest error-dialog MESSAGE
   nest generate [DIR]
 
@@ -626,7 +725,11 @@ proc runCrowErrorDialog(message: string) =
     drawCrowErrorDialog(ui, message, copied, running)
 
 proc runProject(
-    projectDir: string, dialogData = "", dialogMode = false, dialogResultPath = ""
+    projectDir: string,
+    dialogData = "",
+    dialogMode = false,
+    dialogResultPath = "",
+    dialogAnchor = "",
 ): string =
   discard dialogMode
   let dir = projectDir.normalizedPath
@@ -641,7 +744,7 @@ proc runProject(
   var ui = UI.init()
   let app = NestCrowApp.init(mainPath)
   app.runtime.dialogData = dialogData
-  application appConfig(config), ui:
+  application appConfig(config).applyDialogAnchor(parseDialogAnchor(dialogAnchor)), ui:
     app.render(ui)
     if app.lastError.len > 0:
       app.launchCrowErrorDialog(app.lastError)
@@ -680,7 +783,18 @@ proc main() =
         args[3]
       else:
         ""
-    let value = runProject(args[1], dialogData = data, dialogMode = true, dialogResultPath = resultPath)
+    let anchor =
+      if args.len >= 5:
+        args[4]
+      else:
+        ""
+    let value = runProject(
+      args[1],
+      dialogData = data,
+      dialogMode = true,
+      dialogResultPath = resultPath,
+      dialogAnchor = anchor,
+    )
     if resultPath.len > 0:
       writeFile(resultPath, value)
     elif value.len > 0:

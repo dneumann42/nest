@@ -587,7 +587,26 @@ proc dialogResultPath(key: string): string =
       safeKey.add '-'
   getTempDir() / ("nest-dialog-" & $getCurrentProcessId() & "-" & $currentTicks() & "-" & safeKey)
 
-proc launchDialogProcess(runtime: NestCrowRuntime; key, projectDir, data: string) {.raises: [EvaluatorError].} =
+proc dialogAnchorJson(runtime: NestCrowRuntime; anchorID: WidgetID): string =
+  if runtime.currentUi.isNil or anchorID == InvalidWidgetID:
+    return ""
+  let
+    ui = runtime.currentUi[]
+    located = ui.widgetFrame(anchorID)
+  if not located.ok:
+    return ""
+  $(%*{
+    "x": located.frame.x,
+    "y": located.frame.y,
+    "width": located.frame.width,
+    "height": located.frame.height,
+    "windowWidth": ui.windowWidth,
+    "windowHeight": ui.windowHeight,
+  })
+
+proc launchDialogProcess(
+    runtime: NestCrowRuntime; key, projectDir, data: string; anchorID = InvalidWidgetID
+) {.raises: [EvaluatorError].} =
   if key in runtime.dialogProcesses:
     return
   let resolvedProjectDir =
@@ -598,11 +617,15 @@ proc launchDialogProcess(runtime: NestCrowRuntime; key, projectDir, data: string
   if not dirExists(resolvedProjectDir):
     raise newException(EvaluatorError, "dialog project directory does not exist: " & resolvedProjectDir)
   let resultPath = dialogResultPath(key)
+  let anchor = runtime.dialogAnchorJson(anchorID)
+  var args = @["dialog", resolvedProjectDir, data, resultPath]
+  if anchor.len > 0:
+    args.add anchor
   let process =
     try:
       startProcess(
         getAppFilename(),
-        args = @["dialog", resolvedProjectDir, data, resultPath],
+        args = args,
         options = {poUsePath, poParentStreams},
       )
     except OSError as error:
@@ -1076,13 +1099,18 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     discard layout
     discard bodyNodes
     let values = env.evalArgs(arguments)
-    if values.len < 2 or values.len > 3:
-      raise newException(EvaluatorError, "openDialog expects key, projectDir, and optional data")
+    if values.len < 2 or values.len > 4:
+      raise newException(EvaluatorError, "openDialog expects key, projectDir, optional data, and optional anchor")
     let
       key = values[0].asString
       projectDir = values[1].asString
       data = if values.len > 2: values[2].asString else: ""
-    runtime.launchDialogProcess(key, projectDir, data)
+      anchorID =
+        if values.len > 3:
+          runtime.asWidgetID(values[3])
+        else:
+          runtime.requireUi().id(key)
+    runtime.launchDialogProcess(key, projectDir, data, anchorID)
     boolean(true)
 
   runtime.evaluator.native "dialogOpen?":
@@ -1132,26 +1160,6 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         ""
     runtime.requestQuit = true
     text(runtime.dialogCloseValue)
-
-  runtime.evaluator.native "import":
-    discard layout
-    discard bodyNodes
-    if arguments.len != 1:
-      raise newException(EvaluatorError, "import expects one path")
-    let path = env.eval(arguments[0]).asString
-    var resolved = path
-    try:
-      resolved = runtime.resolveModulePath(path)
-    except OSError as error:
-      raise newException(EvaluatorError, path & ": " & error.msg)
-    if resolved in runtime.moduleStack:
-      return nothing()
-    let node = runtime.loadSyntaxFile(resolved)
-    runtime.moduleStack.add resolved
-    try:
-      result = runtime.renderNodes(env, node.statements)
-    finally:
-      runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
 
   runtime.evaluator.native "events":
     discard env
