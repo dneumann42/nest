@@ -1,4 +1,5 @@
 import "../components/volume.nest"
+import "../../../lib/components/radioGroup.nest"
 
 define:
   muteID = (id "volume" "mute")
@@ -6,7 +7,17 @@ define:
   upID = (id "volume" "up")
   mixerID = (id "volume" "mixer")
   closeID = (id "volume" "close")
-  status = (shellAsync (id "volume" "query") (volumeStatusCommand) 500)
+  sliderID = (id "volume" "slider")
+  status = ""
+  percent = 0
+  draggedVolume = nothing
+  defaultSink = ""
+  sinks = list
+
+set status (shell (volumeStatusCommand))
+set percent (shell (volumePercentCommand))
+set defaultSink (shell (volumeDefaultSinkCommand))
+set sinks (textLines (shell (volumeSinkListCommand)))
 
 events:
   when (keyPressed "escape"):
@@ -19,8 +30,18 @@ events:
     shellAsync (id "volume" "action" "up") (volumeActionCommand "up") 0
   when (clicked mixerID):
     shellAsync (id "volume" "action" "mixer") (volumeActionCommand "mixer") 0
+  set draggedVolume (verticalSlider sliderID percent 0 150)
+  when (not (= draggedVolume nothing)):
+    set percent draggedVolume
+    shellAsync (id "volume" "set") (volumeSetCommand draggedVolume) 0
   when (clicked closeID):
     closeDialog ""
+  for sink (iter sinks):
+    define:
+      sourceID = (radioOptionID "volume-sources" sink)
+    when (clicked sourceID):
+      shell (volumeSinkSwitchCommand sink)
+      set defaultSink sink
 
 card (id "volume" "panel"):
   width = fill
@@ -39,24 +60,43 @@ card (id "volume" "panel"):
     button closeID "x":
       width = fixed 28
       height = fit
-  label (id "volume" "status") status:
+  row (id "volume" "body"):
     width = fill
-    height = fit
-  row (id "volume" "actions"):
-    width = fill
-    height = fit
-    gap = 8
+    height = fill
+    gap = 12
     alignItems = AlignCenter
-    justifyContent = JustifyCenter
-    button downID "-":
-      width = fixed 56
-      height = fit
-    button muteID "Mute":
-      width = fixed 86
-      height = fit
-    button upID "+":
-      width = fixed 56
-      height = fit
-  button mixerID "Open mixer":
-    width = fill
-    height = fit
+    justifyContent = JustifyStart
+    column (id "volume" "readout"):
+      width = fill
+      height = fill
+      gap = 8
+      alignItems = AlignStretch
+      justifyContent = JustifyCenter
+      label (id "volume" "status") (string "♫ " status):
+        width = fill
+        height = fit
+      label (id "volume" "percent") (string percent "%"):
+        width = fill
+        height = fit
+      row (id "volume" "actions"):
+        width = fill
+        height = fit
+        gap = 8
+        alignItems = AlignCenter
+        justifyContent = JustifyCenter
+        button downID "-":
+          width = fixed 48
+          height = fit
+        button muteID "Mute":
+          width = fixed 78
+          height = fit
+        button upID "+":
+          width = fixed 48
+          height = fit
+      button mixerID "Open mixer":
+        width = fill
+        height = fit
+      radioGroup "volume-sources" sinks defaultSink
+    verticalSlider sliderID percent 0 150:
+      width = fixed 46
+      height = fill

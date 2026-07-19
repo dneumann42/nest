@@ -7,6 +7,19 @@ const
   ButtonPaddingY = 3
   ButtonMinHeight = 24
 
+proc drawBorder(f: Frame, c: Color) =
+  let
+    x = f.x.toInt
+    y = f.y.toInt
+    w = f.width.toInt
+    h = f.height.toInt
+  if w <= 0 or h <= 0:
+    return
+  drawLine(x, y, x + w - 1, y, c)
+  drawLine(x, y + h - 1, x + w - 1, y + h - 1, c)
+  drawLine(x, y, x, y + h - 1, c)
+  drawLine(x + w - 1, y, x + w - 1, y + h - 1, c)
+
 type Button* = ref object of Interactive
   label: string
   textScroll: bool
@@ -40,18 +53,30 @@ method draw*(self: Button, widget: Widget, ctx: DrawContext) =
     active = ctx.active(widget.id)
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
-    if not active and hot:
+    if self.style.hasBackground:
+      self.styledBackground(ctx.palette.background)
+    elif not active and hot:
       ctx.palette.backgroundHot
     elif active and hot:
       ctx.palette.backgroundActive
     else:
       ctx.palette.background,
   )
+  drawLine(f.x.toInt + 1, f.y.toInt + 1, (f.x + f.width - 2).toInt, f.y.toInt + 1, ctx.palette.buttonHighlight)
+  drawBorder(
+    f,
+    if active and hot:
+      ctx.palette.buttonBorderActive
+    elif hot:
+      ctx.palette.buttonBorderHot
+    else:
+      ctx.palette.buttonBorder,
+  )
   let
     (font, _) = ctx.resources.get("font")
     textExtent = ctx.resources.measureText("font", self.label)
-    textX = f.x.toInt + ButtonPaddingX
-    textY = f.y.toInt + ButtonPaddingY
+    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, ButtonPaddingX)
+    textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, ButtonPaddingY)
     textWidth = max(f.width.toInt - ButtonPaddingX * 2, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
     let

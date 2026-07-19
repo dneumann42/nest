@@ -1,4 +1,4 @@
-import std/[atomics, sets]
+import std/[atomics, tables, sets]
 import resources
 import uirelays/input
 export input
@@ -61,6 +61,8 @@ type
     activeWidgets*: HashSet[WidgetID]
     focusedWidget*: WidgetID
     submittedWidgets*: HashSet[WidgetID]
+    sliderValues*: Table[WidgetID, float64]
+    sliderDragging*: WidgetID
     dirtyWidgets*: HashSet[WidgetID]
     dirtyAll*: bool
     ticks*: int
@@ -75,6 +77,8 @@ type
     activeWidgets*: HashSet[WidgetID]
     focusedWidget*: WidgetID
     submittedWidgets*: HashSet[WidgetID]
+    sliderValues*: Table[WidgetID, float64]
+    sliderDragging*: WidgetID
     keyInputs*: seq[KeyInput]
     textInputs*: seq[string]
 
@@ -110,11 +114,17 @@ proc submitted*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
 proc submit*(ctx: var UpdateContext, id: WidgetID) =
   ctx.submittedWidgets.incl(id)
 
+proc setSliderValue*(ctx: var UpdateContext, id: WidgetID, value: float64) =
+  ctx.sliderValues[id] = value
+  ctx.sliderDragging = id
+
 proc switchState*(updateContext: var UpdateContext, drawContext: var DrawContext) =
   drawContext.hotWidgets = updateContext.hotWidgets
   drawContext.activeWidgets = updateContext.activeWidgets
   drawContext.focusedWidget = updateContext.focusedWidget
   drawContext.submittedWidgets = updateContext.submittedWidgets
+  drawContext.sliderValues = updateContext.sliderValues
+  drawContext.sliderDragging = updateContext.sliderDragging
 
 proc frame*(box: Widget): Frame =
   Frame(

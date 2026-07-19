@@ -17,6 +17,7 @@ component notificationWidget key:
     when (and (clicked buttonID) (not (dialogOpen? "notifications"))):
       openDialog "notifications" "./notifications" "" buttonID
 
-  button buttonID (string "MAIL " count):
+  button buttonID (string "✉ " count):
     width = fit
     height = fit
+    textScroll = true

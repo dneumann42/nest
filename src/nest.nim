@@ -1,4 +1,5 @@
-import std/[cmdline, json, os, osproc, sets, strutils]
+import std/[cmdline, json, os, osproc, posix, sets, strutils]
+from std/times import epochTime
 
 import nest/[ui, resources, palette, dialogs]
 export ui
@@ -40,7 +41,12 @@ type DialogAnchor = object
   x, y, width, height: float64
   windowWidth, windowHeight: int
 
-proc init*(T: typedesc[AppConfig], width = 800, height = 600, title = "Nest"): T =
+type SingleInstanceLock = object
+  active: bool
+  lockDir, pidPath: string
+
+proc init*(T: typedesc[AppConfig], width = 800, height = 600,
+    title = "Nest"): T =
   T(
     title: title,
     width: width,
@@ -202,6 +208,75 @@ proc loadProjectConfig(projectDir: string): ProjectConfig =
 proc positive(value: int): Positive =
   max(value, 1).Positive
 
+proc singleInstanceName(namespace: string): string =
+  result = "nest-"
+  for ch in namespace:
+    if ch.isAlphaNumeric:
+      result.add ch
+    else:
+      result.add '-'
+
+proc pidAlive(pid: int): bool =
+  pid > 0 and dirExists("/proc" / $pid)
+
+proc readPid(path: string): int =
+  try:
+    parseInt(readFile(path).strip)
+  except CatchableError:
+    0
+
+proc removeSingleInstanceLock(lock: SingleInstanceLock) =
+  if not lock.active:
+    return
+  if lock.pidPath.fileExists and lock.pidPath.readPid == getCurrentProcessId():
+    try:
+      removeFile(lock.pidPath)
+    except OSError:
+      discard
+    try:
+      removeDir(lock.lockDir)
+    except OSError:
+      discard
+
+proc terminatePid(pid: int) =
+  if not pidAlive(pid) or pid == getCurrentProcessId():
+    return
+  discard execShellCmd("kill -TERM " & $pid & " >/dev/null 2>&1")
+  let deadline = epochTime() + 1.5
+  while pidAlive(pid) and epochTime() < deadline:
+    os.sleep(25)
+  if pidAlive(pid):
+    discard execShellCmd("kill -KILL " & $pid & " >/dev/null 2>&1")
+
+proc acquireSingleInstanceLock(namespace: string): SingleInstanceLock =
+  result.lockDir = getTempDir() / (singleInstanceName(namespace) & ".lock")
+  result.pidPath = result.lockDir / "pid"
+
+  for attempt in 0 .. 2:
+    if mkdir(cstring(result.lockDir), 0o700) == 0:
+      writeFile(result.pidPath, $getCurrentProcessId())
+      result.active = true
+      return
+
+    let oldPid = result.pidPath.readPid
+    if oldPid > 0 and pidAlive(oldPid):
+      terminatePid(oldPid)
+    else:
+      try:
+        if result.pidPath.fileExists:
+          removeFile(result.pidPath)
+        removeDir(result.lockDir)
+      except OSError:
+        discard
+
+    if attempt < 2:
+      os.sleep(50)
+
+  quit("Could not acquire single-instance lock for namespace: " & namespace)
+
+proc needsSingleInstance(config: ProjectConfig; dialogMode: bool): bool =
+  not dialogMode and config.layerShell.normalize in ["top", "bottom", "left", "right"]
+
 proc numberField(node: JsonNode; name: string): float64 =
   if node.kind == JObject and node.hasKey(name):
     let field = node[name]
@@ -259,7 +334,8 @@ proc applyDialogAnchor(app: AppConfig; anchor: DialogAnchor): AppConfig =
         anchor.x + anchor.width - app.width.float64
       else:
         centerX - app.width.float64 / 2.0
-    popupLeft = clampDistance(desiredLeft, app.width.float64, anchor.windowWidth.float64)
+    popupLeft = clampDistance(desiredLeft, app.width.float64,
+        anchor.windowWidth.float64)
 
   result.layerShell = true
   result.layerShellConfig.layer = LayerOverlay
@@ -308,13 +384,17 @@ proc appConfig(config: ProjectConfig): AppConfig =
 
   case config.layerShell.normalize
   of "top":
-    AppConfig.dockTop(positive(config.height), config.title, config.namespace).withExclusiveZone
+    AppConfig.dockTop(positive(config.height), config.title,
+        config.namespace).withExclusiveZone
   of "bottom":
-    AppConfig.dockBottom(positive(config.height), config.title, config.namespace).withExclusiveZone
+    AppConfig.dockBottom(positive(config.height), config.title,
+        config.namespace).withExclusiveZone
   of "left":
-    AppConfig.dockLeft(positive(config.width), config.title, config.namespace).withExclusiveZone
+    AppConfig.dockLeft(positive(config.width), config.title,
+        config.namespace).withExclusiveZone
   of "right":
-    AppConfig.dockRight(positive(config.width), config.title, config.namespace).withExclusiveZone
+    AppConfig.dockRight(positive(config.width), config.title,
+        config.namespace).withExclusiveZone
   of "top-left", "topleft":
     AppConfig
       .init(
@@ -377,7 +457,8 @@ proc appConfig(config: ProjectConfig): AppConfig =
       )
   else:
     AppConfig.init(
-      width = max(config.width, 1), height = max(config.height, 1), title = config.title
+      width = max(config.width, 1), height = max(config.height, 1),
+          title = config.title
     )
 
 proc projectMainPath(projectDir: string, config: ProjectConfig): string =
@@ -588,7 +669,8 @@ template crowErrorDialogBody(
     ui.dialogHeader(
       ui.id("_nest_error_header"),
       cfg(
-        width = fill(), height = fit(), padding = 8, gap = 8, alignItems = AlignCenter
+        width = fill(), height = fit(), padding = 8, gap = 8,
+            alignItems = AlignCenter
       ),
     ):
       ui.label(ui.id("_nest_error_title"), "Crow error", fill(), fit())
@@ -596,13 +678,15 @@ template crowErrorDialogBody(
     ui.column(
       ui.id("_nest_error_body"),
       cfg(
-        width = fill(), height = fill(), padding = 8, gap = 4, alignItems = AlignStretch
+        width = fill(), height = fill(), padding = 8, gap = 4,
+            alignItems = AlignStretch
       ),
     ):
       for index, line in crowErrorLines(message, maxLines = 8):
         renderCrowErrorLine(ui, index, line, fill(), fit())
       if copied:
-        ui.label(ui.id("_nest_error_copied"), "Copied to clipboard", fill(), fit())
+        ui.label(ui.id("_nest_error_copied"), "Copied to clipboard", fill(),
+            fit())
     ui.row(
       ui.id("_nest_error_actions"),
       cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd),
@@ -664,6 +748,7 @@ template application*(cfg: AppConfig, blk: untyped) =
     updateContext.mouseWheelX = 0
     updateContext.mouseWheelY = 0
     updateContext.submittedWidgets.clear()
+    updateContext.sliderValues.clear()
     if frameEvent:
       handleEvent(e, running, updateContext, drawContext)
     while pollEvent(e, inputFlags):
@@ -741,21 +826,33 @@ proc runProject(
   if not fileExists(mainPath):
     quit("Nest project main file does not exist: " & mainPath)
 
+  let instanceLock =
+    if config.needsSingleInstance(dialogMode):
+      acquireSingleInstanceLock(config.namespace)
+    else:
+      SingleInstanceLock()
+
   var ui = UI.init()
   let app = NestCrowApp.init(mainPath)
   app.runtime.dialogData = dialogData
-  application appConfig(config).applyDialogAnchor(parseDialogAnchor(dialogAnchor)), ui:
-    app.render(ui)
-    if app.lastError.len > 0:
-      app.launchCrowErrorDialog(app.lastError)
-    else:
-      app.pollCrowErrorDialog()
-      app.closeCrowErrorDialog()
-    if app.runtime.requestQuit:
-      running = false
-  result = app.runtime.dialogCloseValue
-  app.runtime.closeDialogProcesses()
-  app.closeCrowErrorDialog()
+  try:
+    application appConfig(config).applyDialogAnchor(parseDialogAnchor(
+        dialogAnchor)), ui:
+      app.render(ui)
+      if app.lastError.len > 0:
+        app.launchCrowErrorDialog(app.lastError)
+      else:
+        app.pollCrowErrorDialog()
+        app.closeCrowErrorDialog()
+      if app.runtime.requestQuit:
+        running = false
+  finally:
+    result = app.runtime.dialogCloseValue
+    app.runtime.closeDialogProcesses()
+    app.runtime.closeShellProcesses()
+    app.runtime.closeWorkspaceSubscriptions()
+    app.closeCrowErrorDialog()
+    instanceLock.removeSingleInstanceLock()
 
 proc main() =
   let args = commandLineParams()

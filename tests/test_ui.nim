@@ -2,6 +2,7 @@ import std/[sets, strutils, unittest]
 
 import nest as nestApp
 import nest/[palette, resources, ui]
+import uirelays/screen
 
 const
   Toolbar = WidgetID(101)
@@ -32,6 +33,7 @@ const
   ScrollRow = WidgetID(126)
   OutsideHeader = WidgetID(127)
   OutsideFooter = WidgetID(128)
+  Slider1 = WidgetID(129)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -50,20 +52,31 @@ suite "ui layout nesting":
   test "lerp interpolates toward a target":
     check lerp(0.0, 10.0, 0.25) == 2.5
 
+  test "box config carries local background and opacity overrides":
+    let styled = cfg(width = fit(), height = fit())
+      .withBackground(color(12'u8, 24'u8, 36'u8))
+      .withOpacity(0.42)
+
+    check styled.style.hasBackground
+    check styled.style.background == color(12'u8, 24'u8, 36'u8)
+    check styled.style.hasOpacity
+    check styled.style.opacity == 0.42
+
   test "fit button remains visible after a fill label in a row":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: text.len * f.int, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: text.len * f.int, h: 18),
+      TextExtent(w: text.len * f.int, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: text.len * f.int, h: 18),
     )
     try:
       var resources = Resources.new()
@@ -88,16 +101,17 @@ suite "ui layout nesting":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: text.len * f.int, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: text.len * f.int, h: 18),
+      TextExtent(w: text.len * f.int, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: text.len * f.int, h: 18),
     )
     try:
       var resources = Resources.new()
@@ -165,7 +179,8 @@ suite "ui layout nesting":
     check ctx.focusedWidget == InvalidWidgetID
     check not ctx.submitted(Input1)
 
-    ctx = UpdateContext(focusedWidget: Input1, mouseX: 250, mouseY: 40, mouseLeftPressed: true)
+    ctx = UpdateContext(focusedWidget: Input1, mouseX: 250, mouseY: 40,
+        mouseLeftPressed: true)
     ui.update(ctx)
     check ctx.focusedWidget == InvalidWidgetID
     check not ctx.submitted(Input1)
@@ -174,16 +189,17 @@ suite "ui layout nesting":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: text.len * f.int, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: text.len * f.int, h: 18),
+      TextExtent(w: text.len * f.int, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: text.len * f.int, h: 18),
     )
     try:
       var resources = Resources.new()
@@ -194,11 +210,13 @@ suite "ui layout nesting":
       ui.beginLayout(80, 40)
       ui.column(
         Body,
-        cfg(width = fill(), height = fill(), alignItems = AlignCenter, justifyContent = JustifyCenter),
+        cfg(width = fill(), height = fill(), alignItems = AlignCenter,
+            justifyContent = JustifyCenter),
       ):
         ui.panel(
           NarrowPanel,
-          cfg(width = prefer(800, min = 400), height = fit(), alignItems = AlignCenter),
+          cfg(width = prefer(800, min = 400), height = fit(),
+              alignItems = AlignCenter),
         ):
           ui.row(NarrowHeader, cfg(width = fill(), height = fit())):
             ui.lineInput(Input1, state, width = fill(), height = fit())
@@ -218,7 +236,8 @@ suite "ui layout nesting":
     var ui = UI.init()
 
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollY = true)):
       ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -226,7 +245,8 @@ suite "ui layout nesting":
 
     checkFrame(ui.widget(ScrollItem1), 0, 0, 90, 30)
 
-    var ctx = UpdateContext(mouseX: 95, mouseY: 5, mouseLeftPressed: true, mouseLeftDown: true)
+    var ctx = UpdateContext(mouseX: 95, mouseY: 5, mouseLeftPressed: true,
+        mouseLeftDown: true)
     ui.update(ctx)
     ctx.mouseLeftPressed = false
     ctx.mouseY = 30
@@ -234,7 +254,8 @@ suite "ui layout nesting":
 
     ui.reset()
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollY = true)):
       ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -246,7 +267,8 @@ suite "ui layout nesting":
     var ui = UI.init()
 
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollY = true)):
       ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -257,7 +279,8 @@ suite "ui layout nesting":
 
     ui.reset()
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollY = true)):
       ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -270,7 +293,8 @@ suite "ui layout nesting":
     var ui = UI.init()
 
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollY = true)):
       ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -281,7 +305,8 @@ suite "ui layout nesting":
 
     ui.reset()
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollY = true)):
       ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
       ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -294,7 +319,8 @@ suite "ui layout nesting":
     for _ in 0 ..< 24:
       ui.reset()
       ui.beginLayout(120, 80)
-      ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollY = true)):
+      ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+          scrollY = true)):
         ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(30))
         ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(30))
         ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(30))
@@ -311,7 +337,8 @@ suite "ui layout nesting":
     ui.column(Body, cfg(width = fixed(120), height = fixed(100), gap = 8.0)):
       ui.row(OutsideHeader, cfg(width = fill(), height = fixed(30))):
         ui.button(HeaderNewButton, "New", width = fixed(40), height = fixed(24))
-      ui.panel(ScrollPanel, cfg(width = fill(), height = fill(), scrollY = true)):
+      ui.panel(ScrollPanel, cfg(width = fill(), height = fill(),
+          scrollY = true)):
         ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(40))
         ui.button(ScrollItem2, "Two", width = fixed(90), height = fixed(40))
         ui.button(ScrollItem3, "Three", width = fixed(90), height = fixed(40))
@@ -327,7 +354,8 @@ suite "ui layout nesting":
     ui.column(Body, cfg(width = fixed(120), height = fixed(100), gap = 8.0)):
       ui.row(OutsideHeader, cfg(width = fill(), height = fixed(30))):
         ui.button(HeaderNewButton, "Top", width = fixed(40), height = fixed(24))
-      ui.panel(ScrollPanel, cfg(width = fill(), height = fill(), scrollY = true)):
+      ui.panel(ScrollPanel, cfg(width = fill(), height = fill(),
+          scrollY = true)):
         ui.button(ScrollItem1, "One", width = fixed(90), height = fixed(20))
       ui.row(OutsideFooter, cfg(width = fill(), height = fixed(20))):
         ui.button(NarrowButton, "New", width = fixed(40), height = fixed(20))
@@ -341,7 +369,8 @@ suite "ui layout nesting":
     var ui = UI.init()
 
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollX = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollX = true)):
       ui.row(ScrollRow, cfg(width = fit(), height = fit(), scrollX = true)):
         ui.button(ScrollItem1, "One", width = fixed(60), height = fixed(30))
         ui.button(ScrollItem2, "Two", width = fixed(60), height = fixed(30))
@@ -350,7 +379,8 @@ suite "ui layout nesting":
 
     checkFrame(ui.widget(ScrollItem1), 0, 0, 60, 30)
 
-    var ctx = UpdateContext(mouseX: 5, mouseY: 55, mouseLeftPressed: true, mouseLeftDown: true)
+    var ctx = UpdateContext(mouseX: 5, mouseY: 55, mouseLeftPressed: true,
+        mouseLeftDown: true)
     ui.update(ctx)
     ctx.mouseLeftPressed = false
     ctx.mouseX = 40
@@ -358,7 +388,8 @@ suite "ui layout nesting":
 
     ui.reset()
     ui.beginLayout(120, 80)
-    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60), scrollX = true)):
+    ui.panel(ScrollPanel, cfg(width = fixed(100), height = fixed(60),
+        scrollX = true)):
       ui.row(ScrollRow, cfg(width = fit(), height = fit(), scrollX = true)):
         ui.button(ScrollItem1, "One", width = fixed(60), height = fixed(30))
         ui.button(ScrollItem2, "Two", width = fixed(60), height = fixed(30))
@@ -377,7 +408,8 @@ suite "ui layout nesting":
         ui.button(Button2, "Two", width = fixed(60), height = fixed(20))
 
       ui.row(Body, cfg(width = fill(), height = fill(), gap = 10.0)):
-        ui.column(Sidebar, cfg(width = fixed(80), height = fill(), gap = 4.0, padding = 4.0)):
+        ui.column(Sidebar, cfg(width = fixed(80), height = fill(), gap = 4.0,
+            padding = 4.0)):
           ui.button(Button3, "Three", width = fill(), height = fixed(20))
         ui.column(Content, cfg(width = fill(), height = fill())):
           ui.button(Button4, "Four", width = fixed(70), height = fixed(20))
@@ -416,11 +448,14 @@ suite "ui layout nesting":
 
     ui.row(
       Body,
-      cfg(width = fill(), height = fixed(80), gap = 10.0, padding = 10.0, alignItems = AlignCenter),
+      cfg(width = fill(), height = fixed(80), gap = 10.0, padding = 10.0,
+          alignItems = AlignCenter),
     ):
       ui.button(Button1, "One", width = fixed(40), height = fixed(20))
-      ui.button(Button2, "Two", width = fixed(40), height = fixed(20), alignSelf = AlignEnd)
-      ui.button(Button5, "Three", width = fixed(40), height = fixed(20), alignSelf = AlignStart)
+      ui.button(Button2, "Two", width = fixed(40), height = fixed(20),
+          alignSelf = AlignEnd)
+      ui.button(Button5, "Three", width = fixed(40), height = fixed(20),
+          alignSelf = AlignStart)
 
     ui.endLayout()
 
@@ -495,21 +530,23 @@ suite "ui layout nesting":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       var ui = UI.init()
       ui.loadFont("font", "", 18)
-      check nestApp.layoutCrowErrorDialogForTest(ui, "missing field: start-label", 620, 300)
+      check nestApp.layoutCrowErrorDialogForTest(ui,
+          "missing field: start-label", 620, 300)
       check ui.widget(ui.id("_nest_error_dialog")).frame.width == 620
       check ui.widget(ui.id("_nest_error_dialog")).frame.height == 300
       check ui.widget(ui.id("_nest_error_header")).frame.height > 0
@@ -581,8 +618,10 @@ suite "ui layout nesting":
     var ui = UI.init()
     var updateContext = UpdateContext(windowWidth: 200, windowHeight: 80)
     var drawContext = DrawContext(
-      resources: Resources.new(), palette: Palette.init(), windowWidth: 200, windowHeight: 80
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 200,
+          windowHeight: 80
     )
+    ui.initContext(200, 80)
     drawContext.resources.loadFont("font", "", 18)
 
     let rootID = ui.root.id
@@ -605,8 +644,10 @@ suite "ui layout nesting":
     var ui = UI.init()
     var updateContext = UpdateContext(windowWidth: 200, windowHeight: 80)
     var drawContext = DrawContext(
-      resources: Resources.new(), palette: Palette.init(), windowWidth: 200, windowHeight: 80
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 200,
+          windowHeight: 80
     )
+    ui.initContext(200, 80)
     drawContext.resources.loadFont("font", "", 18)
 
     ui.layout(updateContext, drawContext):
@@ -618,12 +659,38 @@ suite "ui layout nesting":
     check located.frame.width == 50
     check located.frame.height == 20
 
+  test "slider reports immediate drag value from current mouse position":
+    var ui = UI.init()
+    ui.initContext(200, 80)
+    ui.loadFont("font", "", 18)
+
+    ui.layout:
+      discard ui.slider(Slider1, 0, 0, 100, fixed(100), fixed(30))
+
+    var dragged = false
+    var draggedValue = 0.0
+    ui.mouseMove(75, 15)
+    ui.mouseDown()
+
+    ui.layout:
+      ui.events:
+        let value = ui.slider(Slider1, 0, 0, 100, fixed(100), fixed(30))
+        if value.active:
+          dragged = true
+          draggedValue = value.value
+      discard ui.slider(Slider1, 0, 0, 100, fixed(100), fixed(30))
+
+    check dragged
+    check draggedValue >= 70
+    check draggedValue <= 80
+
   test "event blocks consume the previous frame hit state before layout":
     var ui = UI.init()
     var count = 0
     var updateContext = UpdateContext(windowWidth: 200, windowHeight: 80)
     var drawContext = DrawContext(
-      resources: Resources.new(), palette: Palette.init(), windowWidth: 200, windowHeight: 80
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 200,
+          windowHeight: 80
     )
     drawContext.resources.loadFont("font", "", 18)
 
@@ -644,7 +711,8 @@ suite "ui layout nesting":
       ui.events:
         if drawContext.active(Button1):
           inc count
-      ui.button(Button1, "One", width = fixed(50 + count.toFloat), height = fixed(20))
+      ui.button(Button1, "One", width = fixed(50 + count.toFloat),
+          height = fixed(20))
 
     check count == 0
     check drawContext.active(Button1)
@@ -655,7 +723,8 @@ suite "ui layout nesting":
       ui.events:
         if drawContext.active(Button1):
           inc count
-      ui.button(Button1, "One", width = fixed(50 + count.toFloat), height = fixed(20))
+      ui.button(Button1, "One", width = fixed(50 + count.toFloat),
+          height = fixed(20))
 
     check count == 1
 
@@ -665,7 +734,8 @@ suite "ui layout nesting":
     var edit = editLineState()
     var updateContext = UpdateContext(windowWidth: 320, windowHeight: 120)
     var drawContext = DrawContext(
-      resources: Resources.new(), palette: Palette.init(), windowWidth: 320, windowHeight: 120
+      resources: Resources.new(), palette: Palette.init(), windowWidth: 320,
+          windowHeight: 120
     )
     drawContext.resources.loadFont("font", "", 18)
 
@@ -697,7 +767,8 @@ suite "ui layout nesting":
     check not edit.editing
 
     ui.layout(updateContext, drawContext):
-      for row in listItems[string](rows, proc(item: string, index: int): string = listKey(index, item)):
+      for row in listItems[string](rows, proc(item: string,
+          index: int): string = listKey(index, item)):
         ui.scope(row.key):
           discard ui.button("edit", "Edit", fit(), fit())
 
@@ -707,7 +778,8 @@ suite "ui layout nesting":
     drawContext.activeWidgets.incl betaEditID
 
     ui.layout(updateContext, drawContext):
-      for row in listItems[string](rows, proc(item: string, index: int): string = listKey(index, item)):
+      for row in listItems[string](rows, proc(item: string,
+          index: int): string = listKey(index, item)):
         ui.scope(row.key):
           if ui.button("edit", "Edit", fit(), fit()):
             edit.beginEdit(row.key, row.value)

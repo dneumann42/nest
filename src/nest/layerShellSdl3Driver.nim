@@ -188,6 +188,7 @@ var
   currentCursor = curDefault
   drawColorValid: bool
   drawColor: screen.Color
+  rendererWidth, rendererHeight: int
   clipStack: seq[ClipState]
   currentClip: ClipState
 
@@ -296,11 +297,12 @@ proc resolveFontPath(path: string): string =
     ]
   else:
     let candidates = [
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/TTF/DejaVuSans.ttf",
+      "/usr/share/fonts/noto/NotoSans-Regular.ttf",
       "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf",
       "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
-      "/usr/share/fonts/abattis-cantarell-vf-fonts/Cantarell-VF.otf",
-      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-      "/usr/share/fonts/TTF/DejaVuSans.ttf"
+      "/usr/share/fonts/abattis-cantarell-vf-fonts/Cantarell-VF.otf"
     ]
 
   for candidate in candidates:
@@ -321,7 +323,7 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   if props == 0:
     quit("Could not create SDL window properties for layer-shell window")
 
-  let winFlags = WINDOW_BORDERLESS
+  let winFlags = WINDOW_BORDERLESS or WINDOW_TRANSPARENT
   discard setStringProperty(
     props, cstring(PROP_WINDOW_CREATE_TITLE_STRING), cstring"NimEdit")
   discard setNumberProperty(
@@ -330,6 +332,8 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
     props, cstring(PROP_WINDOW_CREATE_HEIGHT_NUMBER), layout.height.int64)
   discard setNumberProperty(
     props, cstring(PROP_WINDOW_CREATE_FLAGS_NUMBER), winFlags.int64)
+  discard setBooleanProperty(
+    props, cstring(PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN), true)
   discard setBooleanProperty(
     props, cstring(PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN), true)
   discard setBooleanProperty(
@@ -376,12 +380,18 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   ren = createRenderer(win, nil)
   if ren == nil:
     quit("Could not create SDL renderer for layer-shell window")
+  discard setRenderDrawBlendMode(ren, BLENDMODE_BLEND)
+  discard setRenderDrawColor(ren, 0, 0, 0, 0)
+  discard renderClear(ren)
+  drawColorValid = false
 
   discard startTextInput(win)
   var w, h: cint
   discard getWindowSize(win, w, h)
   layout.width = w
   layout.height = h
+  rendererWidth = layout.width
+  rendererHeight = layout.height
   layout.scaleX = 1
   layout.scaleY = 1
   currentClip = ClipState()
@@ -481,7 +491,8 @@ proc sdlDrawText(f: screen.Font; x, y: int; text: string;
                        w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
     ensureDrawColor(bg)
     discard renderFillRect(ren, addr bgRect)
-  var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
+  var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat,
+      h: entry.extent.h.cfloat)
   var dst = FRect(x: x.cfloat, y: y.cfloat,
                   w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
   discard renderTexture(ren, entry.texture, addr src, addr dst)
@@ -493,6 +504,12 @@ proc sdlGetFontMetrics(f: screen.Font): FontMetrics =
   else: screen.FontMetrics()
 
 proc sdlFillRect(r: coords.Rect; color: screen.Color) =
+  if color.a == 0 and r.x == 0 and r.y == 0 and r.w >= rendererWidth and
+      r.h >= rendererHeight:
+    discard setRenderDrawColor(ren, color.r, color.g, color.b, color.a)
+    discard renderClear(ren)
+    drawColorValid = false
+    return
   ensureDrawColor(color)
   var fr = FRect(x: r.x.cfloat, y: r.y.cfloat,
                  w: r.w.cfloat, h: r.h.cfloat)
@@ -691,6 +708,8 @@ proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
     e.kind = WindowResizeEvent
     e.x = sdlEvent.window.data1
     e.y = sdlEvent.window.data2
+    rendererWidth = e.x
+    rendererHeight = e.y
   elif evType == uint32(EVENT_WINDOW_CLOSE_REQUESTED):
     e.kind = WindowCloseEvent
   elif evType == uint32(EVENT_WINDOW_FOCUS_GAINED):

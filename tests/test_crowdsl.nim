@@ -57,6 +57,45 @@ label (id "value") value:
 
     check runtime.get("value").text == "ready"
 
+  test "zero interval async shell replaces stale command for same key":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+    ui.loadFont("font", "", 18)
+    let outputPath = getTempDir() / "nest-shell-async-replace-test"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
+    runtime.render(ui, """
+set value (shellAsync "replace-test" "sleep 0.2; printf old > """ & outputPath & """" 0)
+label (id "value") value:
+  width = fit
+  height = fit
+""")
+    runtime.render(ui, """
+set value (shellAsync "replace-test" "printf new > """ & outputPath & """" 0)
+label (id "value") value:
+  width = fit
+  height = fit
+""")
+
+    for _ in 0 ..< 10:
+      runtime.render(ui, """
+set value (shellAsync "replace-test" "printf new > """ & outputPath & """" 0)
+label (id "value") value:
+  width = fit
+  height = fit
+""")
+      if fileExists(outputPath) and readFile(outputPath) == "new":
+        break
+      os.sleep(20)
+
+    os.sleep(250)
+    check fileExists(outputPath)
+    check readFile(outputPath) == "new"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(

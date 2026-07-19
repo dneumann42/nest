@@ -44,35 +44,54 @@ proc new*(T: typedesc[Card]): T =
 proc new*(T: typedesc[DialogHeader]): T =
   T()
 
+proc drawBorder(f: Frame, c: Color) =
+  let
+    x = f.x.toInt
+    y = f.y.toInt
+    w = f.width.toInt
+    h = f.height.toInt
+  if w <= 0 or h <= 0:
+    return
+  drawLine(x, y, x + w - 1, y, c)
+  drawLine(x, y + h - 1, x + w - 1, y + h - 1, c)
+  drawLine(x, y, x, y + h - 1, c)
+  drawLine(x + w - 1, y, x + w - 1, y + h - 1, c)
+
 method draw*(self: Panel, widget: Widget, ctx: DrawContext) =
   let f = widget.frame
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
-    ctx.palette.panelBackground,
+    self.styledBackground(ctx.palette.panelBackground),
   )
   fillRect(
-    rect(f.x.toInt, f.y.toInt, f.width.toInt, 1),
-    ctx.palette.panelBorder,
+    rect(f.x.toInt, f.y.toInt, f.width.toInt, 2),
+    ctx.palette.buttonHighlight,
   )
+  drawBorder(f, ctx.palette.panelBorder)
 
 method draw*(self: Card, widget: Widget, ctx: DrawContext) =
   let f = widget.frame
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
-    ctx.palette.cardBackground,
+    self.styledBackground(ctx.palette.cardBackground),
   )
   fillRect(
-    rect(f.x.toInt, f.y.toInt, 3, f.height.toInt),
+    rect(f.x.toInt + 1, f.y.toInt + 1, max(f.width.toInt - 2, 0), 1),
+    ctx.palette.buttonHighlight,
+  )
+  fillRect(
+    rect(f.x.toInt, f.y.toInt, 4, f.height.toInt),
     ctx.palette.cardAccent,
   )
+  drawBorder(f, ctx.palette.cardBorder)
 
 method draw*(self: DialogHeader, widget: Widget, ctx: DrawContext) =
   let f = widget.frame
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
-    ctx.palette.dialogHeaderBackground,
+    self.styledBackground(ctx.palette.dialogHeaderBackground),
   )
   fillRect(
-    rect(f.x.toInt, (f.y + f.height - 1).toInt, f.width.toInt, 1),
+    rect(f.x.toInt, (f.y + f.height - 2).toInt, f.width.toInt, 2),
     ctx.palette.dialogHeaderBorder,
   )

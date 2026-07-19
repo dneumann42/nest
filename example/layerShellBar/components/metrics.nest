@@ -1,31 +1,39 @@
 fun cpuCommand:
-  string "a=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); sleep 0.2; b=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); set -- $a $b; total=$(($3-$1)); idle=$(($4-$2)); if [ \"$total\" -gt 0 ]; then printf 'CPU %d%%' $(( (100 * (total - idle)) / total )); else printf 'CPU 0%%'; fi"
+  string "a=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); sleep 0.2; b=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); set -- $a $b; total=$(($3-$1)); idle=$(($4-$2)); if [ \"$total\" -gt 0 ]; then printf '%d%%' $(( (100 * (total - idle)) / total )); else printf '0%%'; fi"
 
 fun memoryCommand:
-  string "awk 'function gb(kb){return kb/1024/1024} /^MemTotal:/ {total=$2} /^MemAvailable:/ {avail=$2} END {if (total > 0) printf \"MEM %.1fG/%.1fG (%d%%)\", gb(total-avail), gb(total), int(100*(total-avail)/total+0.5); else printf \"MEM n/a\"}' /proc/meminfo"
+  string "awk 'function gb(kb){return kb/1024/1024} /^MemTotal:/ {total=$2} /^MemAvailable:/ {avail=$2} END {if (total > 0) printf \"%.1fG %d%%\", gb(total-avail), int(100*(total-avail)/total+0.5); else printf \"n/a\"}' /proc/meminfo"
 
 fun storageCommand:
-  string "df -P / | awk 'NR==2 {printf \"DSK %s\", $5} END {if (NR < 2) printf \"DSK n/a\"}'"
+  string "df -P / | awk 'NR==2 {printf \"%s\", $5} END {if (NR < 2) printf \"n/a\"}'"
 
 fun networkCommand key:
-  string "iface=$(awk '$2==\"00000000\" {print $1; exit}' /proc/net/route); if [ -z \"$iface\" ]; then printf 'NET offline'; exit 0; fi; rx=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || printf 0); tx=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || printf 0); now=$(date +%s); state=/tmp/nest-network-" key "; if [ -f \"$state\" ]; then read prx ptx pnow piface < \"$state\"; else prx=$rx; ptx=$tx; pnow=$now; piface=$iface; fi; printf '%s %s %s %s\n' \"$rx\" \"$tx\" \"$now\" \"$iface\" > \"$state\"; dt=$((now-pnow)); if [ \"$dt\" -le 0 ] || [ \"$piface\" != \"$iface\" ]; then down=0; up=0; else down=$(((rx-prx)/dt)); up=$(((tx-ptx)/dt)); fi; fmt(){ b=$1; if [ \"$b\" -lt 1024 ]; then printf '%dB' \"$b\"; elif [ \"$b\" -lt 1048576 ]; then awk -v b=\"$b\" 'BEGIN{printf \"%.1fK\", b/1024}'; elif [ \"$b\" -lt 1073741824 ]; then awk -v b=\"$b\" 'BEGIN{printf \"%.1fM\", b/1048576}'; else awk -v b=\"$b\" 'BEGIN{printf \"%.1fG\", b/1073741824}'; fi; }; printf 'NET %s/s down %s/s up' \"$(fmt $down)\" \"$(fmt $up)\""
+  string "iface=$(awk '$2==\"00000000\" {print $1; exit}' /proc/net/route); if [ -z \"$iface\" ]; then printf 'offline'; exit 0; fi; rx=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || printf 0); tx=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || printf 0); now=$(date +%s); state=/tmp/nest-network-" key "; if [ -f \"$state\" ]; then read prx ptx pnow piface < \"$state\"; else prx=$rx; ptx=$tx; pnow=$now; piface=$iface; fi; printf '%s %s %s %s\n' \"$rx\" \"$tx\" \"$now\" \"$iface\" > \"$state\"; dt=$((now-pnow)); if [ \"$dt\" -le 0 ] || [ \"$piface\" != \"$iface\" ]; then down=0; up=0; else down=$(((rx-prx)/dt)); up=$(((tx-ptx)/dt)); fi; fmt(){ b=$1; if [ \"$b\" -lt 1024 ]; then printf '%dB' \"$b\"; elif [ \"$b\" -lt 1048576 ]; then awk -v b=\"$b\" 'BEGIN{printf \"%.1fK\", b/1024}'; elif [ \"$b\" -lt 1073741824 ]; then awk -v b=\"$b\" 'BEGIN{printf \"%.1fM\", b/1048576}'; else awk -v b=\"$b\" 'BEGIN{printf \"%.1fG\", b/1073741824}'; fi; }; printf '↓%s/s ↑%s/s' \"$(fmt $down)\" \"$(fmt $up)\""
 
 component cpuMeter key:
-  label (id (eval key) "cpu") (shellAsync (id (eval key) "cpu-query") (cpuCommand) 1000):
-    width = fit
+  button (id (eval key) "cpu") (string "◉ " (shellAsync (id (eval key) "cpu-query") (cpuCommand) 1000)):
+    width = fixed 100
     height = fit
+    background = mix-color (theme-color "primary") (color 18 20 20) 0.28
+    textScroll = true
 
 component memoryMeter key:
-  label (id (eval key) "memory") (shellAsync (id (eval key) "memory-query") (memoryCommand) 2000):
-    width = fit
+  button (id (eval key) "memory") (string "▣ " (shellAsync (id (eval key) "memory-query") (memoryCommand) 2000)):
+    width = fixed 150
     height = fit
+    background = mix-color (theme-color "rose") (color 18 20 20) 0.28
+    textScroll = true
 
 component storageMeter key:
-  label (id (eval key) "storage") (shellAsync (id (eval key) "storage-query") (storageCommand) 8000):
-    width = fit
+  button (id (eval key) "storage") (string "▤ " (shellAsync (id (eval key) "storage-query") (storageCommand) 8000)):
+    width = fixed 100
     height = fit
+    background = mix-color (theme-color "mauve") (color 18 20 20) 0.28
+    textScroll = true
 
 component networkMeter key:
-  label (id (eval key) "network") (shellAsync (id (eval key) "network-query") (networkCommand (eval key)) 1000):
-    width = (fixed 280)
+  button (id (eval key) "network") (string "⇅ " (shellAsync (id (eval key) "network-query") (networkCommand (eval key)) 1000)):
+    width = fixed 240
     height = fit
+    background = mix-color (theme-color "sky") (color 18 20 20) 0.28
+    textScroll = true

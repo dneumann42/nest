@@ -1,0 +1,27 @@
+fun radioOptionID key value:
+  id (eval key) "option" value
+
+component radioGroup key items selected:
+  define:
+    keyText = (eval key)
+    values = (eval items)
+    current = (eval selected)
+
+  column (id keyText "radio-group"):
+    width = fill
+    height = fit
+    gap = 4
+    alignItems = AlignStretch
+    for value (iter values):
+      row (id keyText "radio-row" value):
+        width = fill
+        height = fit
+        gap = 6
+        alignItems = AlignCenter
+        label (id keyText "radio-mark" value) (pick (= value current) "●" "○"):
+          width = fixed 20
+          height = fit
+        button (radioOptionID keyText value) value:
+          width = fill
+          height = fit
+          textScroll = true

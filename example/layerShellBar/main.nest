@@ -46,39 +46,36 @@ column (id "root"):
     height = fixed 36
     padding = 6
     alignItems = AlignStretch
+    background = color 0 0 0
+    opacity = 0.52
     overlay (id "content"):
       width = fill
       height = fill
       alignItems = AlignCenter
-      row (id "bar-row"):
+  
+      row (id "left"):
         width = fill
         height = fill
         gap = 14
         alignItems = AlignCenter
         alignSelf = AlignStretch
-        row (id "left"):
-          width = fill
-          height = fit
-          gap = 14
-          alignItems = AlignCenter
-          startMenu (dict-get cfg "start-label")
-          workspaces "bar"
-          activeWindow "bar"
-        spacer (id "clock-reserve"):
-          width = fixed 260
-          height = fit
-        row (id "right"):
-          width = fill
-          height = fit
-          gap = 14
-          alignItems = AlignCenter
-          justifyContent = JustifyEnd
-          volumeWidget "bar"
-          notificationWidget "bar"
-          cpuMeter "bar"
-          memoryMeter "bar"
-          storageMeter "bar"
-          networkMeter "bar"
+        justifyContent = JustifyStart
+        startMenu (dict-get cfg "start-label")
+        workspaces "bar"
+        activeWindow "bar"
+      row (id "right"):
+        width = fill
+        height = fill
+        gap = 8
+        alignItems = AlignCenter
+        justifyContent = JustifyEnd
+        alignSelf = AlignStretch
+        volumeWidget "bar"
+        notificationWidget "bar"
+        cpuMeter "bar"
+        memoryMeter "bar"
+        storageMeter "bar"
+        networkMeter "bar"
       row (id "clock-center"):
         width = fill
         height = fill
