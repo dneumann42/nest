@@ -5,6 +5,8 @@ define:
   previousID = (id "media" "previous")
   playPauseID = (id "media" "play-pause")
   nextID = (id "media" "next")
+  closeID = (id "media" "close")
+  seekID = (id "media" "seek")
   title = ""
   artist = ""
   album = ""
@@ -13,6 +15,9 @@ define:
   displayStatus = ""
   player = ""
   length = ""
+  position = 0
+  lengthSeconds = 0
+  seekValue = nothing
   url = ""
   art = ""
   playPauseLabel = "Play"
@@ -23,6 +28,8 @@ set album (mediaQuery (id "media" "query" "album") "metadata --format '{{album}}
 set status (mediaQuery (id "media" "query" "status") "status 2>/dev/null || printf 'Stopped'")
 set player (mediaQuery (id "media" "query" "player") "metadata --format '{{playerName}}' 2>/dev/null || true")
 set length (mediaQuery (id "media" "query" "length") "metadata --format '{{mpris:length}}' 2>/dev/null || true")
+set lengthSeconds (mediaLengthSeconds (id "media" "query" "length-seconds"))
+set position (mediaPositionSeconds (id "media" "query" "position"))
 set url (mediaQuery (id "media" "query" "url") "metadata --format '{{xesam:url}}' 2>/dev/null || true")
 set art (mediaArtwork (id "media" "query" "art"))
 when (= status statusOverride):
@@ -37,6 +44,8 @@ events:
     closeDialog ""
   when (clicked artworkID):
     closeDialog ""
+  when (clicked closeID):
+    closeDialog ""
   when (clicked previousID):
     mediaAction (id "media" "action" "previous") "previous 2>/dev/null"
   when (clicked playPauseID):
@@ -46,26 +55,43 @@ events:
     mediaAction (id "media" "action" "play-pause") "play-pause 2>/dev/null"
   when (clicked nextID):
     mediaAction (id "media" "action" "next") "next 2>/dev/null"
+  set seekValue (horizontalSlider seekID position 0 lengthSeconds)
+  when (not (= seekValue nothing)):
+    set position seekValue
+    shellAsync (id "media" "action" "seek") (mediaSeekCommand seekValue) 0
 
 card (id "media" "dialog"):
   width = fill
   height = fill
-  padding = 64
+  padding = 18
   gap = 12
   alignItems = AlignStretch
+  background = color 0 0 0
+  opacity = 0.52
+  dialogHeader (id "media" "header"):
+    width = fill
+    height = fixed 32
+    padding = 8
+    alignItems = AlignCenter
+    label (id "media" "heading") "Media":
+      width = fill
+      height = fit
+    button closeID "x":
+      width = fixed 28
+      height = fit
   row (id "media" "body"):
     width = fill
     height = fill
-    gap = 14
+    gap = 18
     alignItems = AlignStretch
     column (id "media" "left"):
-      width = (fixed 250)
+      width = (fixed 280)
       height = fill
       gap = 10
       alignItems = AlignStretch
       imageButton artworkID art:
         width = fill
-        height = (fixed 250)
+        height = (fixed 280)
       label (id "media" "title") title:
         width = fill
         height = fit
@@ -80,14 +106,17 @@ card (id "media" "dialog"):
         gap = 10
         justifyContent = JustifyCenter
         button previousID "Previous":
-          width = (fixed 104)
+          width = (fixed 84)
           height = (fixed 36)
         button playPauseID playPauseLabel:
-          width = (fixed 120)
+          width = (fixed 96)
           height = (fixed 36)
         button nextID "Next":
-          width = (fixed 104)
+          width = (fixed 84)
           height = (fixed 36)
+      horizontalSlider seekID position 0 lengthSeconds:
+        width = fill
+        height = (fixed 34)
     table (id "media" "metadata-table"):
       width = fill
       height = fit

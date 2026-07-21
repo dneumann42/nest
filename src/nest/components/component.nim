@@ -37,3 +37,6 @@ method measure*(c: Component, resources: Resources): IntrinsicSize {.base.} =
 
 method draw*(c: Component, widget: Widget, ctx: DrawContext) {.base.} =
   discard
+
+method drawOverlay*(c: Component, widget: Widget, ctx: DrawContext) {.base.} =
+  discard

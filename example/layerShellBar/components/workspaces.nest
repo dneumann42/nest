@@ -6,10 +6,17 @@ fun workspaceLabel workspace:
       string "! " name
     when (dict-get workspace "focused"):
       string "[" name "]"
-    when (dict-get workspace "visible"):
-      name
     when T:
       name
+
+fun workspaceBackgroundColor workspace:      
+  cond:
+    when (dict-get workspace "urgent"):
+      (color 118 70 20)
+    when (dict-get workspace "focused"):
+      mix-color (theme-color "primary") (color 18 20 20) 0.4
+    when T:
+      (color 20 20 20)
 
 fun workspaceQuery key:
   swayWorkspaceSubscription key
@@ -40,3 +47,5 @@ component workspaces key:
           button workspaceID (workspaceLabel workspace):
             width = fit
             height = fit
+	    background = (workspaceBackgroundColor workspace)
+

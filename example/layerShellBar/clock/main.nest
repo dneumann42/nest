@@ -13,9 +13,11 @@ events:
 card (id "start-popover"):
   width = fill
   height = fill
-  padding = 0
+  padding = 16
   gap = 0
   alignItems = AlignStretch
+  background = color 0 0 0
+  opacity = 0.52
   dialogHeader (id "start-popover" "header"):
     width = fill
     height = (fixed 32)

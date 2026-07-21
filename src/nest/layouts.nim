@@ -319,6 +319,16 @@ proc row*(
   for i in 1 ..< children.len:
     discard ui.constrain(children[i].left == children[i - 1].right + gap)
 
+  if not scrollX:
+    var fillChildren: seq[Widget]
+    for child in children:
+      if child.widthPolicy.kind == WidgetFill:
+        fillChildren.add child
+    for i in 1 ..< fillChildren.len:
+      discard ui.constrain(
+        (fillChildren[i].width == fillChildren[0].width) | FillRemainingStrength
+      )
+
   if not parent.fitWidth and not scrollX:
     discard ui.constrain(children[^1].right <= parent.right - padding)
 
@@ -373,6 +383,16 @@ proc column*(
 
   for i in 1 ..< children.len:
     discard ui.constrain(children[i].top == children[i - 1].bottom + gap)
+
+  if not scrollY:
+    var fillChildren: seq[Widget]
+    for child in children:
+      if child.heightPolicy.kind == WidgetFill:
+        fillChildren.add child
+    for i in 1 ..< fillChildren.len:
+      discard ui.constrain(
+        (fillChildren[i].height == fillChildren[0].height) | FillRemainingStrength
+      )
 
   if not parent.fitHeight and not scrollY:
     discard ui.constrain(children[^1].bottom <= parent.bottom - padding)

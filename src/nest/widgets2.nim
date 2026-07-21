@@ -67,6 +67,8 @@ type
     dirtyAll*: bool
     ticks*: int
     palette*: Palette
+    hasClip*: bool
+    clipRect*: Rect
 
   UpdateContext* = object
     mouseX*, mouseY*: int
@@ -110,6 +112,20 @@ proc clearFocus*(ctx: var UpdateContext) =
 
 proc submitted*(ctx: UpdateContext | DrawContext, id: WidgetID): bool =
   ctx.submittedWidgets.contains(id)
+
+proc intersectRects*(a, b: Rect): Rect =
+  let
+    x1 = max(a.x, b.x)
+    y1 = max(a.y, b.y)
+    x2 = min(a.x + a.w, b.x + b.w)
+    y2 = min(a.y + a.h, b.y + b.h)
+  rect(x1, y1, max(x2 - x1, 0), max(y2 - y1, 0))
+
+proc clippedRect*(ctx: DrawContext, r: Rect): Rect =
+  if ctx.hasClip:
+    intersectRects(ctx.clipRect, r)
+  else:
+    r
 
 proc submit*(ctx: var UpdateContext, id: WidgetID) =
   ctx.submittedWidgets.incl(id)

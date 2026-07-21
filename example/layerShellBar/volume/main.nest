@@ -14,7 +14,7 @@ define:
   defaultSink = ""
   sinks = list
 
-set status (shell (volumeStatusCommand))
+set status (shell (volumeDialogStatusCommand))
 set percent (shell (volumePercentCommand))
 set defaultSink (shell (volumeDefaultSinkCommand))
 set sinks (textLines (shell (volumeSinkListCommand)))
@@ -49,6 +49,8 @@ card (id "volume" "panel"):
   padding = 10
   gap = 8
   alignItems = AlignStretch
+  background = color 0 0 0
+  opacity = 0.52
   dialogHeader (id "volume" "header"):
     width = fill
     height = fixed 32

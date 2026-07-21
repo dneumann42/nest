@@ -59,7 +59,7 @@ method draw*(self: Label, widget: Widget, ctx: DrawContext) =
       cycle = textExtent.width + gap
       offset = (ctx.ticks div 24) mod cycle
     saveState()
-    setClipRect(rect(f.x.toInt, f.y.toInt, textWidth, f.height.toInt))
+    setClipRect(ctx.clippedRect(rect(f.x.toInt, f.y.toInt, textWidth, f.height.toInt)))
     discard drawText(Font(font), f.x.toInt - offset, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
     discard drawText(Font(font), f.x.toInt - offset + cycle, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
     restoreState()

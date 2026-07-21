@@ -1272,11 +1272,19 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
 
     if widget.id in self.scrollContainers:
       let f = widget.frame
+      let
+        previousHasClip = drawContext.hasClip
+        previousClip = drawContext.clipRect
+        clip = drawContext.clippedRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt))
+      drawContext.hasClip = true
+      drawContext.clipRect = clip
       saveState()
-      setClipRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt))
+      setClipRect(clip)
       for child in self.layoutChildren.getOrDefault(widget.id):
         drawWidgetTree(child, dirty)
       restoreState()
+      drawContext.hasClip = previousHasClip
+      drawContext.clipRect = previousClip
       if dirty:
         drawScrollbars(widget)
     else:
@@ -1284,6 +1292,8 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
         drawWidgetTree(child, dirty)
 
   drawWidgetTree(self.root)
+  for (component, widget) in self.components:
+    component.drawOverlay(widget, drawContext)
   context.dirtyWidgets.clear()
   context.dirtyAll = false
   true
@@ -1814,6 +1824,83 @@ proc slider*(
   let view = Slider.new(drawValue, minimum, maximum, orientation)
   ui.attach(box, Component(view))
   ui.addChild(box)
+
+
+proc comboboxPopupIndex(field: Frame, optionCount: int, optionHeight: float64, windowHeight, mouseX, mouseY: int): int =
+  if optionCount <= 0 or optionHeight <= 0.0:
+    return -1
+  let
+    popupHeight = optionCount.float64 * optionHeight
+    belowY = field.y + field.height
+    aboveY = field.y - popupHeight
+    popupY =
+      if belowY + popupHeight <= windowHeight.float64 or aboveY < 0.0:
+        belowY
+      else:
+        aboveY
+    inside = mouseX.float64 >= field.x and mouseX.float64 < field.x + field.width and
+      mouseY.float64 >= popupY and mouseY.float64 < popupY + popupHeight
+  if inside:
+    result = ((mouseY.float64 - popupY) / optionHeight).int
+    if result < 0 or result >= optionCount:
+      result = -1
+  else:
+    result = -1
+
+proc combobox*(
+    ui: var UI,
+    id: WidgetID,
+    selected: int,
+    options: openArray[string],
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): tuple[changed: bool, index: int] {.discardable.} =
+  result.index = selected
+  if options.len == 0:
+    return
+
+  let clampedSelected = selected.clamp(0, options.len - 1)
+
+  if ui.phase == EventPhase:
+    let open = ui.context.draw.focusedWidget == id
+    if open:
+      let located = ui.widgetFrame(id)
+      if located.ok and ui.context.update.mouseLeftPressed:
+        let
+          f = located.frame
+          inField = ui.context.update.mouseX.float64 >= f.x and
+            ui.context.update.mouseX.float64 < f.x + f.width and
+            ui.context.update.mouseY.float64 >= f.y and
+            ui.context.update.mouseY.float64 < f.y + f.height
+          optionIndex = comboboxPopupIndex(
+            f,
+            options.len,
+            height.value,
+            ui.windowHeight,
+            ui.context.update.mouseX,
+            ui.context.update.mouseY,
+          )
+        ui.eventActiveWidgets.clear()
+        ui.eventSubmittedWidgets.clear()
+        ui.context.draw.activeWidgets.clear()
+        ui.context.draw.submittedWidgets.clear()
+        if optionIndex >= 0:
+          ui.context.draw.focusedWidget = InvalidWidgetID
+          ui.eventFocusedWidget = InvalidWidgetID
+          return (optionIndex != clampedSelected, optionIndex)
+        elif not inField:
+          ui.context.draw.focusedWidget = InvalidWidgetID
+          ui.eventFocusedWidget = InvalidWidgetID
+    return
+
+  let open = ui.context.draw.focusedWidget == id
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("combobox:" & options[clampedSelected] & ":" & $open & ":" & $options.len, width, height, alignSelf))
+  ui.attach(box, Component(ComboBox.new(options[clampedSelected], options, clampedSelected, open, height.value.int)))
+  ui.addChild(box)
+  if open:
+    ui.markDirty(id)
+    ui.requestRedrawAfterSafe(16)
 
 proc lineInput*(
     ui: var UI,

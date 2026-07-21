@@ -4,7 +4,11 @@ define:
   closeID = (id "notifications" "close")
   clearID = (id "notifications" "clear")
   restoreID = (id "notifications" "restore")
-  rows = (textLines (shellAsync (id "notifications" "list-query") (notificationListCommand) 1000))
+  rows = list
+  rowIndex = 0
+
+set rows (textLines (shellAsync (id "notifications" "list-query") (notificationListCommand) 1000))
+set rowIndex 0
 
 events:
   when (keyPressed "escape"):
@@ -22,6 +26,8 @@ card (id "notifications" "panel"):
   padding = 10
   gap = 8
   alignItems = AlignStretch
+  background = color 0 0 0
+  opacity = 0.52
   dialogHeader (id "notifications" "header"):
     width = fill
     height = fixed 32
@@ -39,10 +45,17 @@ card (id "notifications" "panel"):
     gap = 4
     scrollY = true
     for rowText (iter rows):
-      label (id "notifications" "row" rowText) rowText:
+      card (id "notifications" "row" rowIndex):
         width = fill
         height = fit
-        textScroll = true
+        padding = 8
+        background = color 0 0 0
+        opacity = 0.35
+        label (id "notifications" "row-label" rowIndex) rowText:
+          width = fill
+          height = fit
+          textScroll = true
+      += rowIndex 1
   row (id "notifications" "actions"):
     width = fill
     height = fit

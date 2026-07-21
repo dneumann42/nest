@@ -546,6 +546,37 @@ proc sdlLoadImage(path: string): screen.Image =
   destroySurface(surf)
   result = screen.Image(images.len)
 
+proc updatePixelImage*(img: screen.Image; width, height: int; pixels: openArray[uint8]): screen.Image =
+  ## Create or update an RGBA32 texture backed by the SDL renderer.
+  ## The pixel buffer is tightly packed, four bytes per pixel.
+  if ren == nil or width <= 0 or height <= 0 or pixels.len < width * height * 4:
+    return screen.Image(0)
+
+  var slot = getImageSlot(img)
+  if slot != nil and slot[].texture != nil and slot[].w == width and slot[].h == height:
+    discard updateTexture(slot[].texture, nil, unsafeAddr pixels[0], (width * 4).cint)
+    return img
+
+  if slot != nil and slot[].texture != nil:
+    destroyTexture(slot[].texture)
+    slot[].texture = nil
+    slot[].w = 0
+    slot[].h = 0
+
+  let tex = createTexture(ren, PIXELFORMAT_RGBA32, TEXTUREACCESS_STATIC, width.cint, height.cint)
+  if tex == nil:
+    return screen.Image(0)
+  discard setTextureBlendMode(tex, BLENDMODE_BLEND)
+  discard setTextureScaleMode(tex, SCALEMODE_NEAREST)
+  discard updateTexture(tex, nil, unsafeAddr pixels[0], (width * 4).cint)
+
+  if slot != nil:
+    slot[] = ImageSlot(texture: tex, w: width, h: height)
+    result = img
+  else:
+    images.add ImageSlot(texture: tex, w: width, h: height)
+    result = screen.Image(images.len)
+
 proc sdlFreeImage(img: screen.Image) =
   let slot = getImageSlot(img)
   if slot == nil:

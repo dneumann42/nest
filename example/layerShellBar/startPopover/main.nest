@@ -1,68 +1,85 @@
 define:
-  packagesID = (id "menu" "packages")
-  wallpaperID = (id "menu" "wallpaper")
-  monitorsID = (id "menu" "monitors")
-  floatRulesID = (id "menu" "float-rules")
-  emacsID = (id "menu" "emacs")
-  officeID = (id "menu" "office")
-  filesID = (id "menu" "files")
-  maindoID = (id "menu" "maindo")
-  logoutID = (id "menu" "logout")
-  shutdownID = (id "menu" "shutdown")
-  restartID = (id "menu" "restart")
+  commands = []:
+    {}:
+      label = "Packages"
+      name = (id "menu" "packages")
+      cmd = "shelly-ui"
+      place = "left"
+    {}:
+      label = "Pick Wallpaper"
+      name = (id "menu" "wallpaper")
+      cmd = "~/.config/sway/scripts/wallpapers pick"
+      place = "left"
+    {}:
+      label = "Monitor On/Off"
+      name = (id "menu" "monitors")
+      cmd = "foot /home/dneumann/.config/sway/scripts/monitors.sh pick"
+      place = "left"
+    {}:
+      label = "Float Rules"
+      name = (id "menu" "float-rules")
+      cmd = "foot /home/dneumann/.config/sway/scripts/sway-float-rules"
+      place = "left"
+    {}:
+      label = "Editor"
+      name = (id "menu" "emacs")
+      cmd = "emacsclient -c -a emacs"
+      place = "right"
+    {}:
+      label = "Office"
+      name = (id "menu" "libreoffice")
+      cmd = "libreoffice"
+      place = "right"
+    {}:
+      label = "Files"
+      name = (id "menu" "files")
+      cmd = "pcmanfm"
+      place = "right"
+    {}:
+      label = "Maindo"
+      name = (id "menu" "maindo")
+      cmd = "wish ~/.projects/maindo_tcl/main.tcl"
+      place = "right"
+    {}:
+      label = "Logout"
+      name = (id "menu" "logout")
+      cmd = "loginctl terminate-session"
+      place = "bottom"
+    {}:
+      label = "Shutdown"
+      name = (id "menu" "shutdown")
+      cmd = "systemctl shutdown now"
+      place = "bottom"
+    {}:
+      label = "Reboot"
+      name = (id "menu" "reboot")
+      cmd = "restart"
+      place = "bottom"
 
 events:
   when (keyPressed "escape"):
     closeDialog ""
-  when (clicked packagesID):
-    shellAsync (id "menu" "run" "packages") "shelly-ui" 0
-    closeDialog "packages"
-  when (clicked wallpaperID):
-    shellAsync (id "menu" "run" "wallpaper") "~/.config/sway/scripts/wallpapers pick" 0
-    closeDialog "wallpaper"
-  when (clicked monitorsID):
-    shellAsync (id "menu" "run" "monitors") "~/.config/sway/scripts/monitors.sh pick" 0
-    closeDialog "monitors"
-  when (clicked floatRulesID):
-    shellAsync (id "menu" "run" "float-rules") "sway-float-rules" 0
-    closeDialog "float-rules"
-  when (clicked emacsID):
-    shellAsync (id "menu" "run" "emacs") "emacsclient -c -a emacs" 0
-    closeDialog "emacs"
-  when (clicked officeID):
-    shellAsync (id "menu" "run" "office") "libreoffice" 0
-    closeDialog "office"
-  when (clicked filesID):
-    shellAsync (id "menu" "run" "files") "pcmanfm" 0
-    closeDialog "files"
-  when (clicked maindoID):
-    shellAsync (id "menu" "run" "maindo") "wish ~/.projects/maindo_tcl/main.tcl" 0
-    closeDialog "maindo"
-  when (clicked logoutID):
-    closeDialog "logout"
-  when (clicked shutdownID):
-    shellAsync (id "menu" "run" "shutdown") "systemctl shutdown now" 0
-    closeDialog "shutdown"
-  when (clicked restartID):
-    shellAsync (id "menu" "run" "restart") "reboot" 0
-    closeDialog "restart"
+  for command (iter commands):
+    when (clicked command.name):
+      shellLaunch command.cmd
+      closeDialog command.name
 
 card (id "menu" "panel"):
   width = fill
   height = fill
-  padding = 14
+  padding = 32
   gap = 12
   alignItems = AlignStretch
+  background = color 0 0 0
+  opacity = 0.85
   image (id "menu" "banner") "example/layerShellBar/assets/nomicon.bmp":
     width = fixed 256
     height = fixed 70
     alignSelf = AlignCenter
-  label (id "menu" "title") (dialogData):
-    width = fill
-    height = fit
   label (id "menu" "subtitle") "Applications and desktop controls":
-    width = fill
+    width = fit
     height = fit
+    alignSelf = AlignCenter
   row (id "menu" "apps"):
     width = fill
     height = fill
@@ -73,47 +90,29 @@ card (id "menu" "panel"):
       height = fit
       gap = 8
       alignItems = AlignStretch
-      button packagesID "Packages":
-        width = fill
-        height = fit
-      button wallpaperID "Pick wallpaper":
-        width = fill
-        height = fit
-      button monitorsID "Monitors":
-        width = fill
-        height = fit
-      button floatRulesID "Float rules":
-        width = fill
-        height = fit
+      for cmd (iter commands):
+	when (= cmd.place "left"):
+          button cmd.name cmd.label:
+            width = fill
+            height = fit
     column (id "menu" "right"):
       width = fill
       height = fit
       gap = 8
       alignItems = AlignStretch
-      button emacsID "Emacs":
-        width = fill
-        height = fit
-      button officeID "Libre Office":
-        width = fill
-        height = fit
-      button filesID "Files":
-        width = fill
-        height = fit
-      button maindoID "Maindo":
-        width = fill
-        height = fit
+      for cmd (iter commands):
+	when (= cmd.place "right"):
+          button cmd.name cmd.label:
+            width = fill
+            height = fit
   row (id "menu" "power"):
     width = fill
     height = fit
     gap = 8
     alignItems = AlignCenter
     justifyContent = JustifyCenter
-    button logoutID "Logout":
-      width = fixed 116
-      height = fit
-    button shutdownID "Shutdown":
-      width = fixed 116
-      height = fit
-    button restartID "Restart":
-      width = fixed 116
-      height = fit
+    for cmd (iter commands):
+      when (= cmd.place "bottom"):
+        button cmd.name cmd.label:
+          width = fixed 116
+          height = fit

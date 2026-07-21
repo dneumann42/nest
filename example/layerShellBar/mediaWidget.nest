@@ -4,29 +4,32 @@ component mediaWidget key:
   define:
     keyText = eval key
     previousID = (id keyText "previous")
+    artID = (id keyText "art")
     titleID = (id keyText "title")
     playPauseID = (id keyText "play-pause")
     nextID = (id keyText "next")
     title = ""
     status = ""
+    art = ""
     statusOverride = ""
     displayStatus = ""
     playPauseLabel = "Play"
 
   set title (mediaQuery (id keyText "query" "title") "metadata --format '{{artist}} - {{title}}' 2>/dev/null || printf 'No media'")
   set status (mediaQuery (id keyText "query" "status") "status 2>/dev/null || printf 'Stopped'")
+  set art (mediaArtwork (id keyText "query" "art"))
   when (= status statusOverride):
     set statusOverride ""
   set displayStatus (pick (= statusOverride "") status statusOverride)
-  set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
+  set playPauseLabel (pick (= displayStatus "Playing") "❚❚" "▶")
 
   redrawAfter 2000
 
   events:
     when (clicked previousID):
       mediaAction (id keyText "action" "previous") "previous 2>/dev/null"
-    when (and (clicked titleID) (not (dialogOpen? "media"))):
-      openDialog "media" "./media" "" titleID
+    when (and (clicked artID) (not (dialogOpen? "media"))):
+      openDialog "media" "./media" "" artID
     when (clicked playPauseID):
       set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
       set displayStatus statusOverride
@@ -40,16 +43,19 @@ component mediaWidget key:
     height = fit
     gap = 6
     alignItems = AlignCenter
-    button previousID "<":
+    button previousID "◀":
       width = (fixed 28)
       height = fit
+    imageButton artID art:
+      width = (fixed 26)
+      height = (fixed 26)
     button titleID title:
-      width = (fixed 220)
+      width = (fixed 150)
       height = fit
       textScroll = true
     button playPauseID playPauseLabel:
-      width = (fixed 76)
+      width = (fixed 56)
       height = fit
-    button nextID ">":
+    button nextID "▶":
       width = (fixed 28)
       height = fit

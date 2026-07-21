@@ -1,4 +1,4 @@
-import std/[os, tables, unittest]
+import std/[os, strutils, tables, unittest]
 
 import crow
 import nest/[crowdsl, resources, ui]
@@ -95,6 +95,68 @@ label (id "value") value:
     check readFile(outputPath) == "new"
     if fileExists(outputPath):
       removeFile(outputPath)
+
+  test "shell launch survives runtime shell cleanup":
+    let runtime = NestCrowRuntime.init()
+    let outputPath = getTempDir() / "nest-shell-launch-test"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
+    let launched = runtime.evaluator.exec(parse(
+      "shellLaunch \"sleep 0.1; printf launched > " & outputPath & "\"\n"
+    ))
+    runtime.closeShellProcesses()
+
+    for _ in 0 ..< 10:
+      if fileExists(outputPath):
+        break
+      os.sleep(30)
+
+    check launched.kind == Boolean
+    check launched.boolean
+    check fileExists(outputPath)
+    if fileExists(outputPath):
+      check readFile(outputPath) == "launched"
+      removeFile(outputPath)
+
+  test "start popover terminal commands use foot with script paths":
+    let source = readFile("example/layerShellBar/startPopover/main.nest")
+
+    check source.contains(
+      "cmd = \"foot /home/dneumann/.config/sway/scripts/monitors.sh pick\""
+    )
+    check source.contains(
+      "cmd = \"foot /home/dneumann/.config/sway/scripts/sway-float-rules\""
+    )
+    check not source.contains("cmd = \"~/.config/sway/scripts/monitors.sh pick\"")
+    check not source.contains("cmd = \"foot sway-float-rules\"")
+
+  test "volume dialog status does not reuse bar percentage command":
+    let
+      dialogSource = readFile("example/layerShellBar/volume/main.nest")
+      componentSource = readFile("example/layerShellBar/components/volume.nest")
+
+    check dialogSource.contains("set status (shell (volumeDialogStatusCommand))")
+    check not dialogSource.contains("set status (shell (volumeStatusCommand))")
+    check componentSource.contains("fun volumeDialogStatusCommand:")
+    check componentSource.contains("printf 'Muted'")
+    check componentSource.contains("printf 'Unmuted'")
+
+  test "notification mailbox uses uncapped indexed scroll list":
+    let
+      dialogSource = readFile("example/layerShellBar/notifications/main.nest")
+      componentSource = readFile("example/layerShellBar/components/notifications.nest")
+
+    check dialogSource.contains("scrollY = true")
+    check dialogSource.contains("rows = list")
+    check dialogSource.contains("set rows (textLines (shellAsync")
+    check dialogSource.contains("rowIndex = 0")
+    check dialogSource.contains("set rowIndex 0")
+    check dialogSource.contains("card (id \"notifications\" \"row\" rowIndex)")
+    check dialogSource.contains("+= rowIndex 1")
+    check not dialogSource.contains("rows = (textLines (shellAsync")
+    check not componentSource.contains("rows[:5]")
+    check componentSource.contains("for item in rows:")
 
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays
@@ -247,22 +309,23 @@ panel (id "root"):
     try:
       app = NestCrowApp.init("example/layerShellBar/main.nest")
       var ui = UI.init()
-      ui.initContext(800, 36)
+      ui.initContext(800, 30)
       ui.loadFont("font", "", 18)
 
-      app.runtime.renderLayoutOnly(ui, app.program, 800, 36)
+      app.runtime.renderLayoutOnly(ui, app.program, 800, 30)
 
       check app.runtime.lastError == ""
       if app.runtime.lastError == "":
         check app.runtime.get("startID").kind == Native
         check app.runtime.get("clock").kind == Command
-        check ui.widget(ui.id("bar")).frame.height == 36
+        check ui.widget(ui.id("bar")).frame.height == 30
         check ui.widget(ui.id("content")).frame.width > 0
         let clockFrame = ui.widget(ui.id("clock")).frame
         check abs((clockFrame.x + clockFrame.width / 2) - 400) <= 2
         check ui.widget(ui.id("right")).frame.width > 0
         check ui.widget(ui.id("bar", "active-window")).frame.width > 0
         check ui.widget(ui.id("bar", "volume")).frame.width > 0
+        check ui.widget(ui.id("bar-media", "art")).frame.width == 26
         check ui.widget(ui.id("bar", "cpu")).frame.width > 0
         check ui.widget(ui.id("bar", "memory")).frame.width > 0
         check ui.widget(ui.id("bar", "storage")).frame.width > 0
@@ -280,7 +343,7 @@ panel (id "root"):
       if mediaApp.runtime.lastError == "":
         let artworkFrame = mediaUi.widget(mediaUi.id("media", "artwork")).frame
         let tableFrame = mediaUi.widget(mediaUi.id("media", "metadata-table")).frame
-        check artworkFrame.height == 250
+        check artworkFrame.height == 280
         check tableFrame.width > 0
         check tableFrame.x > artworkFrame.x + artworkFrame.width
 
@@ -298,6 +361,15 @@ panel (id "root"):
         check dialogApp.runtime.lastError == ""
         if dialogApp.runtime.lastError == "":
           check dialogUi.widget(rootID).frame.width > 0
+          if path == "example/layerShellBar/startPopover/main.nest":
+            let
+              panelFrame = dialogUi.widget(rootID).frame
+              leftFrame = dialogUi.widget(dialogUi.id("menu", "left")).frame
+              rightFrame = dialogUi.widget(dialogUi.id("menu", "right")).frame
+            check leftFrame.width > 0
+            check rightFrame.width > 0
+            check rightFrame.x > leftFrame.x
+            check rightFrame.x + rightFrame.width <= panelFrame.x + panelFrame.width
     finally:
       if app != nil:
         app.runtime.closeDialogProcesses()

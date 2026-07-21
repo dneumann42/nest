@@ -23,9 +23,12 @@ type AppConfig* = object
   width, height: int
   layerShell*: bool
   layerShellConfig*: LayerShellConfig
+  alwaysRun60Fps*: bool
 
 type FramePacer = object
   firstFrame: bool
+  nextFrameTicks: int
+  frameRemainder: int
 
 type ProjectConfig = object
   main: string
@@ -45,13 +48,19 @@ type SingleInstanceLock = object
   active: bool
   lockDir, pidPath: string
 
-proc init*(T: typedesc[AppConfig], width = 800, height = 600,
-    title = "Nest"): T =
+proc init*(
+    T: typedesc[AppConfig],
+    width = 800,
+    height = 600,
+    title = "Nest",
+    alwaysRun60Fps = false,
+): T =
   T(
     title: title,
     width: width,
     height: height,
     layerShellConfig: layerShellSdl3Driver.dockTop(height.Positive),
+    alwaysRun60Fps: alwaysRun60Fps,
   )
 
 proc layerShell*(cfg: AppConfig, config: LayerShellConfig): AppConfig =
@@ -111,6 +120,23 @@ proc takeFirstFrame(pacer: var FramePacer): bool =
   if pacer.firstFrame:
     pacer.firstFrame = false
     result = true
+
+proc beginFixedFrame(pacer: var FramePacer; frameTicks, now: int) =
+  if pacer.nextFrameTicks == 0 or now > pacer.nextFrameTicks + frameTicks:
+    pacer.nextFrameTicks = now
+
+proc finishFixedFrame(
+    pacer: var FramePacer; frameNumerator, frameDenominator, now: int
+) =
+  pacer.frameRemainder += frameNumerator
+  let frameTicks = max(pacer.frameRemainder div frameDenominator, 1)
+  pacer.frameRemainder = pacer.frameRemainder mod frameDenominator
+  if pacer.nextFrameTicks == 0:
+    pacer.nextFrameTicks = now + frameTicks
+  else:
+    pacer.nextFrameTicks += frameTicks
+    if now > pacer.nextFrameTicks + frameTicks:
+      pacer.nextFrameTicks = now + frameTicks
 
 proc initWindow*(cfg: AppConfig): ScreenLayout =
   if cfg.layerShell:
@@ -713,6 +739,9 @@ proc layoutCrowErrorDialogForTest*(
 
 template application*(cfg: AppConfig, blk: untyped) =
   let window {.inject.} = cfg.initWindow()
+  const
+    FixedFrameNumerator = 1000
+    FixedFrameDenominator = 60
   var
     running {.inject.} = true
     updateContext {.inject.} =
@@ -733,13 +762,45 @@ template application*(cfg: AppConfig, blk: untyped) =
         {WantTextInput}
       else:
         {}
+
+    if cfg.alwaysRun60Fps:
+      updateContext.keyInputs.setLen(0)
+      updateContext.textInputs.setLen(0)
+      updateContext.mouseWheelX = 0
+      updateContext.mouseWheelY = 0
+      updateContext.submittedWidgets.clear()
+      updateContext.sliderValues.clear()
+      var now = input.getTicks()
+      framePacer.beginFixedFrame(17, now)
+      while running and now < framePacer.nextFrameTicks:
+        if input.waitEvent(e, framePacer.nextFrameTicks - now, inputFlags):
+          handleEvent(e, running, updateContext, drawContext)
+          while pollEvent(e, inputFlags):
+            handleEvent(e, running, updateContext, drawContext)
+        now = input.getTicks()
+      while pollEvent(e, inputFlags):
+        handleEvent(e, running, updateContext, drawContext)
+      drawContext.ticks = input.getTicks()
+      blk
+      updateContext.mouseLeftPressed = false
+      refresh()
+      framePacer.finishFixedFrame(FixedFrameNumerator, FixedFrameDenominator, input.getTicks())
+      continue
+
     var shouldRender = framePacer.takeFirstFrame()
+    let waitMs =
+      if cfg.alwaysRun60Fps:
+        16
+      else:
+        -1
     let frameEvent =
       if shouldRender:
         false
       else:
-        input.waitEvent(e, -1, inputFlags)
+        input.waitEvent(e, waitMs, inputFlags)
     if frameEvent:
+      shouldRender = true
+    elif cfg.alwaysRun60Fps:
       shouldRender = true
     elif not shouldRender:
       continue
@@ -761,6 +822,9 @@ template application*(cfg: AppConfig, blk: untyped) =
 
 template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
   let window {.inject.} = cfg.initWindow()
+  const
+    FixedFrameNumerator = 1000
+    FixedFrameDenominator = 60
   var running {.inject.} = true
   ui.initContext(window.width, window.height)
   ui.loadFont("font", "", 18)
@@ -772,8 +836,38 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
         {WantTextInput}
       else:
         {}
+
+    if cfg.alwaysRun60Fps:
+      ui.beginInputFrame()
+      var now = input.getTicks()
+      framePacer.beginFixedFrame(17, now)
+      while running and now < framePacer.nextFrameTicks:
+        if input.waitEvent(e, framePacer.nextFrameTicks - now, inputFlags):
+          handleEvent(e, running, ui)
+          while pollEvent(e, inputFlags):
+            handleEvent(e, running, ui)
+        now = input.getTicks()
+      while pollEvent(e, inputFlags):
+        handleEvent(e, running, ui)
+      ui.setDrawTicks(input.getTicks())
+      ui.markAllDirty()
+      blk
+      ui.finishInputFrame()
+      if ui.redrewFrame():
+        refresh()
+      framePacer.finishFixedFrame(FixedFrameNumerator, FixedFrameDenominator, input.getTicks())
+      continue
+
     var shouldRender = framePacer.takeFirstFrame()
-    let waitMs = ui.redrawDelayMs()
+    let redrawWaitMs = ui.redrawDelayMs()
+    let waitMs =
+      if cfg.alwaysRun60Fps:
+        if redrawWaitMs >= 0:
+          min(redrawWaitMs, 16)
+        else:
+          16
+      else:
+        redrawWaitMs
     let frameEvent =
       if shouldRender:
         false
@@ -781,7 +875,11 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
         input.waitEvent(e, waitMs, inputFlags)
     if frameEvent:
       shouldRender = true
-    elif waitMs >= 0:
+    elif cfg.alwaysRun60Fps:
+      shouldRender = true
+      if redrawWaitMs >= 0:
+        ui.clearRedrawRequest()
+    elif redrawWaitMs >= 0:
       shouldRender = true
       ui.clearRedrawRequest()
     if not shouldRender:

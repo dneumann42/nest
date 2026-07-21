@@ -7,8 +7,17 @@ fun mediaQuery key command:
 fun mediaAction key command:
   shellAsync key (mediaPlayerCommand command) 0
 
+fun mediaSeekCommand value:
+  mediaPlayerCommand (string "position " value " 2>/dev/null")
+
 fun mediaArtwork key:
   mediaQuery key "metadata mpris:artUrl 2>/dev/null | while IFS= read -r p; do case \"$p\" in file://*) src=${p#file://}; key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); bmp=/tmp/nest-media-art-$key.bmp; if [ -f \"$bmp\" ] && [ \"$bmp\" -nt \"$src\" ]; then printf '%s' \"$bmp\"; else magick \"$src\" \"$bmp\" >/dev/null 2>&1 && printf '%s' \"$bmp\"; fi;; http://*|https://*) key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); src=/tmp/nest-media-art-$key.src; bmp=/tmp/nest-media-art-$key.bmp; if [ ! -f \"$bmp\" ]; then curl -L -s --max-time 10 -o \"$src\" \"$p\" >/dev/null 2>&1 && magick \"$src\" \"$bmp\" >/dev/null 2>&1; fi; [ -f \"$bmp\" ] && printf '%s' \"$bmp\";; esac; done"
+
+fun mediaLengthSeconds key:
+  mediaQuery key "metadata --format '{{mpris:length}}' 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1 / 1000000; else printf \"0\" }'"
+
+fun mediaPositionSeconds key:
+  mediaQuery key "position 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1; else printf \"0\" }'"
 
 fun mediaMetadataRow key labelText valueText:
   tableRow (id key "metadata" labelText):

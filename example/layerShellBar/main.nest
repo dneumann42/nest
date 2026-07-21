@@ -25,6 +25,7 @@ import "components/activeWindow.nest"
 import "components/volume.nest"
 import "components/metrics.nest"
 import "components/notifications.nest"
+import "mediaWidget.nest"
 
 events:
   when (and (clicked startID) (not (dialogOpen? "start"))):
@@ -43,8 +44,8 @@ column (id "root"):
   alignItems = AlignStretch
   panel (id "bar"):
     width = fill
-    height = fixed 36
-    padding = 6
+    height = fixed 30
+    padding = 0
     alignItems = AlignStretch
     background = color 0 0 0
     opacity = 0.52
@@ -52,7 +53,6 @@ column (id "root"):
       width = fill
       height = fill
       alignItems = AlignCenter
-  
       row (id "left"):
         width = fill
         height = fill
@@ -71,6 +71,7 @@ column (id "root"):
         justifyContent = JustifyEnd
         alignSelf = AlignStretch
         volumeWidget "bar"
+        mediaWidget "bar-media"
         notificationWidget "bar"
         cpuMeter "bar"
         memoryMeter "bar"

@@ -1,6 +1,6 @@
 main = "main.nest"
 title = "Nest Layer Shell Bar"
 width = 1
-height = 36
+height = 30
 layerShell = "top"
 namespace = "nest-layer-shell-bar"

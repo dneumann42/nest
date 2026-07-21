@@ -240,6 +240,34 @@ suite "constraint layout":
     checkFrame center, 110, 0, 200, 100
     checkFrame right, 320, 0, 100, 100
 
+  test "row distributes multiple fill children evenly":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let left = ui.box("left", width = fill())
+    let right = ui.box("right", width = fill())
+
+    ui.root window
+    ui.row(window, [left, right], gap = 12, padding = 14)
+    ui.resize(420, 100)
+    ui.solve()
+
+    checkFrame left, 14, 14, 190, 72
+    checkFrame right, 216, 14, 190, 72
+
+  test "column distributes multiple fill children evenly":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let top = ui.box("top", height = fill())
+    let bottom = ui.box("bottom", height = fill())
+
+    ui.root window
+    ui.column(window, [top, bottom], gap = 12, padding = 14)
+    ui.resize(100, 420)
+    ui.solve()
+
+    checkFrame top, 14, 14, 72, 190
+    checkFrame bottom, 14, 216, 72, 190
+
   test "equal size helpers constrain repeated cells":
     let ui = newLayout()
     let window = ui.box("window")

@@ -597,6 +597,20 @@ proc closeShellProcesses*(runtime: NestCrowRuntime) =
     shell.process.close
   runtime.shellProcesses.clear()
 
+proc launchShellCommand(command: string): bool {.raises: [].} =
+  try:
+    let process = startProcess(
+      "sh",
+      args = @["-c", command],
+      options = {poUsePath, poDaemon, poParentStreams},
+    )
+    process.close
+    true
+  except OSError:
+    false
+  except IOError:
+    false
+
 proc closeWorkspaceSubscriptions*(runtime: NestCrowRuntime) =
   for subscription in runtime.workspaceSubscriptions.values:
     subscription.stopWorkspaceSubscription()
@@ -1057,6 +1071,14 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         0
     text(runtime.asyncShellOutput(values[0].asString, values[1].asString, intervalMs))
+
+  runtime.evaluator.native "shellLaunch":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "shellLaunch expects one command")
+    boolean(launchShellCommand(values[0].asString))
 
   runtime.evaluator.native "swayWorkspaces":
     discard layout
