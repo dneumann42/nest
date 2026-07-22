@@ -2,7 +2,7 @@ import std/[sets, strutils, unittest]
 
 import nest as nestApp
 import nest/[appConfig, dialogAnchors, layerShellSdl3Driver, palette, resources, ui]
-import uirelays/screen
+import nest/screen
 
 const
   Toolbar = WidgetID(101)

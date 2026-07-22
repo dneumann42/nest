@@ -1,6 +1,6 @@
 import std/[atomics, tables, sets]
 import resources
-import uirelays/input
+import nest/input
 export input
 import kiwiberry
 import palette

@@ -2,7 +2,7 @@ import std/[os, strutils, tables, unittest]
 
 import crow
 import nest/[crowdsl, resources, ui]
-import uirelays/[coords, screen]
+import nest/[coords, screen]
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:

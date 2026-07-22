@@ -1,7 +1,7 @@
 import ../widgets2
 import component
 import containers
-import uirelays/[coords, screen]
+import nest/[coords, screen]
 
 type
   TableView* = ref object of Container

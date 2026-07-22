@@ -1,7 +1,7 @@
 import std/sets
 
 import nest/[appConfig, framePacer, palette, resources, ui]
-import uirelays/[input, screen]
+import nest/[input, screen]
 
 proc textFromEvent(chars: array[4, char]): string =
   for ch in chars:

@@ -3,7 +3,7 @@
 import sdl3
 import sdl3_ttf
 import std/[hashes, os, tables]
-import uirelays/[coords, input, screen]
+import nest/[coords, input, screen]
 
 {.compile: "wayland/wlr-layer-shell-unstable-v1-protocol.c".}
 {.compile: "wayland/xdg-shell-protocol.c".}
@@ -191,6 +191,7 @@ var
   rendererWidth, rendererHeight: int
   clipStack: seq[ClipState]
   currentClip: ClipState
+  useLayerShell: bool
 
 proc clearMeasureCache() =
   measureCache.clear()
@@ -238,7 +239,8 @@ proc resetSdlState() =
     destroyRenderer(ren)
     ren = nil
   if win != nil:
-    nestLayerShellDestroy()
+    if useLayerShell:
+      nestLayerShellDestroy()
     destroyWindow(win)
     win = nil
 
@@ -311,10 +313,16 @@ proc resolveFontPath(path: string): string =
 
   ""
 
-proc sdlCreateWindow(layout: var ScreenLayout) =
-  if ren != nil or win != nil:
-    resetSdlState()
+proc createNormalWindow(layout: var ScreenLayout) =
+  let flags = WINDOW_RESIZABLE
+  win = createWindow(cstring"Nest", layout.width.cint, layout.height.cint, flags)
+  if win == nil:
+    quit("Could not create SDL window")
+  if layout.fullScreen:
+    discard setWindowFullscreen(win, true)
+  discard showWindow(win)
 
+proc createLayerShellWindow(layout: var ScreenLayout) =
   let driver = getCurrentVideoDriver()
   if driver == nil or $driver != "wayland":
     quit("Nest layer-shell apps require SDL's Wayland video driver")
@@ -377,9 +385,18 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   discard setWindowSize(win, layout.width.cint, layout.height.cint)
   discard showWindow(win)
 
+proc sdlCreateWindow(layout: var ScreenLayout) =
+  if ren != nil or win != nil:
+    resetSdlState()
+
+  if useLayerShell:
+    createLayerShellWindow(layout)
+  else:
+    createNormalWindow(layout)
+
   ren = createRenderer(win, nil)
   if ren == nil:
-    quit("Could not create SDL renderer for layer-shell window")
+    quit("Could not create SDL renderer")
   discard setRenderDrawBlendMode(ren, BLENDMODE_BLEND)
   discard setRenderDrawColor(ren, 0, 0, 0, 0)
   discard renderClear(ren)
@@ -836,8 +853,7 @@ proc selectWaylandVideoDriver() =
     cstring(HINT_VIDEO_DRIVER), cstring"wayland", HINT_OVERRIDE
   )
 
-proc initLayerShellSdl3Driver*() =
-  selectWaylandVideoDriver()
+proc installSdl3Relays() =
   if not sdl3.init(INIT_VIDEO or INIT_EVENTS):
     quit("SDL3 init failed")
   if not sdl3_ttf.init():
@@ -861,3 +877,12 @@ proc initLayerShellSdl3Driver*() =
     shutdown: sdlQuitRequest)
   clipboardRelays = ClipboardRelays(
     getText: sdlGetClipboardText, putText: sdlPutClipboardText)
+
+proc initSdl3Driver*() =
+  useLayerShell = false
+  installSdl3Relays()
+
+proc initLayerShellSdl3Driver*() =
+  useLayerShell = true
+  selectWaylandVideoDriver()
+  installSdl3Relays()

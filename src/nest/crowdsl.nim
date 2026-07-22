@@ -3,7 +3,7 @@ import std/[json, locks, math, os, osproc, sets, streams, strformat, strutils, t
 import crow
 import palette
 import ui
-import uirelays/[input, screen]
+import nest/[input, screen]
 
 type
   WidgetIDValue* = ref object of NativeValue

@@ -1,7 +1,7 @@
 import std/[os, osproc]
 
 import nest/[appConfig, crowdsl, runtime, ui]
-import uirelays/input
+import nest/input
 
 proc closeCrowErrorDialog*(app: NestCrowApp) =
   if app.errorDialogProcess != nil:

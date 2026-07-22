@@ -1,6 +1,6 @@
 import ../widgets2
 import component
-import uirelays/[coords, screen]
+import nest/[coords, screen]
 
 type
   Slot* = seq[WidgetID]

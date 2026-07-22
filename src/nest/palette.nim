@@ -1,6 +1,6 @@
 import std/[json, os, strutils]
 
-import uirelays/screen
+import nest/screen
 
 type Palette* = object
   primary*: Color

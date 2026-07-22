@@ -1,5 +1,5 @@
 import nest/[crowdsl, layerShellSdl3Driver]
-import uirelays/[backend, screen]
+import nest/[backend, screen]
 
 type AppConfig* = object
   title*: string

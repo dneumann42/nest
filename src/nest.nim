@@ -4,7 +4,7 @@ export appConfig, dialogs, errorDialogs, runtime, ui
 import fungus
 export fungus
 
-import uirelays/[input, screen]
+import nest/[input, screen]
 export input, screen
 
 import nest/layerShellSdl3Driver

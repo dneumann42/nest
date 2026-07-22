@@ -2,7 +2,7 @@ import std/math
 
 import ../[resources, widgets2]
 import component
-import uirelays/[coords, screen]
+import nest/[coords, screen]
 
 const
   MenuPaddingX = 8

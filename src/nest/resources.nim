@@ -1,5 +1,5 @@
 import std/[os, tables, times]
-import uirelays/[coords, screen]
+import nest/[coords, screen]
 export coords, screen
 
 type

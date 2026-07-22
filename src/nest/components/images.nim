@@ -1,6 +1,6 @@
 import ../[resources, widgets2]
 import component
-import uirelays/[coords, screen]
+import nest/[coords, screen]
 
 type
   ImageView* = ref object of Component

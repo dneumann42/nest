@@ -2,7 +2,7 @@ import std/[macros, sets, strutils, tables]
 
 import layouts, components, palette, resources, widgets2
 export layouts, components
-import uirelays/screen
+import nest/screen
 
 type
   ComponentWidget = tuple[component: Component, widget: Widget]

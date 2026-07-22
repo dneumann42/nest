@@ -1,6 +1,6 @@
 import ../widgets2
 import ../resources
-import uirelays/screen
+import nest/screen
 
 type
   ComponentStyle* = object
