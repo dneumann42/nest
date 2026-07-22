@@ -1,0 +1,11 @@
+main = "main.nest"
+title = "Nest App"
+width = 800
+height = 600
+layerShell = "none"
+namespace = "nest-app"
+exclusiveZone = -1
+marginTop = 0
+marginRight = 0
+marginBottom = 0
+marginLeft = 0

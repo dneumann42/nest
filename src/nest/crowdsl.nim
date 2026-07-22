@@ -45,6 +45,7 @@ type
 
   NestCrowRuntime* = ref object
     evaluator*: Evaluator
+    externalEvents: CountTable[string]
     loadedFiles*: Table[string, Time]
     dialogProcesses*: Table[string, DialogProcess]
     dialogResults*: Table[string, string]
@@ -72,6 +73,20 @@ proc init*(T: typedesc[NestCrowRuntime]): T
 proc renderNodes(runtime: NestCrowRuntime; env: Environment; nodes: seq[
     SyntaxNode]): Value
 proc renderNodes(runtime: NestCrowRuntime; nodes: seq[SyntaxNode]): Value
+
+proc queueExternal*(runtime: NestCrowRuntime; name: string) =
+  if name.len > 0:
+    runtime.externalEvents.inc(name)
+
+proc consumeExternal(runtime: NestCrowRuntime; name: string): bool =
+  let count = runtime.externalEvents.getOrDefault(name)
+  if count <= 0:
+    return false
+  if count == 1:
+    runtime.externalEvents.del(name)
+  else:
+    runtime.externalEvents[name] = count - 1
+  true
 
 proc widgetValue(id: WidgetID): Value =
   nativeValue(WidgetIDValue(value: id))
@@ -778,6 +793,22 @@ proc pollDialogProcesses*(runtime: NestCrowRuntime) =
   for key in finished:
     runtime.dialogProcesses.del key
 
+proc closeManagedDialog*(runtime: NestCrowRuntime; key: string) =
+  if key notin runtime.dialogProcesses:
+    return
+  let dialog = runtime.dialogProcesses[key]
+  if dialog.process.running:
+    dialog.process.terminate
+  try:
+    if fileExists(dialog.resultPath):
+      removeFile(dialog.resultPath)
+  except OSError:
+    discard
+  except IOError:
+    discard
+  dialog.process.close
+  runtime.dialogProcesses.del key
+
 proc closeDialogProcesses*(runtime: NestCrowRuntime) =
   for dialog in runtime.dialogProcesses.values:
     if dialog.process.running:
@@ -987,6 +1018,18 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if pressed:
       runtime.requireUi().markAllDirty()
     boolean(pressed)
+
+  runtime.evaluator.native "external":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "external expects one event name")
+    let matched =
+      runtime.requireUi().inEventPhase() and
+        runtime.consumeExternal(env.eval(arguments[0]).asString)
+    if matched:
+      runtime.requireUi().markAllDirty()
+    boolean(matched)
 
   runtime.evaluator.native "fill":
     discard env
@@ -1291,6 +1334,27 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     runtime.launchDialogProcess(key, projectDir, data, anchorID)
     boolean(true)
 
+  runtime.evaluator.native "toggleDialog":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len < 2 or values.len > 4:
+      raise newException(EvaluatorError, "toggleDialog expects key, projectDir, optional data, and optional anchor")
+    let key = values[0].asString
+    if key in runtime.dialogProcesses:
+      runtime.closeManagedDialog(key)
+      return boolean(false)
+    let
+      projectDir = values[1].asString
+      data = if values.len > 2: values[2].asString else: ""
+      anchorID =
+        if values.len > 3:
+          runtime.asWidgetID(values[3])
+        else:
+          runtime.requireUi().id(key)
+    runtime.launchDialogProcess(key, projectDir, data, anchorID)
+    boolean(true)
+
   runtime.evaluator.native "dialogOpen?":
     discard layout
     discard bodyNodes
@@ -1298,6 +1362,15 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if values.len != 1:
       raise newException(EvaluatorError, "dialogOpen? expects key")
     boolean(values[0].asString in runtime.dialogProcesses)
+
+  runtime.evaluator.native "closeManagedDialog":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "closeManagedDialog expects key")
+    runtime.closeManagedDialog(values[0].asString)
+    nothing()
 
   runtime.evaluator.native "dialogResult":
     discard layout
@@ -1603,6 +1676,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
 proc init*(T: typedesc[NestCrowRuntime]): T =
   result = T(
     evaluator: Evaluator.init(),
+    externalEvents: initCountTable[string](),
     dialogProcesses: initTable[string, DialogProcess](),
     dialogResults: initTable[string, string](),
     shellProcesses: initTable[string, ShellProcess](),

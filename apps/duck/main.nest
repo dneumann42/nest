@@ -1,0 +1,34 @@
+define:
+  count = 0
+  rootID = id
+  titleID = id
+  decrementID = (id "decrement")
+  incrementID = (id "increment")
+events:
+  when (clicked decrementID):
+    -= count 1
+  when (clicked incrementID):
+    += count 1
+panel rootID:
+  width = fill
+  height = fill
+  gap = 12.0
+  padding = 16.0
+  alignItems = AlignCenter
+  justifyContent = JustifyCenter
+  label titleID "Counter":
+    width = fit
+    height = fit
+  row (id "controls"):
+    width = fit
+    height = fit
+    gap = 8
+    button decrementID "-":
+      width = (fixed 32)
+      height = fit
+    label (id "count") count:
+      width = (fixed 80)
+      height = fit
+    button incrementID "+":
+      width = (fixed 32)
+      height = fit

@@ -4,7 +4,7 @@ define:
   lastAction = ""
 
 fun startMenu lbl:  
-  imageButton startID "example/layerShellBar/assets/nomicon-small.bmp":
+  imageButton startID "apps/layerShellBar/assets/nomicon-small.bmp":
     width = fixed 28
     height = fixed 28
 
@@ -28,6 +28,8 @@ import "components/notifications.nest"
 import "mediaWidget.nest"
 
 events:
+  when (external "sigusr1"):
+    toggleDialog "start" "./startPopover" (dict-get cfg "start-label") startID
   when (and (clicked startID) (not (dialogOpen? "start"))):
     openDialog "start" "./startPopover" (dict-get cfg "start-label") startID
   when (and (clicked clockID) (not (dialogOpen? "clock"))):

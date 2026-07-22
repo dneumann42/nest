@@ -120,7 +120,7 @@ label (id "value") value:
       removeFile(outputPath)
 
   test "start popover terminal commands use foot with script paths":
-    let source = readFile("example/layerShellBar/startPopover/main.nest")
+    let source = readFile("apps/layerShellBar/startPopover/main.nest")
 
     check source.contains(
       "cmd = \"foot /home/dneumann/.config/sway/scripts/monitors.sh pick\""
@@ -133,8 +133,8 @@ label (id "value") value:
 
   test "volume dialog status does not reuse bar percentage command":
     let
-      dialogSource = readFile("example/layerShellBar/volume/main.nest")
-      componentSource = readFile("example/layerShellBar/components/volume.nest")
+      dialogSource = readFile("apps/layerShellBar/volume/main.nest")
+      componentSource = readFile("apps/layerShellBar/components/volume.nest")
 
     check dialogSource.contains("set status (shell (volumeDialogStatusCommand))")
     check not dialogSource.contains("set status (shell (volumeStatusCommand))")
@@ -144,8 +144,8 @@ label (id "value") value:
 
   test "notification mailbox uses uncapped indexed scroll list":
     let
-      dialogSource = readFile("example/layerShellBar/notifications/main.nest")
-      componentSource = readFile("example/layerShellBar/components/notifications.nest")
+      dialogSource = readFile("apps/layerShellBar/notifications/main.nest")
+      componentSource = readFile("apps/layerShellBar/components/notifications.nest")
 
     check dialogSource.contains("scrollY = true")
     check dialogSource.contains("rows = list")
@@ -203,7 +203,7 @@ panel (id "root"):
       fontRelays = originalFontRelays
 
   test "counter example renders and button clicks mutate state":
-    let app = NestCrowApp.init("example/counter/main.nest")
+    let app = NestCrowApp.init("apps/counter/main.nest")
     var ui = UI.init()
     ui.initContext(360, 180)
     ui.loadFont("font", "", 18)
@@ -276,7 +276,7 @@ panel (id "root"):
       drawText: countText,
     )
     try:
-      let app = NestCrowApp.init("example/counter/main.nest")
+      let app = NestCrowApp.init("apps/counter/main.nest")
       var ui = UI.init()
       ui.initContext(360, 180)
       ui.loadFont("font", "", 18)
@@ -307,7 +307,7 @@ panel (id "root"):
     )
     var app: NestCrowApp = nil
     try:
-      app = NestCrowApp.init("example/layerShellBar/main.nest")
+      app = NestCrowApp.init("apps/layerShellBar/main.nest")
       var ui = UI.init()
       ui.initContext(800, 30)
       ui.loadFont("font", "", 18)
@@ -332,7 +332,7 @@ panel (id "root"):
         check ui.widget(ui.id("bar", "notifications")).frame.width > 0
         check ui.widget(ui.id("bar", "network")).frame.width > 0
 
-      let mediaApp = NestCrowApp.init("example/layerShellBar/media/main.nest")
+      let mediaApp = NestCrowApp.init("apps/layerShellBar/media/main.nest")
       var mediaUi = UI.init()
       mediaUi.initContext(420, 560)
       mediaUi.loadFont("font", "", 18)
@@ -348,9 +348,9 @@ panel (id "root"):
         check tableFrame.x > artworkFrame.x + artworkFrame.width
 
       for spec in [
-        ("example/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu", "panel")),
-        ("example/layerShellBar/volume/main.nest", 260, 170, ui.id("volume", "panel")),
-        ("example/layerShellBar/notifications/main.nest", 420, 260, ui.id("notifications", "panel")),
+        ("apps/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu", "panel")),
+        ("apps/layerShellBar/volume/main.nest", 260, 170, ui.id("volume", "panel")),
+        ("apps/layerShellBar/notifications/main.nest", 420, 260, ui.id("notifications", "panel")),
       ]:
         let (path, width, height, rootID) = spec
         let dialogApp = NestCrowApp.init(path)
@@ -361,7 +361,7 @@ panel (id "root"):
         check dialogApp.runtime.lastError == ""
         if dialogApp.runtime.lastError == "":
           check dialogUi.widget(rootID).frame.width > 0
-          if path == "example/layerShellBar/startPopover/main.nest":
+          if path == "apps/layerShellBar/startPopover/main.nest":
             let
               panelFrame = dialogUi.widget(rootID).frame
               leftFrame = dialogUi.widget(dialogUi.id("menu", "left")).frame
@@ -507,7 +507,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
       runtime.renderLayoutOnly(ui, parse("""
 define:
   selectedDate = "2026-07-18"
-import "example/layerShellBar/components/calendar.nest"
+import "apps/layerShellBar/components/calendar.nest"
 dateSelector "cal" selectedDate
 """), 320, 320)
 
@@ -532,7 +532,7 @@ dateSelector "cal" selectedDate
       runtime.render(eventUi, parse("""
 define:
   selectedDate = "2026-07-18"
-import "example/layerShellBar/components/calendar.nest"
+import "apps/layerShellBar/components/calendar.nest"
 dateSelector "cal" selectedDate
 """))
 
@@ -575,7 +575,7 @@ dateSelector "cal" selectedDate
 define:
   selectedDate = "2026-07-18"
   clickedDate = nothing
-import "example/layerShellBar/components/calendar.nest"
+import "apps/layerShellBar/components/calendar.nest"
 dateSelectorWithSignal "cal" selectedDate clickedDate
 """))
 
@@ -609,7 +609,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
       ui.beginLayout(320, 320)
       runtime.renderComponent(
         ui,
-        "example/layerShellBar/components/calendar.nest",
+        "apps/layerShellBar/components/calendar.nest",
         "dateSelector",
         @[stringLiteral("nim-cal"), symbol("selectedDate")],
       )
