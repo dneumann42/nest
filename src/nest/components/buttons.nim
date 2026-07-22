@@ -36,7 +36,7 @@ method update*(self: Button, widget: Widget, ctx: var UpdateContext) =
   if isActive:
     ctx.setActive(widget.id)
 
-method draw*(self: Button, widget: Widget, ctx: DrawContext) =
+method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     hot = ctx.hot(widget.id)

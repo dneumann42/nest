@@ -17,5 +17,5 @@ method update*(self: LineInput, widget: Widget, ctx: var UpdateContext) =
 method measure*(self: LineInput, resources: Resources): IntrinsicSize =
   self.editor.measure(resources)
 
-method draw*(self: LineInput, widget: Widget, ctx: DrawContext) =
+method draw*(self: LineInput, widget: Widget, ctx: var DrawContext) =
   self.editor.draw(widget, ctx)

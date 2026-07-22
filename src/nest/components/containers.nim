@@ -47,7 +47,7 @@ proc new*(T: typedesc[DialogHeader]): T =
 proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
-method draw*(self: Panel, widget: Widget, ctx: DrawContext) =
+method draw*(self: Panel, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
@@ -56,7 +56,7 @@ method draw*(self: Panel, widget: Widget, ctx: DrawContext) =
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, 2), ctx.palette.buttonHighlight)
   drawBorder(f, ctx.palette.panelBorder)
 
-method draw*(self: Card, widget: Widget, ctx: DrawContext) =
+method draw*(self: Card, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   let
     x = f.x.toInt
@@ -74,7 +74,7 @@ method draw*(self: Card, widget: Widget, ctx: DrawContext) =
   fillRect(rect(x + 1, y + h - 2, max(w - 2, 0), 1), ctx.palette.panelBorder)
   fillRect(rect(x + w - 2, y + 1, 1, max(h - 2, 0)), ctx.palette.panelBorder)
 
-method draw*(self: DialogHeader, widget: Widget, ctx: DrawContext) =
+method draw*(self: DialogHeader, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),

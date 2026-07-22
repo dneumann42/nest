@@ -39,6 +39,8 @@ type
     mods*: set[Modifier]
     text*: array[4, char]
     x*, y*: int
+    mouseX*, mouseY*: int
+    wheelX*, wheelY*: float64
     button*: MouseButton
     clicks*: int
 

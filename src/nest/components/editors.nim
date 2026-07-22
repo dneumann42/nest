@@ -11,6 +11,11 @@ const
   EditorMinHeight* = 28
 
 type
+  EditorScrollAxis = enum
+    NoEditorScroll
+    EditorScrollX
+    EditorScrollY
+
   EditorCursor* = object
     index*: int
 
@@ -18,11 +23,21 @@ type
     text*: string
     cursor*: int
     preferredColumn*: int
+    scrollX*, scrollY*: float64
+    targetX*, targetY*: float64
+    maxX*, maxY*: float64
+    contentWidth*, contentHeight*: float64
+    dragging*: EditorScrollAxis
+    dragStartMouse*: float64
+    dragStartScroll*: float64
+    ensureCursorVisible*: bool
 
   Editor* = ref object of Interactive
     state*: EditorState
     fontName*: string
     singleLine*: bool
+    lineNumbers*: bool
+    scrollbars*: bool
 
 proc new*(T: typedesc[EditorState], text = ""): T =
   T(text: text, cursor: text.len, preferredColumn: -1)
@@ -31,10 +46,21 @@ proc clampCursor*(state: EditorState) =
   state.cursor = clamp(state.cursor, 0, state.text.len)
 
 proc new*(
-    T: typedesc[Editor], state: EditorState, fontName = "font", singleLine = false
+    T: typedesc[Editor],
+    state: EditorState,
+    fontName = "font",
+    singleLine = false,
+    lineNumbers = false,
+    scrollbars = true,
 ): T =
   state.clampCursor()
-  T(state: state, fontName: fontName, singleLine: singleLine)
+  T(
+    state: state,
+    fontName: fontName,
+    singleLine: singleLine,
+    lineNumbers: lineNumbers and not singleLine,
+    scrollbars: scrollbars and not singleLine,
+  )
 
 proc lineStart(text: string, index: int): int =
   result = clamp(index, 0, text.len)
@@ -193,36 +219,88 @@ proc handleKey*(state: EditorState, input: KeyInput, widget: Widget,
     discard
 
 proc frameContains(f: Frame, x, y: int): bool =
-  x.float64 > f.x and x.float64 < f.x + f.width and
-    y.float64 > f.y and y.float64 < f.y + f.height
+  x.float64 >= f.x and x.float64 < f.x + f.width and
+    y.float64 >= f.y and y.float64 < f.y + f.height
 
-method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
-  let isHot = widget.frame.frameContains(ctx.mouseX, ctx.mouseY)
-  if isHot:
-    ctx.setHot(widget.id)
-  if ctx.mouseLeftPressed:
-    if isHot:
-      ctx.setFocus(widget.id)
-    elif ctx.focused(widget.id):
-      ctx.clearFocus()
+proc editorScrollWheelStep(): float64 =
+  42.0
 
-  if not ctx.focused(widget.id):
-    return
+proc editorScrollLerpFactor(): float64 =
+  0.35
 
-  ctx.setActive(widget.id)
-  for input in ctx.keyInputs:
-    self.state.handleKey(input, widget, ctx, self.singleLine)
-  if ctx.focused(widget.id):
-    for text in ctx.textInputs:
-      if text.len > 0 and (text[0] >= ' ' or (not self.singleLine and text[0] == '\n')):
-        self.state.insertText(text, self.singleLine)
+proc editorScrollbarSize(): float64 =
+  10.0
+
+proc expandTabs(text: string): string =
+  text.replace("\t", "    ")
+
+proc nearlyEqual(a, b: float64): bool =
+  abs(a - b) < 0.5
+
+proc contains(frame: Frame, x, y: int): bool =
+  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and y.toFloat >= frame.y and
+    y.toFloat < frame.y + frame.height
+
+proc horizontalTrack(f: Frame): Frame =
+  Frame(
+    x: f.x,
+    y: f.y + max(f.height - editorScrollbarSize(), 0.0),
+    width: max(f.width - editorScrollbarSize(), 0.0),
+    height: min(editorScrollbarSize(), f.height),
+  )
+
+proc verticalTrack(f: Frame): Frame =
+  Frame(
+    x: f.x + max(f.width - editorScrollbarSize(), 0.0),
+    y: f.y,
+    width: min(editorScrollbarSize(), f.width),
+    height: max(f.height - editorScrollbarSize(), 0.0),
+  )
+
+proc horizontalThumb(f: Frame, state: EditorState): Frame =
+  let track = horizontalTrack(f)
+  if state.maxX <= 0 or track.width <= 0:
+    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+  let contentWidth = state.maxX + f.width
+  let thumbWidth = max(24.0, track.width * min(f.width / contentWidth, 1.0))
+  let travel = max(track.width - thumbWidth, 0.0)
+  Frame(
+    x: track.x + travel * (state.scrollX / state.maxX),
+    y: track.y,
+    width: thumbWidth,
+    height: track.height,
+  )
+
+proc verticalThumb(f: Frame, state: EditorState): Frame =
+  let track = verticalTrack(f)
+  if state.maxY <= 0 or track.height <= 0:
+    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+  let contentHeight = state.maxY + f.height
+  let thumbHeight = max(24.0, track.height * min(f.height / contentHeight, 1.0))
+  let travel = max(track.height - thumbHeight, 0.0)
+  Frame(
+    x: track.x,
+    y: track.y + travel * (state.scrollY / state.maxY),
+    width: track.width,
+    height: thumbHeight,
+  )
+
+proc editorLineNumberWidth(
+    self: Editor, resources: Resources, lineCount: int
+): int =
+  if not self.lineNumbers:
+    return 0
+  let digits = max(2, ($max(lineCount, 1)).len)
+  resources.measureText(self.fontName, repeat("9", digits)).width + EditorPaddingX * 2
 
 proc editorLines(text: string): seq[string] =
   result = text.split('\n')
   if result.len == 0:
     result = @[""]
 
-method measure*(self: Editor, resources: Resources): IntrinsicSize =
+proc editorContentSize(
+    self: Editor, resources: Resources
+): tuple[width, height: float64] =
   let lines =
     if self.singleLine:
       @[self.state.text]
@@ -232,15 +310,113 @@ method measure*(self: Editor, resources: Resources): IntrinsicSize =
   var height = 0
   let (_, metrics) = resources.get(self.fontName)
   for line in lines:
-    let measurement = resources.measureText(self.fontName, line)
+    let measurement = resources.measureText(self.fontName, line.expandTabs)
     width = max(width, measurement.width)
     height += max(metrics.lineHeight, measurement.height)
-  intrinsicSize(
+  width += self.editorLineNumberWidth(resources, lines.len)
+  (
     max(width + EditorPaddingX * 2, EditorMinWidth).toFloat,
     max(height + EditorPaddingY * 2, EditorMinHeight).toFloat,
   )
 
-proc getFrameStyle*(ctx: DrawContext, hot, focused: bool): tuple[bg, border: Color] =
+proc updateScrollBounds(state: EditorState, f: Frame) =
+  state.maxX = max(state.contentWidth - f.width, 0.0)
+  state.maxY = max(state.contentHeight - f.height, 0.0)
+  state.targetX = state.targetX.clamp(0.0, state.maxX)
+  state.targetY = state.targetY.clamp(0.0, state.maxY)
+
+method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
+  let isHot = widget.frame.frameContains(ctx.mouseX, ctx.mouseY)
+  let handlesWheel = isHot or ctx.focused(widget.id)
+  let f = widget.frame
+  if not self.singleLine and ctx.resources.ready:
+    let (contentWidth, contentHeight) = self.editorContentSize(ctx.resources)
+    self.state.contentWidth = contentWidth
+    self.state.contentHeight = contentHeight
+  self.state.updateScrollBounds(f)
+  if isHot:
+    ctx.setHot(widget.id)
+  if handlesWheel and not self.singleLine:
+    if ctx.mouseWheelY != 0 and self.state.maxY > 0:
+      self.state.targetY = (
+        self.state.targetY - ctx.mouseWheelY * editorScrollWheelStep()
+      ).clamp(0.0, self.state.maxY)
+      ctx.setActive(widget.id)
+    if ctx.mouseWheelX != 0 and self.state.maxX > 0:
+      self.state.targetX = (
+        self.state.targetX - ctx.mouseWheelX * editorScrollWheelStep()
+      ).clamp(0.0, self.state.maxX)
+      ctx.setActive(widget.id)
+  if not self.singleLine and self.scrollbars:
+    if not ctx.mouseLeftDown:
+      self.state.dragging = NoEditorScroll
+    if ctx.mouseLeftPressed:
+      if self.state.maxY > 0 and verticalThumb(f, self.state).contains(ctx.mouseX, ctx.mouseY):
+        self.state.dragging = EditorScrollY
+        self.state.dragStartMouse = ctx.mouseY.toFloat
+        self.state.dragStartScroll = self.state.targetY
+        ctx.setActive(widget.id)
+      elif self.state.maxX > 0 and
+          horizontalThumb(f, self.state).contains(ctx.mouseX, ctx.mouseY):
+        self.state.dragging = EditorScrollX
+        self.state.dragStartMouse = ctx.mouseX.toFloat
+        self.state.dragStartScroll = self.state.targetX
+        ctx.setActive(widget.id)
+    case self.state.dragging
+    of EditorScrollY:
+      let
+        track = verticalTrack(f)
+        thumb = verticalThumb(f, self.state)
+        travel = max(track.height - thumb.height, 1.0)
+      self.state.targetY = (
+        self.state.dragStartScroll +
+        (ctx.mouseY.toFloat - self.state.dragStartMouse) * self.state.maxY / travel
+      ).clamp(0.0, self.state.maxY)
+      ctx.setActive(widget.id)
+    of EditorScrollX:
+      let
+        track = horizontalTrack(f)
+        thumb = horizontalThumb(f, self.state)
+        travel = max(track.width - thumb.width, 1.0)
+      self.state.targetX = (
+        self.state.dragStartScroll +
+        (ctx.mouseX.toFloat - self.state.dragStartMouse) * self.state.maxX / travel
+      ).clamp(0.0, self.state.maxX)
+      ctx.setActive(widget.id)
+    of NoEditorScroll:
+      discard
+  if ctx.mouseLeftPressed:
+    if isHot:
+      ctx.setFocus(widget.id)
+      self.state.ensureCursorVisible = true
+    elif ctx.focused(widget.id):
+      ctx.clearFocus()
+
+  if not ctx.focused(widget.id):
+    return
+
+  ctx.setActive(widget.id)
+  let previousCursor = self.state.cursor
+  let previousTextLen = self.state.text.len
+  for input in ctx.keyInputs:
+    self.state.handleKey(input, widget, ctx, self.singleLine)
+  if ctx.focused(widget.id):
+    for text in ctx.textInputs:
+      if text.len > 0 and (text[0] >= ' ' or (not self.singleLine and text[0] == '\n')):
+        self.state.insertText(text, self.singleLine)
+  if self.state.cursor != previousCursor or self.state.text.len != previousTextLen:
+    self.state.ensureCursorVisible = true
+
+method measure*(self: Editor, resources: Resources): IntrinsicSize =
+  let (width, height) = self.editorContentSize(resources)
+  self.state.contentWidth = width
+  self.state.contentHeight = height
+  intrinsicSize(
+    width,
+    height,
+  )
+
+proc getFrameStyle*(ctx: var DrawContext, hot, focused: bool): tuple[bg, border: Color] =
   let
     bg =
       if focused:
@@ -262,7 +438,7 @@ proc cursorLineAndColumn(state: EditorState): tuple[line, column: int] =
       lineStart = index + 1
   result.column = state.cursor - lineStart
 
-method draw*(self: Editor, widget: Widget, ctx: DrawContext) =
+method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     focused = ctx.focused(widget.id)
@@ -275,9 +451,21 @@ method draw*(self: Editor, widget: Widget, ctx: DrawContext) =
         @[self.state.text]
       else:
         editorLines(self.state.text)
+    gutterWidth = self.editorLineNumberWidth(ctx.resources, lines.len)
+    textLeft = f.x.toInt + EditorPaddingX + gutterWidth
+    textTop = f.y.toInt + EditorPaddingY
+    contentHeight = EditorPaddingY * 2 + lines.len * lineHeight
+  var widestLine = 0
+  for line in lines:
+    widestLine = max(widestLine, ctx.resources.measureText(self.fontName, line.expandTabs).width)
+  let contentWidth = gutterWidth + EditorPaddingX * 2 + widestLine
 
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), bg)
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), border)
+
+  self.state.contentWidth = contentWidth.toFloat
+  self.state.contentHeight = contentHeight.toFloat
+  self.state.updateScrollBounds(f)
 
   saveState()
   setClipRect(ctx.clippedRect(rect(
@@ -286,17 +474,81 @@ method draw*(self: Editor, widget: Widget, ctx: DrawContext) =
     max(f.width.toInt - 2, 0),
     max(f.height.toInt - 2, 0),
   )))
-  var y = f.y.toInt + EditorPaddingY
-  for line in lines:
-    discard drawText(
-      Font(font),
-      f.x.toInt + EditorPaddingX,
-      y,
-      line,
-      ctx.palette.textColor,
-      bg,
-    )
+  if focused and self.state.ensureCursorVisible:
+    let cursor = self.state.cursorLineAndColumn()
+    let lineText =
+      if cursor.line >= 0 and cursor.line < lines.len:
+        lines[cursor.line]
+      else:
+        ""
+    let beforeCursor =
+      if cursor.column > 0:
+        lineText[0 ..< min(cursor.column, lineText.len)]
+      else:
+        ""
+    let cursorX =
+      textLeft + ctx.resources.measureText(self.fontName, beforeCursor.expandTabs).width
+    let cursorY = textTop + cursor.line * lineHeight
+    let visibleLeft = f.x.toInt + gutterWidth + EditorPaddingX
+    let visibleRight = (f.x + f.width).toInt - EditorPaddingX
+    let visibleTop = f.y.toInt + EditorPaddingY
+    let visibleBottom = (f.y + f.height).toInt - EditorPaddingY
+    if cursorX.toFloat - self.state.targetX < visibleLeft.toFloat:
+      self.state.targetX = (cursorX - visibleLeft).toFloat.clamp(0.0, self.state.maxX)
+    elif cursorX.toFloat - self.state.targetX > visibleRight.toFloat:
+      self.state.targetX = (
+        cursorX - visibleRight + EditorPaddingX
+      ).toFloat.clamp(0.0, self.state.maxX)
+    if cursorY.toFloat - self.state.targetY < visibleTop.toFloat:
+      self.state.targetY = (cursorY - visibleTop).toFloat.clamp(0.0, self.state.maxY)
+    elif (cursorY + lineHeight).toFloat - self.state.targetY > visibleBottom.toFloat:
+      self.state.targetY = (
+        cursorY + lineHeight - visibleBottom
+      ).toFloat.clamp(0.0, self.state.maxY)
+    self.state.ensureCursorVisible = false
+
+  self.state.scrollX = self.state.scrollX.clamp(0.0, self.state.maxX).lerp(
+    self.state.targetX, editorScrollLerpFactor()
+  )
+  self.state.scrollY = self.state.scrollY.clamp(0.0, self.state.maxY).lerp(
+    self.state.targetY, editorScrollLerpFactor()
+  )
+  if not self.state.scrollX.nearlyEqual(self.state.targetX) or
+      not self.state.scrollY.nearlyEqual(self.state.targetY):
+    ctx.requestRedrawAfter(16)
+
+  var y = textTop - self.state.scrollY.toInt
+  for index, line in lines:
+    if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
+      if self.lineNumbers:
+        let number = $(index + 1)
+        let numberWidth = ctx.resources.measureText(self.fontName, number).width
+        discard drawText(
+          Font(font),
+          f.x.toInt + EditorPaddingX + gutterWidth - EditorPaddingX - numberWidth,
+          y,
+          number,
+          ctx.palette.foreground,
+          bg,
+        )
+      discard drawText(
+        Font(font),
+        textLeft - self.state.scrollX.toInt,
+        y,
+        line.expandTabs,
+        ctx.palette.textColor,
+        bg,
+      )
     y += lineHeight
+
+  if self.lineNumbers:
+    drawLine(
+      f.x.toInt + gutterWidth,
+      f.y.toInt + 1,
+      f.x.toInt + gutterWidth,
+      (f.y + f.height).toInt - 1,
+      border,
+    )
 
   if focused:
     let cursor = self.state.cursorLineAndColumn()
@@ -311,8 +563,9 @@ method draw*(self: Editor, widget: Widget, ctx: DrawContext) =
       else:
         ""
     let cursorX =
-      f.x.toInt + EditorPaddingX + ctx.resources.measureText(self.fontName, beforeCursor).width
-    let cursorY = f.y.toInt + EditorPaddingY + cursor.line * lineHeight
+      textLeft - self.state.scrollX.toInt +
+      ctx.resources.measureText(self.fontName, beforeCursor.expandTabs).width
+    let cursorY = textTop - self.state.scrollY.toInt + cursor.line * lineHeight
     drawLine(
       cursorX,
       cursorY,
@@ -320,4 +573,29 @@ method draw*(self: Editor, widget: Widget, ctx: DrawContext) =
       min(cursorY + lineHeight, (f.y + f.height).toInt - EditorPaddingY),
       ctx.palette.textColor,
     )
+  if self.scrollbars:
+    if self.state.maxY > 0:
+      let
+        track = verticalTrack(f)
+        thumb = verticalThumb(f, self.state)
+      fillRect(
+        rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt),
+        ctx.palette.panelMuted,
+      )
+      fillRect(
+        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt),
+        ctx.palette.cardAccent,
+      )
+    if self.state.maxX > 0:
+      let
+        track = horizontalTrack(f)
+        thumb = horizontalThumb(f, self.state)
+      fillRect(
+        rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt),
+        ctx.palette.panelMuted,
+      )
+      fillRect(
+        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt),
+        ctx.palette.cardAccent,
+      )
   restoreState()

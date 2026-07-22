@@ -9,6 +9,18 @@ proc textFromEvent(chars: array[4, char]): string =
       break
     result.add(ch)
 
+proc wheelDeltaX(e: Event): float64 =
+  if e.wheelX != 0.0:
+    e.wheelX
+  else:
+    e.x.toFloat
+
+proc wheelDeltaY(e: Event): float64 =
+  if e.wheelY != 0.0:
+    e.wheelY
+  else:
+    e.y.toFloat
+
 proc handleEvent(
     e: Event,
     running: var bool,
@@ -24,10 +36,18 @@ proc handleEvent(
     drawContext.mouseX = e.x
     drawContext.mouseY = e.y
   of MouseDownEvent:
+    updateContext.mouseX = e.x
+    updateContext.mouseY = e.y
+    drawContext.mouseX = e.x
+    drawContext.mouseY = e.y
     let last = updateContext.mouseLeftDown
     updateContext.mouseLeftDown = true
     updateContext.mouseLeftPressed = not last
   of MouseUpEvent:
+    updateContext.mouseX = e.x
+    updateContext.mouseY = e.y
+    drawContext.mouseX = e.x
+    drawContext.mouseY = e.y
     updateContext.mouseLeftDown = false
     updateContext.mouseLeftPressed = false
   of WindowResizeEvent:
@@ -42,8 +62,18 @@ proc handleEvent(
     if text.len > 0:
       updateContext.textInputs.add text
   of MouseWheelEvent:
-    updateContext.mouseWheelX += e.x.toFloat
-    updateContext.mouseWheelY += e.y.toFloat
+    updateContext.mouseX = e.mouseX
+    updateContext.mouseY = e.mouseY
+    drawContext.mouseX = e.mouseX
+    drawContext.mouseY = e.mouseY
+    let
+      wheelX = e.wheelDeltaX()
+      wheelY = e.wheelDeltaY()
+    if ShiftPressed in e.mods:
+      updateContext.mouseWheelX += wheelX + wheelY
+    else:
+      updateContext.mouseWheelX += wheelX
+      updateContext.mouseWheelY += wheelY
   else:
     discard
 
@@ -54,9 +84,11 @@ proc handleEvent(e: Event, running: var bool, ui: var UI) =
   of MouseMoveEvent:
     ui.mouseMove(e.x, e.y)
   of MouseDownEvent:
+    ui.mouseMove(e.x, e.y)
     ui.mouseDown()
     ui.requestRedrawAfter(0)
   of MouseUpEvent:
+    ui.mouseMove(e.x, e.y)
     ui.mouseUp()
     ui.requestRedrawAfter(0)
   of WindowResizeEvent:
@@ -69,7 +101,14 @@ proc handleEvent(e: Event, running: var bool, ui: var UI) =
     ui.textInput(textFromEvent(e.text))
     ui.requestRedrawAfter(0)
   of MouseWheelEvent:
-    ui.mouseWheel(e.x.toFloat, e.y.toFloat)
+    ui.mouseMove(e.mouseX, e.mouseY)
+    let
+      wheelX = e.wheelDeltaX()
+      wheelY = e.wheelDeltaY()
+    if ShiftPressed in e.mods:
+      ui.mouseWheel(wheelX + wheelY, 0.0)
+    else:
+      ui.mouseWheel(wheelX, wheelY)
     ui.requestRedrawAfter(0)
   else:
     discard
@@ -91,6 +130,7 @@ template application*(cfg: AppConfig, blk: untyped) =
       dirtyAll: true,
     )
   drawContext.resources.loadFont("font", "", 18)
+  drawContext.resources.loadFont("editor", "nerd-monospace", 18)
   var framePacer = FramePacer.init()
   while running:
     var e = Event()
@@ -160,6 +200,7 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
   var running {.inject.} = true
   ui.initContext(window.width, window.height)
   ui.loadFont("font", "", 18)
+  ui.loadFont("editor", "nerd-monospace", 18)
   var framePacer = FramePacer.init()
   while running:
     var e = Event()

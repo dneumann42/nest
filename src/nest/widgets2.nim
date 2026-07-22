@@ -69,8 +69,11 @@ type
     palette*: Palette
     hasClip*: bool
     clipRect*: Rect
+    hasRedrawRequest*: bool
+    redrawDelayMs*: int
 
   UpdateContext* = object
+    resources*: Resources
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
     mouseLeftPressed*, mouseLeftDown*: bool
@@ -129,6 +132,12 @@ proc clippedRect*(ctx: DrawContext, r: Rect): Rect =
 
 proc submit*(ctx: var UpdateContext, id: WidgetID) =
   ctx.submittedWidgets.incl(id)
+
+proc requestRedrawAfter*(ctx: var DrawContext, ms: int) =
+  let delay = max(ms, 0)
+  if not ctx.hasRedrawRequest or delay < ctx.redrawDelayMs:
+    ctx.hasRedrawRequest = true
+    ctx.redrawDelayMs = delay
 
 proc setSliderValue*(ctx: var UpdateContext, id: WidgetID, value: float64) =
   ctx.sliderValues[id] = value

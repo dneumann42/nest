@@ -79,7 +79,7 @@ method update*(self: Slider, widget: Widget, ctx: var UpdateContext) =
 proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
-method draw*(self: Slider, widget: Widget, ctx: DrawContext) =
+method draw*(self: Slider, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     n = normalized(self.value, self.minimum, self.maximum)

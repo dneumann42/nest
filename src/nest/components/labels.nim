@@ -46,7 +46,7 @@ method update*(self: DiagnosticLabel, widget: Widget, ctx: var UpdateContext) =
     if ctx.mouseLeftPressed:
       ctx.setActive(widget.id)
 
-method draw*(self: Label, widget: Widget, ctx: DrawContext) =
+method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     (font, _) = ctx.resources.get(self.fontName)
@@ -73,7 +73,7 @@ method draw*(self: Label, widget: Widget, ctx: DrawContext) =
       color(0, 0, 0, 0),
     )
 
-method draw*(self: DiagnosticLabel, widget: Widget, ctx: DrawContext) =
+method draw*(self: DiagnosticLabel, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     (font, _) = ctx.resources.get(self.fontName)

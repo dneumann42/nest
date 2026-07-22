@@ -24,26 +24,26 @@ proc new*(T: typedesc[TableRowView]): T =
 proc new*(T: typedesc[TableCellView]): T =
   T()
 
-method draw*(self: TableView, widget: Widget, ctx: DrawContext) =
+method draw*(self: TableView, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
       self.styledBackground(ctx.palette.cardBackground))
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
       ctx.palette.panelBorder)
 
-method draw*(self: TableHeaderView, widget: Widget, ctx: DrawContext) =
+method draw*(self: TableHeaderView, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
       self.styledBackground(ctx.palette.dialogHeaderBackground))
   fillRect(rect(f.x.toInt, (f.y + f.height - 1).toInt, f.width.toInt, 1),
       ctx.palette.dialogHeaderBorder)
 
-method draw*(self: TableRowView, widget: Widget, ctx: DrawContext) =
+method draw*(self: TableRowView, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   fillRect(rect(f.x.toInt, (f.y + f.height - 1).toInt, f.width.toInt, 1),
       ctx.palette.panelBorder)
 
-method draw*(self: TableCellView, widget: Widget, ctx: DrawContext) =
+method draw*(self: TableCellView, widget: Widget, ctx: var DrawContext) =
   let f = widget.frame
   fillRect(rect((f.x + f.width - 1).toInt, f.y.toInt, 1, f.height.toInt),
       ctx.palette.panelBorder)

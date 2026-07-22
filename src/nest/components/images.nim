@@ -35,7 +35,7 @@ method update*(self: ImageButton, widget: Widget, ctx: var UpdateContext) =
     if ctx.mouseLeftPressed:
       ctx.setActive(widget.id)
 
-proc drawImagePath(path: string, widget: Widget, ctx: DrawContext) =
+proc drawImagePath(path: string, widget: Widget, ctx: var DrawContext) =
   let
     image = ctx.resources.loadImage(path)
     size = ctx.resources.measureImage(path)
@@ -55,10 +55,10 @@ proc drawImagePath(path: string, widget: Widget, ctx: DrawContext) =
     rect(x.toInt, y.toInt, width.toInt, height.toInt),
   )
 
-method draw*(self: ImageView, widget: Widget, ctx: DrawContext) =
+method draw*(self: ImageView, widget: Widget, ctx: var DrawContext) =
   drawImagePath(self.path, widget, ctx)
 
-method draw*(self: ImageButton, widget: Widget, ctx: DrawContext) =
+method draw*(self: ImageButton, widget: Widget, ctx: var DrawContext) =
   if ctx.hot(widget.id):
     let f = widget.frame
     fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), ctx.palette.backgroundHot)

@@ -35,6 +35,7 @@ const
   OutsideFooter = WidgetID(128)
   Slider1 = WidgetID(129)
   FloatingPanel = WidgetID(130)
+  Editor2 = WidgetID(131)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -253,6 +254,322 @@ suite "ui layout nesting":
     ctx.keyInputs = @[KeyInput(key: KeyUp)]
     ui.update(ctx)
     check state.cursor == 4
+
+  test "editor line numbers add an optional gutter":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var resources = Resources.new()
+      resources.loadFont("font", "", 18)
+      var ui = UI.init()
+      var plain = EditorState.new("abcdefghij\nb")
+      var numbered = EditorState.new("abcdefghij\nb")
+
+      ui.beginLayout(400, 120)
+      ui.row(Body, cfg(width = fit(), height = fit())):
+        ui.textEditor(Input1, plain, width = fit(), height = fit())
+        ui.textEditor(
+          Editor2,
+          numbered,
+          width = fit(),
+          height = fit(),
+          lineNumbers = true,
+        )
+      ui.applyIntrinsicSizes(resources)
+      ui.endLayout()
+
+      check ui.widget(Editor2).frame.width > ui.widget(Input1).frame.width
+    finally:
+      fontRelays = originalFontRelays
+
+  test "editor mouse wheel scrolls content with easing":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one\ntwo\nthree\nfour\nfive\nsix")
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.maxY > 0
+      ui.mouseMove(10, 10)
+      ui.mouseWheel(0, -1)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.targetY > 0
+      check state.scrollY > 0
+      check state.scrollY < state.targetY
+    finally:
+      fontRelays = originalFontRelays
+
+  test "focused editor mouse wheel scrolls without hover":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one\ntwo\nthree\nfour\nfive\nsix")
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      ui.mouseMove(10, 10)
+      ui.mouseDown()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+      ui.mouseUp()
+
+      ui.mouseMove(210, 70)
+      ui.mouseWheel(0, -1)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.targetY > 0
+      check state.scrollY > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "active focused editor mouse wheel marks a redraw":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one\ntwo\nthree\nfour\nfive\nsix")
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+      ui.mouseMove(10, 10)
+      ui.mouseDown()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+      ui.mouseUp()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check ui.redrewFrame()
+      ui.mouseWheel(0, -1)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check ui.redrewFrame()
+      check state.targetY > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "editor wheel uses measured bounds before first draw":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one")
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      state.text = "one\ntwo\nthree\nfour\nfive\nsix"
+      ui.mouseMove(10, 10)
+      ui.mouseWheel(0, -1)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.maxY > 0
+      check state.targetY > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "focused editor wheel can scroll away from cursor":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one\ntwo\nthree\nfour\nfive\nsix")
+      state.cursor = 0
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+      ui.mouseMove(10, 10)
+      ui.mouseDown()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+      ui.mouseUp()
+
+      ui.mouseWheel(0, -1)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.targetY > 0
+      check state.scrollY > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "focused editor horizontal wheel can scroll away from cursor":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(160, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("abcdefghijklmnopqrstuvwxyz")
+      state.cursor = 0
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(120), height = fixed(60))
+      ui.mouseMove(10, 10)
+      ui.mouseDown()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(120), height = fixed(60))
+      ui.mouseUp()
+
+      ui.mouseWheel(-1, 0)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(120), height = fixed(60))
+
+      check state.targetX > 0
+      check state.scrollX > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "editor scrollbar drag scrolls content":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one\ntwo\nthree\nfour\nfive\nsix")
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      ui.mouseMove(195, 5)
+      ui.mouseDown()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      ui.mouseMove(195, 35)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.targetY > 0
+      check state.scrollY > 0
+      ui.mouseUp()
+    finally:
+      fontRelays = originalFontRelays
 
   test "line input escape and outside click clear focus without submit":
     var ui = UI.init()

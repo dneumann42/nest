@@ -52,3 +52,5 @@ panel rootID:
   editor editorID:
     width = fill
     height = fill
+    fontName = "editor"
+    lineNumbers = true

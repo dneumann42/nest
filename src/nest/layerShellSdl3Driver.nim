@@ -283,35 +283,60 @@ proc evictTextCacheIfNeeded() =
 # --- Screen hook implementations ---
 
 proc resolveFontPath(path: string): string =
-  if path.len > 0:
+  if path.len > 0 and path != "nerd-monospace":
     return path
 
-  when defined(windows):
-    let candidates = [
+  proc firstExisting(candidates: openArray[string]): string =
+    for candidate in candidates:
+      if fileExists(candidate):
+        return candidate
+    ""
+
+  if path == "nerd-monospace":
+    when defined(windows):
+      return firstExisting([
+        r"C:\Windows\Fonts\CaskaydiaCoveNerdFont-Regular.ttf",
+        r"C:\Windows\Fonts\DejaVuSansMono.ttf",
+        r"C:\Windows\Fonts\consola.ttf"
+      ])
+    elif defined(macosx):
+      return firstExisting([
+        "/Library/Fonts/MesloLGS NF Regular.ttf",
+        "/Library/Fonts/SauceCodeProNerdFont-Regular.ttf",
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/Monaco.ttf"
+      ])
+    else:
+      return firstExisting([
+        "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
+        "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Regular.ttf",
+        "/usr/share/fonts/TTF/CaskaydiaCoveNerdFont-Regular.ttf",
+        "/usr/share/fonts/TTF/MesloLGS NF Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+        "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/liberation-fonts/LiberationMono-Regular.ttf"
+      ])
+  elif defined(windows):
+    return firstExisting([
       r"C:\Windows\Fonts\segoeui.ttf",
       r"C:\Windows\Fonts\arial.ttf"
-    ]
+    ])
   elif defined(macosx):
-    let candidates = [
+    return firstExisting([
       "/System/Library/Fonts/SFNS.ttf",
       "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
       "/System/Library/Fonts/Supplemental/Arial.ttf"
-    ]
+    ])
   else:
-    let candidates = [
+    return firstExisting([
       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
       "/usr/share/fonts/TTF/DejaVuSans.ttf",
       "/usr/share/fonts/noto/NotoSans-Regular.ttf",
       "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf",
       "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
       "/usr/share/fonts/abattis-cantarell-vf-fonts/Cantarell-VF.otf"
-    ]
-
-  for candidate in candidates:
-    if fileExists(candidate):
-      return candidate
-
-  ""
+    ])
 
 proc createNormalWindow(layout: var ScreenLayout) =
   let flags = WINDOW_RESIZABLE
@@ -823,6 +848,11 @@ proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
     e.kind = MouseWheelEvent
     e.x = sdlEvent.wheel.x.int
     e.y = sdlEvent.wheel.y.int
+    e.wheelX = sdlEvent.wheel.x.float64
+    e.wheelY = sdlEvent.wheel.y.float64
+    e.mods = translateMods(getModState())
+    e.mouseX = sdlEvent.wheel.mouse_x.int
+    e.mouseY = sdlEvent.wheel.mouse_y.int
 
 proc sdlPollEvent(e: var input.Event; flags: set[InputFlag]): bool =
   var sdlEvent: sdl3.Event

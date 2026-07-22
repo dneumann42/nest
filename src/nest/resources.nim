@@ -26,6 +26,9 @@ proc new*(T: typedesc[Resources]): T =
     imageTimes: newTable[string, Time](),
   )
 
+proc ready*(resources: Resources): bool =
+  not resources.resources.isNil
+
 proc loadFont*(resources: Resources, name, path: string, size: Positive) =
   var metrics = FontMetrics()
   let font = openFont(path, size, metrics)
@@ -36,8 +39,13 @@ proc loadFont*(resources: Resources, name, path: string, size: Positive) =
 proc get*(
     resources: Resources, name: string
 ): tuple[resource: int, metrics: FontMetrics] =
-  let res = resources.resources[name]
-  let met = resources.fontMetrics[name]
+  let resolvedName =
+    if resources.resources.hasKey(name):
+      name
+    else:
+      "font"
+  let res = resources.resources[resolvedName]
+  let met = resources.fontMetrics[resolvedName]
   result = (res, met)
 
 proc measureText*(resources: Resources, fontName, text: string): TextMeasurement =

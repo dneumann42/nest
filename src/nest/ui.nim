@@ -42,6 +42,9 @@ type
     alignSelf*: Alignment
     scrollX*, scrollY*: bool
     textScroll*: bool
+    lineNumbers*: bool
+    scrollbars*: bool
+    fontName*: string
     style*: ComponentStyle
 
   PendingLayout = object
@@ -124,6 +127,9 @@ proc cfg*(
     scrollX = false,
     scrollY = false,
     textScroll = false,
+    lineNumbers = false,
+    scrollbars = true,
+    fontName = "font",
     style = ComponentStyle(),
 ): BoxConfig =
   BoxConfig(
@@ -137,6 +143,9 @@ proc cfg*(
     scrollX: scrollX,
     scrollY: scrollY,
     textScroll: textScroll,
+    lineNumbers: lineNumbers,
+    scrollbars: scrollbars,
+    fontName: fontName,
     style: style,
   )
 
@@ -250,7 +259,8 @@ proc renderKey(kind: string, config: BoxConfig): string =
   kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
     $config.padding & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
-    $config.textScroll & styleKey
+    $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars & "|" &
+    config.fontName & styleKey
 
 proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): string =
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
@@ -1124,14 +1134,21 @@ template layout*(
     let beforeFocused {.gensym.} = drawContext.focusedWidget
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
+    updateContext.resources = drawContext.resources
     updateContext.sliderDragging =
       if updateContext.mouseLeftDown: drawContext.sliderDragging else: InvalidWidgetID
     ui.update(updateContext)
+    if updateContext.mouseWheelX != 0 or updateContext.mouseWheelY != 0 or
+        updateContext.mouseLeftDown:
+      drawContext.dirtyAll = true
     ui.markStateChanges(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext
     )
     switchState(updateContext, drawContext)
     ui.frameRedrawn = ui.draw(drawContext)
+    if drawContext.hasRedrawRequest:
+      ui.requestRedrawAfterSafe(drawContext.redrawDelayMs)
+      drawContext.dirtyAll = true
   else:
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
@@ -1159,17 +1176,24 @@ template layout*(ui: var UI, blk: untyped): auto =
     let beforeFocused {.gensym.} = ui.context.draw.focusedWidget
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
+    ui.context.update.resources = ui.context.draw.resources
     ui.context.update.sliderDragging =
       if ui.context.update.mouseLeftDown:
         ui.context.draw.sliderDragging
       else:
         InvalidWidgetID
     ui.update(ui.context.update)
+    if ui.context.update.mouseWheelX != 0 or ui.context.update.mouseWheelY != 0 or
+        ui.context.update.mouseLeftDown:
+      ui.markAllDirty()
     ui.markStateChanges(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, ui.context.update
     )
     switchState(ui.context.update, ui.context.draw)
     ui.frameRedrawn = ui.draw(ui.context.draw)
+    if ui.context.draw.hasRedrawRequest:
+      ui.requestRedrawAfterSafe(ui.context.draw.redrawDelayMs)
+      ui.markAllDirty()
   else:
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
@@ -1264,6 +1288,7 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
     return false
 
   var drawContext = context
+  drawContext.hasRedrawRequest = false
   fillRect(
     rect(0, 0, drawContext.windowWidth, drawContext.windowHeight), color(0, 0, 0, 0)
   )
@@ -1328,6 +1353,8 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
   drawWidgetTree(self.root)
   for (component, widget) in self.components:
     component.drawOverlay(widget, drawContext)
+  context.hasRedrawRequest = drawContext.hasRedrawRequest
+  context.redrawDelayMs = drawContext.redrawDelayMs
   context.dirtyWidgets.clear()
   context.dirtyAll = false
   true
@@ -2023,12 +2050,30 @@ proc textEditor*(
     width, height: SizePolicy,
     fontName = "font",
     alignSelf = AlignAuto,
+    lineNumbers = false,
+    scrollbars = true,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
-    renderKey("textEditor:" & state.text & ":" & $state.cursor & ":" & fontName,
-      width, height, alignSelf),
+    renderKey(
+      "textEditor:" & state.text & ":" & $state.cursor & ":" & fontName & ":" &
+        $lineNumbers & ":" & $scrollbars,
+      width,
+      height,
+      alignSelf,
+    ),
   )
-  ui.attach(box, Component(Editor.new(state, fontName, singleLine = false)))
+  ui.attach(
+    box,
+    Component(
+      Editor.new(
+        state,
+        fontName,
+        singleLine = false,
+        lineNumbers = lineNumbers,
+        scrollbars = scrollbars,
+      )
+    ),
+  )
   ui.addChild(box)

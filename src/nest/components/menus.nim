@@ -75,7 +75,7 @@ method update*(self: MenuItem, widget: Widget, ctx: var UpdateContext) =
   if isHot and ctx.mouseLeftPressed:
     ctx.setActive(widget.id)
 
-method draw*(self: Menu, widget: Widget, ctx: DrawContext) =
+method draw*(self: Menu, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     hot = ctx.hot(widget.id)
@@ -104,7 +104,7 @@ method draw*(self: Menu, widget: Widget, ctx: DrawContext) =
     color(0, 0, 0, 0),
   )
 
-method draw*(self: MenuItem, widget: Widget, ctx: DrawContext) =
+method draw*(self: MenuItem, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     hot = ctx.hot(widget.id)
@@ -118,7 +118,7 @@ method draw*(self: MenuItem, widget: Widget, ctx: DrawContext) =
         self.styledBackground(ctx.palette.panelBackground)
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), bg)
 
-method draw*(self: MenuDivider, widget: Widget, ctx: DrawContext) =
+method draw*(self: MenuDivider, widget: Widget, ctx: var DrawContext) =
   discard self
   let f = widget.frame
   let y = (f.y + f.height / 2).toInt

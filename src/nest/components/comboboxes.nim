@@ -69,7 +69,7 @@ method update*(self: ComboBox, widget: Widget, ctx: var UpdateContext) =
     elif self.open and not popupHot:
       ctx.clearFocus()
 
-proc drawTextClipped(ctx: DrawContext, f: Frame, text: string, selected = false) =
+proc drawTextClipped(ctx: var DrawContext, f: Frame, text: string, selected = false) =
   let
     (font, _) = ctx.resources.get("font")
     textExtent = ctx.resources.measureText("font", text)
@@ -84,7 +84,7 @@ proc drawTextClipped(ctx: DrawContext, f: Frame, text: string, selected = false)
   if selected:
     fillRect(rect(f.x.toInt + 3, f.y.toInt + 3, 3, max(f.height.toInt - 6, 1)), ctx.palette.cardAccent)
 
-method draw*(self: ComboBox, widget: Widget, ctx: DrawContext) =
+method draw*(self: ComboBox, widget: Widget, ctx: var DrawContext) =
   let
     f = widget.frame
     hot = ctx.hot(widget.id)
@@ -120,7 +120,7 @@ method draw*(self: ComboBox, widget: Widget, ctx: DrawContext) =
     drawLine(arrowX + ComboArrowWidth - 4, arrowY + 2, arrowX + ComboArrowWidth div 2, arrowY - 3, ctx.palette.textColor)
 
 
-method drawOverlay*(self: ComboBox, widget: Widget, ctx: DrawContext) =
+method drawOverlay*(self: ComboBox, widget: Widget, ctx: var DrawContext) =
   if not self.open:
     return
   let

@@ -309,6 +309,12 @@ proc evalConfig(
       result.scrollY = value.isTruthy
     of "textScroll":
       result.textScroll = value.isTruthy
+    of "lineNumbers":
+      result.lineNumbers = value.isTruthy
+    of "scrollbars":
+      result.scrollbars = value.isTruthy
+    of "fontName":
+      result.fontName = value.asString
     of "background", "backgroundColor":
       result.style.hasBackground = true
       result.style.background = value.asColor(result.style.background)
@@ -2170,7 +2176,10 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       runtime.editorStates[key],
       config.width,
       config.height,
+      fontName = config.fontName,
       alignSelf = config.alignSelf,
+      lineNumbers = config.lineNumbers,
+      scrollbars = config.scrollbars,
     )
     nothing()
 
