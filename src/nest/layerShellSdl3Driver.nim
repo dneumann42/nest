@@ -532,6 +532,18 @@ proc sdlFillRect(r: coords.Rect; color: screen.Color) =
                  w: r.w.cfloat, h: r.h.cfloat)
   discard renderFillRect(ren, addr fr)
 
+proc sdlLineRect(r: coords.Rect; color: screen.Color) =
+  if r.w <= 0 or r.h <= 0:
+    return
+  ensureDrawColor(color)
+  var fr = FRect(
+    x: r.x.cfloat,
+    y: r.y.cfloat,
+    w: r.w.cfloat,
+    h: r.h.cfloat,
+  )
+  discard renderRect(ren, addr fr)
+
 proc sdlDrawLine(x1, y1, x2, y2: int; color: screen.Color) =
   ensureDrawColor(color)
   discard renderLine(ren, x1.cfloat, y1.cfloat, x2.cfloat, y2.cfloat)
@@ -868,7 +880,8 @@ proc installSdl3Relays() =
     getFontMetrics: sdlGetFontMetrics, measureText: sdlMeasureText,
     drawText: sdlDrawText)
   drawRelays = DrawRelays(
-    fillRect: sdlFillRect, drawLine: sdlDrawLine, drawPoint: sdlDrawPoint,
+    fillRect: sdlFillRect, lineRect: sdlLineRect,
+    drawLine: sdlDrawLine, drawPoint: sdlDrawPoint,
     loadImage: sdlLoadImage, freeImage: sdlFreeImage, drawImage: sdlDrawImage,
     imageSize: sdlImageSize)
   inputRelays = InputRelays(

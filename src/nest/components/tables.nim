@@ -28,13 +28,7 @@ method draw*(self: TableView, widget: Widget, ctx: DrawContext) =
   let f = widget.frame
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
       self.styledBackground(ctx.palette.cardBackground))
-  fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, 1),
-      ctx.palette.panelBorder)
-  fillRect(rect(f.x.toInt, (f.y + f.height - 1).toInt, f.width.toInt, 1),
-      ctx.palette.panelBorder)
-  fillRect(rect(f.x.toInt, f.y.toInt, 1, f.height.toInt),
-      ctx.palette.panelBorder)
-  fillRect(rect((f.x + f.width - 1).toInt, f.y.toInt, 1, f.height.toInt),
+  lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
       ctx.palette.panelBorder)
 
 method draw*(self: TableHeaderView, widget: Widget, ctx: DrawContext) =

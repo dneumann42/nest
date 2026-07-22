@@ -440,6 +440,213 @@ panel (id "root"):
     let cleared = runtime.evaluator.exec(parse("menuResult \"main\"\n"))
     check cleared.kind == Nothing
 
+  test "menu result can drive event branches":
+    var runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(240, 80)
+    ui.loadFont("font", "", 18)
+    runtime.dialogResults["menu:duck:menubar"] = "file.open"
+
+    runtime.render(ui, parse("""
+define:
+  menuAction = nothing
+events:
+  when (not (= (menuResult "duck:menubar") nothing)):
+    set menuAction (menuResult "duck:menubar")
+    when (= menuAction "file.open"):
+      set menuAction "open clicked"
+    clearMenuResult "duck:menubar"
+"""))
+
+    let action = runtime.get("menuAction")
+    check action.kind == Text
+    check action.text == "open clicked"
+    check "menu:duck:menubar" notin runtime.dialogResults
+
+  test "pickFile calls callback with selected path":
+    let originalPickFileDialog = pickFileDialog
+    pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+      if not callback.isNil:
+        callback("/tmp/example.txt")
+    try:
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(240, 80)
+      ui.loadFont("font", "", 18)
+
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+fun pickedFile path:
+  set picked path
+events:
+  when (= picked ""):
+    pickFile pickedFile
+"""))
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+fun pickedFile path:
+  set picked path
+events:
+  when (= picked ""):
+    pickFile pickedFile
+"""))
+
+      let picked = runtime.get("picked")
+      check picked.kind == Text
+      check picked.text == "/tmp/example.txt"
+    finally:
+      pickFileDialog = originalPickFileDialog
+
+  test "pickDirectory calls callback with selected path":
+    let originalPickDirectoryDialog = pickDirectoryDialog
+    pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+      if not callback.isNil:
+        callback("/tmp/example-dir")
+    try:
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(240, 80)
+      ui.loadFont("font", "", 18)
+
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+fun pickedDirectory path:
+  set picked path
+events:
+  when (= picked ""):
+    pickDirectory pickedDirectory
+"""))
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+fun pickedDirectory path:
+  set picked path
+events:
+  when (= picked ""):
+    pickDirectory pickedDirectory
+"""))
+
+      let picked = runtime.get("picked")
+      check picked.kind == Text
+      check picked.text == "/tmp/example-dir"
+    finally:
+      pickDirectoryDialog = originalPickDirectoryDialog
+
+  test "pickFileEvent posts external event with selected path":
+    let originalPickFileDialog = pickFileDialog
+    pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+      if not callback.isNil:
+        callback("/tmp/event-file.txt")
+    try:
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(240, 80)
+      ui.loadFont("font", "", 18)
+
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+  requested = false
+events:
+  when (external "file-picked"):
+    set picked (pickResult "file-picked")
+    clearPickResult "file-picked"
+  when (= requested false):
+    set requested true
+    pickFileEvent "file-picked"
+"""))
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+  requested = false
+events:
+  when (external "file-picked"):
+    set picked (pickResult "file-picked")
+    clearPickResult "file-picked"
+  when (= requested false):
+    set requested true
+    pickFileEvent "file-picked"
+"""))
+
+      let picked = runtime.get("picked")
+      check picked.kind == Text
+      check picked.text == "/tmp/event-file.txt"
+      let cleared = runtime.evaluator.exec(parse("pickResult \"file-picked\"\n"))
+      check cleared.kind == Nothing
+    finally:
+      pickFileDialog = originalPickFileDialog
+
+  test "pickDirectoryEvent posts external event with selected path":
+    let originalPickDirectoryDialog = pickDirectoryDialog
+    pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+      if not callback.isNil:
+        callback("/tmp/event-dir")
+    try:
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(240, 80)
+      ui.loadFont("font", "", 18)
+
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+  requested = false
+events:
+  when (external "dir-picked"):
+    set picked (pickResult "dir-picked")
+    clearPickResult "dir-picked"
+  when (= requested false):
+    set requested true
+    pickDirectoryEvent "dir-picked"
+"""))
+      runtime.render(ui, parse("""
+define:
+  picked = ""
+  requested = false
+events:
+  when (external "dir-picked"):
+    set picked (pickResult "dir-picked")
+    clearPickResult "dir-picked"
+  when (= requested false):
+    set requested true
+    pickDirectoryEvent "dir-picked"
+"""))
+
+      let picked = runtime.get("picked")
+      check picked.kind == Text
+      check picked.text == "/tmp/event-dir"
+    finally:
+      pickDirectoryDialog = originalPickDirectoryDialog
+
+  test "editor text can be read and replaced from crow":
+    var runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(240, 120)
+    ui.loadFont("font", "", 18)
+
+    runtime.render(ui, parse("""
+define:
+  editorID = (id "test" "editor")
+  captured = ""
+events:
+  when (= captured ""):
+    setEditorText editorID "first\nsecond"
+    set captured (editorText editorID)
+panel (id "root"):
+  width = fill
+  height = fill
+  editor editorID:
+    width = fill
+    height = fill
+"""))
+
+    let captured = runtime.get("captured")
+    check captured.kind == Text
+    check captured.text == "first\nsecond"
+
   test "crow menubar renders top menus and arbitrary menu item bodies":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -484,6 +691,105 @@ menuBar (id "main"):
       check ui.widget(ui.id("main", "file")).frame.width > 0
       check ui.widget(ui.id("main", "edit")).frame.x > ui.widget(ui.id("main", "file")).frame.x
     finally:
+      fontRelays = originalFontRelays
+
+  test "crow menubar emits clicked item full path":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(360, 160)
+      ui.loadFont("font", "", 18)
+      let source = parse("""
+define:
+  menuID = (id "duck" "menubar")
+menuBar menuID:
+  width = fill
+  height = fixed 28
+  menu "file" "File":
+    menuItem "open" "Open"
+    menuItem "saveas" "Save As"
+""")
+
+      runtime.openMenus["duck:menubar"] = "file"
+      runtime.render(ui, source)
+      let located = ui.widgetFrame(ui.id("duck:menubar", "item", "0"))
+      check located.ok
+      let itemFrame = located.frame
+      ui.mouseMove(itemFrame.x.toInt + 2, itemFrame.y.toInt + 2)
+      ui.mouseDown()
+      runtime.render(ui, source)
+      runtime.render(ui, source)
+
+      check runtime.dialogResults.getOrDefault("menu:duck:menubar") == "file.open"
+    finally:
+      fontRelays = originalFontRelays
+
+  test "duck file open menu action is handled":
+    let originalFontRelays = fontRelays
+    let originalPickFileDialog = pickFileDialog
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    let duckFile = getTempDir() / "duck-open-editor.txt"
+    let duckContent = "alpha\nbeta"
+    writeFile(duckFile, duckContent)
+    pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+      if not callback.isNil:
+        callback(duckFile)
+    try:
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(360, 180)
+      ui.loadFont("font", "", 18)
+      let source = parse(readFile("apps/duck/main.nest"), "apps/duck/main.nest")
+
+      runtime.openMenus["duck:menubar"] = "file"
+      runtime.render(ui, source)
+      let located = ui.widgetFrame(ui.id("duck:menubar", "item", "1"))
+      check located.ok
+      let itemFrame = located.frame
+      ui.mouseMove(itemFrame.x.toInt + 2, itemFrame.y.toInt + 2)
+      ui.mouseDown()
+      runtime.render(ui, source)
+      runtime.render(ui, source)
+      runtime.render(ui, source)
+      runtime.render(ui, source)
+
+      let action = runtime.get("menuAction")
+      check action.kind == Text
+      check action.text == duckFile
+      let picked = runtime.get("pickedFile")
+      check picked.kind == Text
+      check picked.text == duckFile
+      let editorText = runtime.evaluator.exec(parse("editorText \"duck:editor\"\n"))
+      check editorText.kind == Text
+      check editorText.text == duckContent
+    finally:
+      pickFileDialog = originalPickFileDialog
       fontRelays = originalFontRelays
 
   test "menu popover item pattern closes with full item path":

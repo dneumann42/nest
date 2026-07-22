@@ -228,6 +228,32 @@ suite "ui layout nesting":
     check ctx.submitted(Input1)
     check ctx.focusedWidget == InvalidWidgetID
 
+  test "editor supports multiline editing and cursor movement":
+    var ui = UI.init()
+    var state = EditorState.new("one\ntwo")
+    ui.beginLayout(300, 160)
+
+    ui.textEditor(Input1, state, width = fixed(220), height = fixed(120))
+    ui.endLayout()
+
+    var ctx = UpdateContext(mouseX: 10, mouseY: 10, mouseLeftPressed: true)
+    ui.update(ctx)
+    check ctx.focused(Input1)
+
+    ctx.mouseLeftPressed = false
+    ctx.keyInputs = @[KeyInput(key: KeyEnter)]
+    ctx.textInputs = @[]
+    ui.update(ctx)
+    check state.text == "one\ntwo\n"
+
+    ctx.keyInputs = @[KeyInput(key: KeyA, mods: {CtrlPressed})]
+    ui.update(ctx)
+    check state.cursor == state.text.len
+
+    ctx.keyInputs = @[KeyInput(key: KeyUp)]
+    ui.update(ctx)
+    check state.cursor == 4
+
   test "line input escape and outside click clear focus without submit":
     var ui = UI.init()
     var state = LineInputState.new("abc")

@@ -26,11 +26,11 @@ panel rootID:
     gap = 8
     alignItems = AlignCenter
     button decrementID "-":
-      width = (fixed 32)
+      width = fixed 32
       height = fit
     label (id "count") count:
-      width = (fixed 80)
+      width = fixed 80
       height = fit
     button incrementID "+":
-      width = (fixed 32)
+      width = fixed 32
       height = fit

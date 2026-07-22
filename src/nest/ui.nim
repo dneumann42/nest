@@ -101,11 +101,14 @@ macro layoutOnly*(definition: untyped): untyped =
 
   let params = result[3]
   if params.len < 2 or params[1].kind != nnkIdentDefs:
-    error("layoutOnly requires a routine with a UI receiver as the first parameter", definition)
+    error(
+      "layoutOnly requires a routine with a UI receiver as the first parameter",
+      definition,
+    )
 
   let receiver = params[1][0]
   let body = result[^1]
-  result[^1] = quote do:
+  result[^1] = quote:
     if `receiver`.phase == EventPhase:
       return
     `body`
@@ -154,8 +157,8 @@ proc init*(T: typedesc[UI]): T =
     root: ui.box(nextWidgetID(), width = fill(), height = fill()),
     context: UIContext(
       update: UpdateContext(),
-      draw: DrawContext(resources: Resources.new(), palette: Palette.init(),
-          dirtyAll: true),
+      draw:
+        DrawContext(resources: Resources.new(), palette: Palette.init(), dirtyAll: true),
     ),
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
   )
@@ -182,8 +185,9 @@ proc windowWidth*(self: UI): int =
 proc windowHeight*(self: UI): int =
   self.context.draw.windowHeight
 
-proc widgetFrame*(self: UI, id: WidgetID): tuple[ok: bool,
-    frame: Frame] {.raises: [].} =
+proc widgetFrame*(
+    self: UI, id: WidgetID
+): tuple[ok: bool, frame: Frame] {.raises: [].} =
   for box in self.layout.boxes:
     if box.id == id:
       return (true, box.frame)
@@ -248,8 +252,7 @@ proc renderKey(kind: string, config: BoxConfig): string =
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
     $config.textScroll & styleKey
 
-proc renderKey(kind: string, width, height: SizePolicy,
-    alignSelf: Alignment): string =
+proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): string =
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
 
 proc beginInputFrame*(self: var UI) =
@@ -361,7 +364,7 @@ proc normalizedKeyName(value: string): string =
     if ch notin {'-', '_', ' '}:
       result.add toLowerAscii(ch)
 
-proc keyPressed*(self: UI; name: string): bool =
+proc keyPressed*(self: UI, name: string): bool =
   if self.phase != EventPhase:
     return false
   let wanted = normalizedKeyName(name)
@@ -461,13 +464,17 @@ proc shiftWidget(widget: Widget, dx, dy: float64) =
   widget.x.value = widget.x.value + dx
   widget.y.value = widget.y.value + dy
 
-proc scrollbarSize(): float64 = 10.0
+proc scrollbarSize(): float64 =
+  10.0
 
-proc scrollWheelStep(): float64 = 42.0
+proc scrollWheelStep(): float64 =
+  42.0
 
-proc scrollLerpFactor(): float64 = 0.35
+proc scrollLerpFactor(): float64 =
+  0.35
 
-proc snapBackLerpFactor(): float64 = 0.22
+proc snapBackLerpFactor(): float64 =
+  0.22
 
 proc overscrollLimit(viewport: float64): float64 =
   min(72.0, max(viewport * 0.35, 16.0))
@@ -499,10 +506,9 @@ proc verticalTrack(parent: Widget): Frame =
 proc horizontalThumb(parent: Widget, state: ScrollState): Frame =
   let track = horizontalTrack(parent)
   if state.maxX <= 0 or state.contentWidth <= 0 or track.width <= 0:
-    return Frame(x: track.x, y: track.y, width: track.width,
-        height: track.height)
-  let thumbWidth = max(24.0, track.width * min(parent.frame.width /
-      state.contentWidth, 1.0))
+    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+  let thumbWidth =
+    max(24.0, track.width * min(parent.frame.width / state.contentWidth, 1.0))
   let travel = max(track.width - thumbWidth, 0.0)
   Frame(
     x: track.x + travel * (state.scrollX / state.maxX),
@@ -514,10 +520,9 @@ proc horizontalThumb(parent: Widget, state: ScrollState): Frame =
 proc verticalThumb(parent: Widget, state: ScrollState): Frame =
   let track = verticalTrack(parent)
   if state.maxY <= 0 or state.contentHeight <= 0 or track.height <= 0:
-    return Frame(x: track.x, y: track.y, width: track.width,
-        height: track.height)
-  let thumbHeight = max(24.0, track.height * min(parent.frame.height /
-      state.contentHeight, 1.0))
+    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+  let thumbHeight =
+    max(24.0, track.height * min(parent.frame.height / state.contentHeight, 1.0))
   let travel = max(track.height - thumbHeight, 0.0)
   Frame(
     x: track.x,
@@ -527,8 +532,8 @@ proc verticalThumb(parent: Widget, state: ScrollState): Frame =
   )
 
 proc contains(frame: Frame, x, y: int): bool =
-  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
-    y.toFloat >= frame.y and y.toFloat < frame.y + frame.height
+  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and y.toFloat >= frame.y and
+    y.toFloat < frame.y + frame.height
 
 proc shiftDescendants(
     self: UI, parent: Widget, dx, dy: float64, visited: var HashSet[WidgetID]
@@ -565,7 +570,8 @@ proc updateScrollState(self: var UI, parent: Widget) =
     state.contentHeight = parentFrame.height
   else:
     state.contentWidth = max(parentFrame.width, maxRight - min(parentFrame.x, minLeft))
-    state.contentHeight = max(parentFrame.height, maxBottom - min(parentFrame.y, minTop))
+    state.contentHeight =
+      max(parentFrame.height, maxBottom - min(parentFrame.y, minTop))
   state.maxX = max(state.contentWidth - parentFrame.width, 0.0)
   state.maxY = max(state.contentHeight - parentFrame.height, 0.0)
   let
@@ -577,14 +583,12 @@ proc updateScrollState(self: var UI, parent: Widget) =
     state.targetX = state.targetX.snapTarget(0.0, state.maxX)
   if state.dragging != ScrollY:
     state.targetY = state.targetY.snapTarget(0.0, state.maxY)
-  state.scrollX = state.scrollX.clamp(-overscrollX, state.maxX +
-      overscrollX).lerp(
-    state.targetX, scrollLerpFactor()
-  )
-  state.scrollY = state.scrollY.clamp(-overscrollY, state.maxY +
-      overscrollY).lerp(
-    state.targetY, scrollLerpFactor()
-  )
+  state.scrollX = state.scrollX.clamp(-overscrollX, state.maxX + overscrollX).lerp(
+      state.targetX, scrollLerpFactor()
+    )
+  state.scrollY = state.scrollY.clamp(-overscrollY, state.maxY + overscrollY).lerp(
+      state.targetY, scrollLerpFactor()
+    )
   if state.maxX <= 0 and state.dragging == ScrollX:
     state.dragging = NoScroll
   if state.maxY <= 0 and state.dragging == ScrollY:
@@ -635,10 +639,11 @@ proc directLeafHeight(self: UI, widget: Widget): float64 =
     widget.heightPolicy.min
 
 proc preferredWidth(
-    self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
+  self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
 ): float64
+
 proc preferredHeight(
-    self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
+  self: UI, widget: Widget, pendingByParent: Table[WidgetID, PendingLayout]
 ): float64
 
 proc preferredWidth(
@@ -652,22 +657,22 @@ proc preferredWidth(
   of RowLayout:
     if pending.children.len == 0:
       return widget.widthPolicy.min
-    var width = pending.padding * 2.0 + pending.gap * max(pending.children.len -
-        1, 0).toFloat
+    var width =
+      pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
     for child in pending.children:
       width += self.preferredWidth(child, pendingByParent)
     width.clampPolicy(widget.widthPolicy)
   of ColumnLayout:
     var width = widget.widthPolicy.min
     for child in pending.children:
-      width = max(width, self.preferredWidth(child, pendingByParent) +
-          pending.padding * 2.0)
+      width =
+        max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
     width.clampPolicy(widget.widthPolicy)
   of OverlayLayout:
     var width = widget.widthPolicy.min
     for child in pending.children:
-      width = max(width, self.preferredWidth(child, pendingByParent) +
-          pending.padding * 2.0)
+      width =
+        max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
     width.clampPolicy(widget.widthPolicy)
 
 proc preferredHeight(
@@ -681,28 +686,28 @@ proc preferredHeight(
   of RowLayout:
     var height = widget.heightPolicy.min
     for child in pending.children:
-      height = max(height, self.preferredHeight(child, pendingByParent) +
-          pending.padding * 2.0)
+      height = max(
+        height, self.preferredHeight(child, pendingByParent) + pending.padding * 2.0
+      )
     height.clampPolicy(widget.heightPolicy)
   of ColumnLayout:
     if pending.children.len == 0:
       return widget.heightPolicy.min
-    var height = pending.padding * 2.0 + pending.gap * max(
-        pending.children.len - 1, 0).toFloat
+    var height =
+      pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
     for child in pending.children:
       height += self.preferredHeight(child, pendingByParent)
     height.clampPolicy(widget.heightPolicy)
   of OverlayLayout:
     var height = widget.heightPolicy.min
     for child in pending.children:
-      height = max(height, self.preferredHeight(child, pendingByParent) +
-          pending.padding * 2.0)
+      height = max(
+        height, self.preferredHeight(child, pendingByParent) + pending.padding * 2.0
+      )
     height.clampPolicy(widget.heightPolicy)
 
 proc assignDirectStack(
-    self: UI,
-    pending: PendingLayout,
-    pendingByParent: Table[WidgetID, PendingLayout],
+    self: UI, pending: PendingLayout, pendingByParent: Table[WidgetID, PendingLayout]
 ) =
   if pending.children.len == 0:
     return
@@ -741,9 +746,10 @@ proc assignDirectStack(
         else:
           self.preferredHeight(child, pendingByParent)
       var childWidth =
-        if child.widthPolicy.kind == WidgetFill or
-            (child.directAlignment(pending.alignItems) == AlignStretch and
-                child.stretchWidth):
+        if child.widthPolicy.kind == WidgetFill or (
+          child.directAlignment(pending.alignItems) == AlignStretch and
+          child.stretchWidth
+        ):
           availableWidth.clampPolicy(child.widthPolicy)
         else:
           self.preferredWidth(child, pendingByParent)
@@ -793,9 +799,10 @@ proc assignDirectStack(
         else:
           self.preferredWidth(child, pendingByParent)
       var childHeight =
-        if child.heightPolicy.kind == WidgetFill or
-            (child.directAlignment(pending.alignItems) == AlignStretch and
-                child.stretchHeight):
+        if child.heightPolicy.kind == WidgetFill or (
+          child.directAlignment(pending.alignItems) == AlignStretch and
+          child.stretchHeight
+        ):
           availableHeight.clampPolicy(child.heightPolicy)
         else:
           self.preferredHeight(child, pendingByParent)
@@ -819,9 +826,10 @@ proc assignDirectStack(
       availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
     for child in pending.children:
       var childWidth =
-        if child.widthPolicy.kind == WidgetFill or
-            (child.directAlignment(pending.alignItems) == AlignStretch and
-                child.stretchWidth):
+        if child.widthPolicy.kind == WidgetFill or (
+          child.directAlignment(pending.alignItems) == AlignStretch and
+          child.stretchWidth
+        ):
           availableWidth.clampPolicy(child.widthPolicy)
         else:
           self.preferredWidth(child, pendingByParent)
@@ -894,8 +902,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
   for pending in self.pendingLayouts:
     if pending.scrollX or pending.scrollY:
       directParents.incl pending.parent.id
-    elif pending.parent.id in scrollParentIDs or
-        pending.parent.id.hasScrollAncestor():
+    elif pending.parent.id in scrollParentIDs or pending.parent.id.hasScrollAncestor():
       directParents.incl pending.parent.id
 
   for i in countdown(self.pendingLayouts.high, 0):
@@ -915,7 +922,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
         scrollX = pending.scrollX,
-          scrollY = pending.scrollY,
+        scrollY = pending.scrollY,
       )
     of ColumnLayout:
       self.layout.column(
@@ -926,7 +933,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
         scrollX = pending.scrollX,
-          scrollY = pending.scrollY,
+        scrollY = pending.scrollY,
       )
     of OverlayLayout:
       self.layout.overlay(
@@ -980,7 +987,7 @@ proc currentParent(self: UI): Widget =
   else:
     self.frames[^1].parent
 
-proc currentWidget(self: UI; id: WidgetID): tuple[ok: bool; widget: Widget] =
+proc currentWidget(self: UI, id: WidgetID): tuple[ok: bool, widget: Widget] =
   for box in self.layout.boxes:
     if box.id == id:
       return (true, box)
@@ -1038,8 +1045,7 @@ proc place*(self: var UI, slot: WidgetSlot) {.layoutOnly.} =
 proc place*(self: var UI, widget: Widget) {.layoutOnly.} =
   self.addChild(widget)
 
-proc attach*(self: var UI, widget: Widget,
-    component: Component) {.layoutOnly.} =
+proc attach*(self: var UI, widget: Widget, component: Component) {.layoutOnly.} =
   self.components.add((component, widget))
   self.componentByID[widget.id] = component
 
@@ -1119,12 +1125,11 @@ template layout*(
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
     updateContext.sliderDragging =
-      if updateContext.mouseLeftDown:
-        drawContext.sliderDragging
-      else:
-        InvalidWidgetID
+      if updateContext.mouseLeftDown: drawContext.sliderDragging else: InvalidWidgetID
     ui.update(updateContext)
-    ui.markStateChanges(beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext)
+    ui.markStateChanges(
+      beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext
+    )
     switchState(updateContext, drawContext)
     ui.frameRedrawn = ui.draw(drawContext)
   else:
@@ -1160,8 +1165,9 @@ template layout*(ui: var UI, blk: untyped): auto =
       else:
         InvalidWidgetID
     ui.update(ui.context.update)
-    ui.markStateChanges(beforeHot, beforeActive, beforeSubmitted, beforeFocused,
-        ui.context.update)
+    ui.markStateChanges(
+      beforeHot, beforeActive, beforeSubmitted, beforeFocused, ui.context.update
+    )
     switchState(ui.context.update, ui.context.draw)
     ui.frameRedrawn = ui.draw(ui.context.draw)
   else:
@@ -1169,8 +1175,7 @@ template layout*(ui: var UI, blk: untyped): auto =
     ui.context.update.activeWidgets.clear()
   ui.reset()
 
-proc updateScrollbarDrag(self: var UI, parent: Widget,
-    context: var UpdateContext) =
+proc updateScrollbarDrag(self: var UI, parent: Widget, context: var UpdateContext) =
   if parent.id notin self.scrollContainers:
     return
   var state = self.scrollStates.getOrDefault(parent.id)
@@ -1179,30 +1184,28 @@ proc updateScrollbarDrag(self: var UI, parent: Widget,
     overscrollY = overscrollLimit(parent.frame.height)
   if parent.frame.contains(context.mouseX, context.mouseY):
     if state.maxY > 0 and context.mouseWheelY != 0:
-      state.targetY =
-        (state.targetY - context.mouseWheelY * scrollWheelStep()).clamp(
-          -overscrollY, state.maxY + overscrollY
-        )
+      state.targetY = (state.targetY - context.mouseWheelY * scrollWheelStep()).clamp(
+        -overscrollY, state.maxY + overscrollY
+      )
       context.setActive(parent.id)
     if state.maxX > 0 and context.mouseWheelX != 0:
-      state.targetX =
-        (state.targetX - context.mouseWheelX * scrollWheelStep()).clamp(
-          -overscrollX, state.maxX + overscrollX
-        )
+      state.targetX = (state.targetX - context.mouseWheelX * scrollWheelStep()).clamp(
+        -overscrollX, state.maxX + overscrollX
+      )
       context.setActive(parent.id)
 
   if not context.mouseLeftDown:
     state.dragging = NoScroll
 
   if context.mouseLeftPressed:
-    if state.maxY > 0 and verticalThumb(parent, state).contains(context.mouseX,
-        context.mouseY):
+    if state.maxY > 0 and
+        verticalThumb(parent, state).contains(context.mouseX, context.mouseY):
       state.dragging = ScrollY
       state.dragStartMouse = context.mouseY.toFloat
       state.dragStartScroll = state.targetY
       context.setActive(parent.id)
-    elif state.maxX > 0 and horizontalThumb(parent, state).contains(
-        context.mouseX, context.mouseY):
+    elif state.maxX > 0 and
+        horizontalThumb(parent, state).contains(context.mouseX, context.mouseY):
       state.dragging = ScrollX
       state.dragStartMouse = context.mouseX.toFloat
       state.dragStartScroll = state.targetX
@@ -1213,19 +1216,19 @@ proc updateScrollbarDrag(self: var UI, parent: Widget,
     let track = verticalTrack(parent)
     let thumb = verticalThumb(parent, state)
     let travel = max(track.height - thumb.height, 1.0)
-    state.targetY =
-      (state.dragStartScroll + (context.mouseY.toFloat - state.dragStartMouse) *
-          state.maxY / travel)
-        .clamp(-overscrollY, state.maxY + overscrollY)
+    state.targetY = (
+      state.dragStartScroll +
+      (context.mouseY.toFloat - state.dragStartMouse) * state.maxY / travel
+    ).clamp(-overscrollY, state.maxY + overscrollY)
     context.setActive(parent.id)
   of ScrollX:
     let track = horizontalTrack(parent)
     let thumb = horizontalThumb(parent, state)
     let travel = max(track.width - thumb.width, 1.0)
-    state.targetX =
-      (state.dragStartScroll + (context.mouseX.toFloat - state.dragStartMouse) *
-          state.maxX / travel)
-        .clamp(-overscrollX, state.maxX + overscrollX)
+    state.targetX = (
+      state.dragStartScroll +
+      (context.mouseX.toFloat - state.dragStartMouse) * state.maxX / travel
+    ).clamp(-overscrollX, state.maxX + overscrollX)
     context.setActive(parent.id)
   of NoScroll:
     discard
@@ -1245,7 +1248,7 @@ proc updateWidgetTree(
 
   let insideClip =
     (not clipped) or widget.frame.contains(context.mouseX, context.mouseY) or
-      context.focused(widget.id)
+    context.focused(widget.id)
   let childClipped = clipped or widget.id in self.scrollContainers
 
   if not insideClip and childClipped:
@@ -1261,8 +1264,9 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
     return false
 
   var drawContext = context
-  fillRect(rect(0, 0, drawContext.windowWidth, drawContext.windowHeight),
-      color(0, 0, 0, 0))
+  fillRect(
+    rect(0, 0, drawContext.windowWidth, drawContext.windowHeight), color(0, 0, 0, 0)
+  )
   drawContext.dirtyAll = true
 
   proc drawScrollbars(widget: Widget) =
@@ -1272,21 +1276,29 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
     if state.maxY > 0:
       let track = verticalTrack(widget)
       let thumb = verticalThumb(widget, state)
-      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt,
-          track.height.toInt), drawContext.palette.panelMuted)
-      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt,
-          thumb.height.toInt), drawContext.palette.cardAccent)
+      fillRect(
+        rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt),
+        drawContext.palette.panelMuted,
+      )
+      fillRect(
+        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt),
+        drawContext.palette.cardAccent,
+      )
     if state.maxX > 0:
       let track = horizontalTrack(widget)
       let thumb = horizontalThumb(widget, state)
-      fillRect(rect(track.x.toInt, track.y.toInt, track.width.toInt,
-          track.height.toInt), drawContext.palette.panelMuted)
-      fillRect(rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt,
-          thumb.height.toInt), drawContext.palette.cardAccent)
+      fillRect(
+        rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt),
+        drawContext.palette.panelMuted,
+      )
+      fillRect(
+        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt),
+        drawContext.palette.cardAccent,
+      )
 
   proc drawWidgetTree(widget: Widget, inheritedDirty = false) =
-    let dirty = drawContext.dirtyAll or inheritedDirty or widget.id in
-        drawContext.dirtyWidgets
+    let dirty =
+      drawContext.dirtyAll or inheritedDirty or widget.id in drawContext.dirtyWidgets
     if dirty and self.componentByID.hasKey(widget.id):
       self.componentByID[widget.id].draw(widget, drawContext)
 
@@ -1295,7 +1307,9 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
       let
         previousHasClip = drawContext.hasClip
         previousClip = drawContext.clipRect
-        clip = drawContext.clippedRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt))
+        clip = drawContext.clippedRect(
+          rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
+        )
       drawContext.hasClip = true
       drawContext.clipRect = clip
       saveState()
@@ -1390,20 +1404,15 @@ template overlay*(self: var UI, config: BoxConfig, body: untyped) =
       discard
       self.overlay(config)
 
-template row*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("row", config))
       self.pushLayout(layoutParent)
       body
@@ -1411,20 +1420,15 @@ template row*(
       self.row(config)
       discard self.popLayout()
 
-template column*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("column", config))
       self.pushLayout(layoutParent)
       body
@@ -1432,20 +1436,15 @@ template column*(
       self.column(config)
       discard self.popLayout()
 
-template overlay*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template overlay*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("overlay", config))
       self.pushLayout(layoutParent)
       body
@@ -1453,8 +1452,7 @@ template overlay*(
       self.overlay(config)
       discard self.popLayout()
 
-template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
-    body: untyped) =
+template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyped) =
   block:
     if self.phase == EventPhase:
       body
@@ -1479,20 +1477,15 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
       self.layout.alignCenterY(child, layoutParent)
       discard self.popLayout()
 
-template panel*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("panel", config))
       let component = Panel.new()
       component.style = config.style
@@ -1503,20 +1496,15 @@ template panel*(
       self.column(config)
       discard self.popLayout()
 
-template card*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("card", config))
       let component = Card.new()
       component.style = config.style
@@ -1528,11 +1516,7 @@ template card*(
       discard self.popLayout()
 
 template floatingCardBelow*(
-    self: var UI,
-    id: WidgetID,
-    anchorID: WidgetID,
-    config: BoxConfig,
-    body: untyped,
+    self: var UI, id: WidgetID, anchorID: WidgetID, config: BoxConfig, body: untyped
 ) =
   block:
     if self.phase == EventPhase:
@@ -1540,9 +1524,9 @@ template floatingCardBelow*(
       discard
     else:
       let anchor {.gensym.} = self.currentWidget(anchorID)
-      let layoutParent {.gensym.} =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent {.gensym.} = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("floatingCardBelow", config))
       let component {.gensym.} = Card.new()
       component.style = config.style
@@ -1559,20 +1543,15 @@ template floatingCardBelow*(
       self.column(config)
       discard self.popFloatingLayout()
 
-template dialogHeader*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("dialogHeader", config))
       let component = DialogHeader.new()
       component.style = config.style
@@ -1583,20 +1562,15 @@ template dialogHeader*(
       self.row(config)
       discard self.popLayout()
 
-template menuBar*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template menuBar*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("menuBar", config))
       let component = Panel.new()
       component.style = config.style
@@ -1607,20 +1581,15 @@ template menuBar*(
       self.row(config)
       discard self.popLayout()
 
-template table*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("table", config))
       let component = TableView.new()
       component.style = config.style
@@ -1631,20 +1600,15 @@ template table*(
       self.column(config)
       discard self.popLayout()
 
-template tableHeader*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("tableHeader", config))
       let component = TableHeaderView.new()
       component.style = config.style
@@ -1655,20 +1619,15 @@ template tableHeader*(
       self.row(config)
       discard self.popLayout()
 
-template tableRow*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template tableRow*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("tableRow", config))
       let component = TableRowView.new()
       component.style = config.style
@@ -1679,20 +1638,15 @@ template tableRow*(
       self.row(config)
       discard self.popLayout()
 
-template tableCell*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template tableCell*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("tableCell", config))
       let component = TableCellView.new()
       component.style = config.style
@@ -1740,9 +1694,12 @@ proc button*(
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("button:" & label & ":" & $textScroll, width,
-      height, alignSelf) & "|" & $style.hasBackground & "|" & $style.background &
-      "|" & $style.hasOpacity & "|" & $style.opacity)
+  ui.setRenderKey(
+    id,
+    renderKey("button:" & label & ":" & $textScroll, width, height, alignSelf) & "|" &
+      $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity & "|" &
+      $style.opacity,
+  )
   if textScroll:
     ui.markDirty(id)
     ui.requestRedrawAfterSafe(33)
@@ -1765,20 +1722,15 @@ proc menu*(
   ui.attach(box, Component(Menu.new(label)))
   ui.addChild(box)
 
-template menuItem*(
-    self: var UI,
-    id: WidgetID,
-    config: BoxConfig,
-    body: untyped,
-) =
+template menuItem*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
-      let layoutParent =
-        self.box(id, width = config.width, height = config.height,
-            alignSelf = config.alignSelf)
+      let layoutParent = self.box(
+        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+      )
       self.setRenderKey(id, renderKey("menuItem", config))
       let component = MenuItem.new()
       component.style = config.style
@@ -1816,8 +1768,12 @@ proc label*(
     textScroll = false,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("label:" & text & ":" & fontName & ":" &
-      $textScroll, width, height, alignSelf))
+  ui.setRenderKey(
+    id,
+    renderKey(
+      "label:" & text & ":" & fontName & ":" & $textScroll, width, height, alignSelf
+    ),
+  )
   if textScroll:
     ui.markDirty(id)
     ui.requestRedrawAfterSafe(33)
@@ -1836,8 +1792,10 @@ proc coloredLabel*(
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
-    id, renderKey("coloredLabel:" & text & ":" & fontName & ":" & $color, width,
-        height, alignSelf)
+    id,
+    renderKey(
+      "coloredLabel:" & text & ":" & fontName & ":" & $color, width, height, alignSelf
+    ),
   )
   let lbl = Label.new(text, fontName, color, hasColor = true)
   ui.attach(box, Component(lbl))
@@ -1857,8 +1815,13 @@ proc diagnosticLabel*(
     return clickable and ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
-    id, renderKey("diagnosticLabel:" & text & ":" & fontName & ":" & $color,
-        width, height, alignSelf)
+    id,
+    renderKey(
+      "diagnosticLabel:" & text & ":" & fontName & ":" & $color,
+      width,
+      height,
+      alignSelf,
+    ),
   )
   let lbl = DiagnosticLabel.new(text, fontName, color, hasColor = true)
   ui.attach(box, Component(lbl))
@@ -1907,18 +1870,14 @@ proc slider*(
         f = located.frame
         hot =
           ui.context.update.mouseX.toFloat >= f.x and
-        ui.context.update.mouseX.toFloat < f.x + f.width and
+          ui.context.update.mouseX.toFloat < f.x + f.width and
           ui.context.update.mouseY.toFloat >= f.y and
           ui.context.update.mouseY.toFloat < f.y + f.height
         dragging = ui.context.draw.sliderDragging == id
       if (ui.context.update.mouseLeftDown and (hot or ui.active(id) or dragging)) or
           ((not ui.context.update.mouseLeftDown) and dragging):
         let value = sliderValueFromMouse(
-          f,
-          ui.context.update.mouseX,
-          ui.context.update.mouseY,
-          minimum,
-          maximum,
+          f, ui.context.update.mouseX, ui.context.update.mouseY, minimum, maximum,
           orientation,
         )
         ui.context.draw.sliderValues[id] = value
@@ -1947,8 +1906,12 @@ proc slider*(
   ui.attach(box, Component(view))
   ui.addChild(box)
 
-
-proc comboboxPopupIndex(field: Frame, optionCount: int, optionHeight: float64, windowHeight, mouseX, mouseY: int): int =
+proc comboboxPopupIndex(
+    field: Frame,
+    optionCount: int,
+    optionHeight: float64,
+    windowHeight, mouseX, mouseY: int,
+): int =
   if optionCount <= 0 or optionHeight <= 0.0:
     return -1
   let
@@ -1960,7 +1923,8 @@ proc comboboxPopupIndex(field: Frame, optionCount: int, optionHeight: float64, w
         belowY
       else:
         aboveY
-    inside = mouseX.float64 >= field.x and mouseX.float64 < field.x + field.width and
+    inside =
+      mouseX.float64 >= field.x and mouseX.float64 < field.x + field.width and
       mouseY.float64 >= popupY and mouseY.float64 < popupY + popupHeight
   if inside:
     result = ((mouseY.float64 - popupY) / optionHeight).int
@@ -1990,16 +1954,13 @@ proc combobox*(
       if located.ok and ui.context.update.mouseLeftPressed:
         let
           f = located.frame
-          inField = ui.context.update.mouseX.float64 >= f.x and
+          inField =
+            ui.context.update.mouseX.float64 >= f.x and
             ui.context.update.mouseX.float64 < f.x + f.width and
             ui.context.update.mouseY.float64 >= f.y and
             ui.context.update.mouseY.float64 < f.y + f.height
           optionIndex = comboboxPopupIndex(
-            f,
-            options.len,
-            height.value,
-            ui.windowHeight,
-            ui.context.update.mouseX,
+            f, options.len, height.value, ui.windowHeight, ui.context.update.mouseX,
             ui.context.update.mouseY,
           )
         ui.eventActiveWidgets.clear()
@@ -2017,8 +1978,23 @@ proc combobox*(
 
   let open = ui.context.draw.focusedWidget == id
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("combobox:" & options[clampedSelected] & ":" & $open & ":" & $options.len, width, height, alignSelf))
-  ui.attach(box, Component(ComboBox.new(options[clampedSelected], options, clampedSelected, open, height.value.int)))
+  ui.setRenderKey(
+    id,
+    renderKey(
+      "combobox:" & options[clampedSelected] & ":" & $open & ":" & $options.len,
+      width,
+      height,
+      alignSelf,
+    ),
+  )
+  ui.attach(
+    box,
+    Component(
+      ComboBox.new(
+        options[clampedSelected], options, clampedSelected, open, height.value.int
+      )
+    ),
+  )
   ui.addChild(box)
   if open:
     ui.markDirty(id)
@@ -2033,8 +2009,26 @@ proc lineInput*(
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("lineInput:" & state.text & ":" & fontName,
-      width, height, alignSelf))
+  ui.setRenderKey(
+    id, renderKey("lineInput:" & state.text & ":" & fontName, width, height, alignSelf)
+  )
   let input = LineInput.new(state, fontName)
   ui.attach(box, Component(input))
+  ui.addChild(box)
+
+proc textEditor*(
+    ui: var UI,
+    id: WidgetID,
+    state: EditorState,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(
+    id,
+    renderKey("textEditor:" & state.text & ":" & $state.cursor & ":" & fontName,
+      width, height, alignSelf),
+  )
+  ui.attach(box, Component(Editor.new(state, fontName, singleLine = false)))
   ui.addChild(box)

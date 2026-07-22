@@ -1,12 +1,30 @@
 define:
   rootID = id
   panelColor = color 100 100 100
-  menuAction = nothing
   menuID = (id "duck" "menubar")
+  editorID = (id "duck" "editor")
+  menuAction = nothing
+  pickedFile = ""
+
+fun openFileInEditor path:
+  with (open-file path "rb") stream:
+    define:
+      content = (read-all stream)
+    setEditorText editorID content
 
 events:
+  when (external "duck:filePicked"):
+    set pickedFile (pickResult "duck:filePicked")
+    openFileInEditor pickedFile
+    set menuAction pickedFile
+    clearPickResult "duck:filePicked"
+
   when (not (= (menuResult "duck:menubar") nothing)):
     set menuAction (menuResult "duck:menubar")
+    when (= menuAction "file.open"):
+      pickFileEvent "duck:filePicked"
+    when (= menuAction "file.save"):
+      set menuAction (editorText editorID)
     clearMenuResult "duck:menubar"
 
 fun duckMenuBar:
@@ -27,15 +45,10 @@ fun duckMenuBar:
 panel rootID:
   width = fill
   height = fill
-  gap = 12.0
+  gap = 0.0
   padding = 0.0
   alignItems = AlignStretch
   duckMenuBar
-  label (id "duck" "title") "Duck":
-    width = fit
-    height = fit
-    alignSelf = AlignCenter
-  label (id "duck" "menu-action") menuAction:
-    width = fit
-    height = fit
-    alignSelf = AlignCenter
+  editor editorID:
+    width = fill
+    height = fill

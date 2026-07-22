@@ -29,17 +29,7 @@ proc new*(T: typedesc[MenuDivider]): T =
   T()
 
 proc drawBorder(f: Frame, c: Color) =
-  let
-    x = f.x.toInt
-    y = f.y.toInt
-    w = f.width.toInt
-    h = f.height.toInt
-  if w <= 0 or h <= 0:
-    return
-  drawLine(x, y, x + w - 1, y, c)
-  drawLine(x, y + h - 1, x + w - 1, y + h - 1, c)
-  drawLine(x, y, x, y + h - 1, c)
-  drawLine(x + w - 1, y, x + w - 1, y + h - 1, c)
+  lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 method measure*(self: Menu, resources: Resources): IntrinsicSize =
   let measurement = resources.measureText("font", self.label)
