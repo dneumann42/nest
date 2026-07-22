@@ -56,7 +56,6 @@ proc applyDialogAnchor*(app: AppConfig; anchor: DialogAnchor): AppConfig =
     leftZone = centerX < anchor.windowWidth.float64 / 3.0
     rightZone = centerX > anchor.windowWidth.float64 * 2.0 / 3.0
     topZone = centerY <= anchor.windowHeight.float64 / 2.0
-    horizontalParent = anchor.windowWidth >= anchor.windowHeight
     desiredLeft =
       if leftZone:
         anchor.x
@@ -78,18 +77,11 @@ proc applyDialogAnchor*(app: AppConfig; anchor: DialogAnchor): AppConfig =
 
   if topZone:
     result.layerShellConfig.anchors.incl EdgeTop
-    result.layerShellConfig.marginTop =
-      if horizontalParent:
-        0'i32
-      else:
-        edgeDistance(anchor.y + anchor.height)
+    result.layerShellConfig.marginTop = edgeDistance(anchor.y + anchor.height)
   else:
     result.layerShellConfig.anchors.incl EdgeBottom
     result.layerShellConfig.marginBottom =
-      if horizontalParent:
-        0'i32
-      else:
-        edgeDistance(anchor.windowHeight.float64 - anchor.y)
+      edgeDistance(anchor.windowHeight.float64 - anchor.y)
 
   if leftZone:
     result.layerShellConfig.anchors.incl EdgeLeft

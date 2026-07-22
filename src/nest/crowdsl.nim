@@ -1,4 +1,4 @@
-import std/[json, locks, math, os, osproc, streams, strformat, strutils, tables, times]
+import std/[json, locks, math, os, osproc, sets, streams, strformat, strutils, tables, times]
 
 import crow
 import palette
@@ -47,8 +47,10 @@ type
     evaluator*: Evaluator
     externalEvents: CountTable[string]
     loadedFiles*: Table[string, Time]
+    loadedModules*: HashSet[string]
     dialogProcesses*: Table[string, DialogProcess]
     dialogResults*: Table[string, string]
+    openMenus*: Table[string, string]
     shellProcesses*: Table[string, ShellProcess]
     shellCache*: Table[string, ShellCache]
     workspaceSubscriptions*: Table[string, WorkspaceSubscription]
@@ -68,6 +70,21 @@ type
     lastError*: string
     errorDialogProcess*: Process
     errorDialogMessage*: string
+
+  MenuEntryKind = enum
+    MenuEntryItem
+    MenuEntryDivider
+
+  MenuEntry = object
+    kind: MenuEntryKind
+    path: string
+    label: string
+    body: seq[SyntaxNode]
+
+  MenuSpec = object
+    label: string
+    path: string
+    body: seq[SyntaxNode]
 
 proc init*(T: typedesc[NestCrowRuntime]): T
 proc renderNodes(runtime: NestCrowRuntime; env: Environment; nodes: seq[
@@ -169,6 +186,42 @@ proc asColor(value: Value; fallback: Color): Color =
   else:
     fallback
 
+proc normalizedMenuPart(value: string): string =
+  for ch in value.normalize:
+    if ch in {'a' .. 'z', '0' .. '9', '_', '-'}:
+      result.add ch
+
+proc menuPathJoin(parent, child: string): string =
+  if parent.len == 0:
+    child
+  elif child.len == 0:
+    parent
+  else:
+    parent & "." & child
+
+proc commandSymbol(node: SyntaxNode): string =
+  if node.kind == Command and node.callee.kind == Symbol:
+    node.callee.symbol
+  else:
+    ""
+
+proc idKey(env: Environment; node: SyntaxNode; fallback: string): string {.raises: [
+    EvaluatorError].} =
+  if node.kind == String:
+    return node.stringValue
+  if node.kind == Symbol:
+    return node.symbol
+  if node.kind == Command and node.commandSymbol == "id":
+    var parts: seq[string]
+    for argument in node.arguments:
+      parts.add env.eval(argument).asString
+    if parts.len > 0:
+      return parts.join(":")
+  fallback
+
+proc menuKey(key: string): string =
+  "menu:" & key
+
 proc asByte(value: Value; fallback = 0): uint8 =
   uint8(value.asNumber(fallback.float64).int.clamp(0, 255))
 
@@ -234,6 +287,48 @@ proc childNodes(nodes: seq[SyntaxNode]): seq[SyntaxNode] =
   for node in nodes:
     if node.kind != Binding:
       result.add node
+
+proc menuArgs(env: Environment; arguments: seq[SyntaxNode]): tuple[path, label: string] {.raises: [
+    EvaluatorError].} =
+  let values = env.evalArgs(arguments)
+  case values.len
+  of 0:
+    discard
+  of 1:
+    result.label = values[0].asString
+    result.path = normalizedMenuPart(result.label)
+  else:
+    result.path = values[0].asString
+    result.label = values[1].asString
+  if result.path.len == 0:
+    result.path = normalizedMenuPart(result.label)
+  if result.label.len == 0:
+    result.label = result.path
+
+proc collectMenuEntries(env: Environment; parentPath: string;
+    body: seq[SyntaxNode]): seq[MenuEntry] {.raises: [EvaluatorError].} =
+  for node in body:
+    case node.commandSymbol
+    of "menuItem":
+      let args = env.menuArgs(node.arguments)
+      result.add MenuEntry(
+        kind: MenuEntryItem,
+        path: menuPathJoin(parentPath, args.path),
+        label: args.label,
+        body: node.body,
+      )
+    of "menuDivider":
+      result.add MenuEntry(kind: MenuEntryDivider)
+    else:
+      discard
+
+proc collectMenus(env: Environment; body: seq[SyntaxNode]): seq[MenuSpec] {.raises: [
+    EvaluatorError].} =
+  for node in body:
+    if node.commandSymbol != "menu":
+      continue
+    let args = env.menuArgs(node.arguments)
+    result.add MenuSpec(label: args.label, path: args.path, body: node.body)
 
 proc currentDir(runtime: NestCrowRuntime): string =
   if runtime.moduleStack.len > 0:
@@ -959,6 +1054,32 @@ proc loadSyntaxFile*(runtime: NestCrowRuntime;
     converted.frames = error.frames
     raise converted
 
+proc importModule(
+    runtime: NestCrowRuntime; env: Environment; path: string; pos = noSourcePos()
+) {.raises: [EvaluatorError].} =
+  let resolved =
+    try:
+      if not path.isAbsolute and runtime.moduleStack.len == 0 and pos.hasSource:
+        (pos.sourcePath.parentDir / path).normalizedPath
+      else:
+        runtime.resolveModulePath(path)
+    except OSError as error:
+      raise newException(EvaluatorError, path & ": " & error.msg)
+  if resolved in runtime.loadedModules:
+    return
+  let node = runtime.loadSyntaxFile(resolved)
+  runtime.moduleStack.add resolved
+  try:
+    try:
+      discard runtime.renderNodes(env, node.statements)
+    except EvaluatorError as error:
+      raise error
+    except Exception as error:
+      raise newException(EvaluatorError, error.msg)
+    runtime.loadedModules.incl resolved
+  finally:
+    runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
+
 proc renderNodes(runtime: NestCrowRuntime; env: Environment; nodes: seq[
     SyntaxNode]): Value =
   result = nothing()
@@ -986,6 +1107,14 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       if not env.contains(node.bindingSymbol):
         result = env.eval(node.value)
         env.define(node.bindingSymbol, result)
+
+  runtime.evaluator.native "import":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "import expects one path")
+    runtime.importModule(env, env.eval(arguments[0]).asString, arguments[0].pos)
+    nothing()
 
   runtime.evaluator.native "id":
     discard layout
@@ -1429,6 +1558,125 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     runtime.currentUi[].scope(key):
       result = runtime.renderNodes(env, bodyNodes)
 
+  runtime.evaluator.native "menuBar":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let
+      id =
+        if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+      key =
+        if arguments.len > 0: env.idKey(arguments[0], values[0].asString) else: $id
+      config = env.evalConfig(bodyNodes)
+      menus = env.collectMenus(bodyNodes.childNodes)
+      dialogKey = menuKey(key)
+    runtime.currentUi[].menuBar(id, config):
+      for menu in menus:
+        let menuID = runtime.requireUi().id(key, menu.path)
+        if runtime.requireUi().menu(menuID, menu.label, fit(), fill()):
+          if runtime.openMenus.getOrDefault(key) == menu.path:
+            runtime.openMenus.del key
+          else:
+            runtime.openMenus[key] = menu.path
+    let openPath = runtime.openMenus.getOrDefault(key)
+    if openPath.len > 0:
+      for menu in menus:
+        if menu.path != openPath:
+          continue
+        let entries = env.collectMenuEntries(menu.path, menu.body)
+        if runtime.requireUi().inEventPhase():
+          for index, entry in entries:
+            if entry.kind == MenuEntryItem and runtime.requireUi().clicked(
+                runtime.requireUi().id(key, "item", $index)):
+              runtime.dialogResults[dialogKey] = entry.path
+              runtime.openMenus.del key
+              runtime.requireUi().markAllDirty()
+        else:
+          runtime.currentUi[].floatingCardBelow(
+            runtime.requireUi().id(key, "popover", menu.path),
+            runtime.requireUi().id(key, menu.path),
+            cfg(width = fixed(260), height = fit(), padding = 6,
+                gap = 0, alignItems = AlignStretch)
+              .withBackground(color(0, 0, 0))
+              .withOpacity(0.9),
+          ):
+            runtime.currentUi[].column(
+              runtime.requireUi().id(key, "items", menu.path),
+              cfg(width = fill(), height = fit(), gap = 0,
+                  alignItems = AlignStretch),
+            ):
+              for index, entry in entries:
+                case entry.kind
+                of MenuEntryDivider:
+                  runtime.currentUi[].menuDivider(
+                    runtime.requireUi().id(key, "divider", $index),
+                    fill(),
+                    fixed(9),
+                  )
+                of MenuEntryItem:
+                  runtime.currentUi[].menuItem(
+                    runtime.requireUi().id(key, "item", $index),
+                    cfg(width = fill(), height = fit(), padding = 4,
+                        alignItems = AlignCenter),
+                  ):
+                    if entry.body.len == 0:
+                      runtime.currentUi[].label(
+                        runtime.requireUi().id(key, "label", $index),
+                        entry.label,
+                        fill(),
+                        fit(),
+                      )
+                    else:
+                      discard runtime.renderNodes(env, entry.body)
+    nothing()
+
+  runtime.evaluator.native "menu":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    nothing()
+
+  runtime.evaluator.native "menuItem":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].menuItem(id, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    boolean(runtime.requireUi().inEventPhase() and runtime.requireUi().clicked(id))
+
+  runtime.evaluator.native "menuDivider":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let id =
+      if values.len > 0: runtime.asWidgetID(values[0]) else: nextWidgetID()
+    let config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].menuDivider(id, config.width, config.height,
+        config.alignSelf)
+    nothing()
+
+  runtime.evaluator.native "menuResult":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "menuResult expects key")
+    let key = menuKey(values[0].asString)
+    if key in runtime.dialogResults:
+      text(runtime.dialogResults[key])
+    else:
+      nothing()
+
+  runtime.evaluator.native "clearMenuResult":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "clearMenuResult expects key")
+    runtime.dialogResults.del menuKey(values[0].asString)
+    nothing()
+
   runtime.evaluator.native "panel":
     discard layout
     let values = env.evalArgs(arguments)
@@ -1677,8 +1925,10 @@ proc init*(T: typedesc[NestCrowRuntime]): T =
   result = T(
     evaluator: Evaluator.init(),
     externalEvents: initCountTable[string](),
+    loadedModules: initHashSet[string](),
     dialogProcesses: initTable[string, DialogProcess](),
     dialogResults: initTable[string, string](),
+    openMenus: initTable[string, string](),
     shellProcesses: initTable[string, ShellProcess](),
     shellCache: initTable[string, ShellCache](),
     workspaceSubscriptions: initTable[string, WorkspaceSubscription](),
@@ -1736,13 +1986,7 @@ proc render*(runtime: NestCrowRuntime; ui: var UI; program: SyntaxNode) =
     runtime.currentUi = nil
 
 proc loadComponentLibrary*(runtime: NestCrowRuntime; path: string) =
-  let resolved = runtime.resolveModulePath(path)
-  let node = runtime.loadSyntaxFile(resolved)
-  runtime.moduleStack.add resolved
-  try:
-    discard runtime.renderNodes(node.statements)
-  finally:
-    runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
+  runtime.importModule(runtime.evaluator.env, path)
 
 proc renderComponent*(
     runtime: NestCrowRuntime;

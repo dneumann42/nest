@@ -64,6 +64,7 @@ type
     frames*: seq[LayoutFrame]
     childrenWidgets*: seq[Widget]
     components*: seq[ComponentWidget]
+    floatingWidgets: seq[Widget]
     componentByID: Table[WidgetID, Component]
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
@@ -418,6 +419,7 @@ proc reset*(self: var UI) =
   self.frames.setLen(0)
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
+  self.floatingWidgets.setLen(0)
   self.componentByID.clear()
   if self.intrinsicByID.isNil:
     self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
@@ -438,6 +440,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.frames = @[LayoutFrame(parent: self.root)]
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
+  self.floatingWidgets.setLen(0)
   self.componentByID.clear()
   if self.intrinsicByID.isNil:
     self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
@@ -934,6 +937,12 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         justifyContent = pending.justifyContent,
       )
 
+  if self.floatingWidgets.len > 0:
+    if self.layoutChildren.hasKey(self.root.id):
+      self.layoutChildren[self.root.id].add self.floatingWidgets
+    else:
+      self.layoutChildren[self.root.id] = self.floatingWidgets
+
   result = self.layout.solve()
   if result:
     for box in self.layout.boxes:
@@ -971,6 +980,12 @@ proc currentParent(self: UI): Widget =
   else:
     self.frames[^1].parent
 
+proc currentWidget(self: UI; id: WidgetID): tuple[ok: bool; widget: Widget] =
+  for box in self.layout.boxes:
+    if box.id == id:
+      return (true, box)
+  (false, Widget())
+
 proc takeChildren(self: var UI): seq[Widget] =
   if self.frames.len == 0:
     result = self.childrenWidgets
@@ -988,6 +1003,11 @@ proc popLayout(self: var UI): Widget =
   self.frames.setLen(self.frames.len - 1)
   self.parent = self.currentParent()
   self.addChild(result)
+
+proc popFloatingLayout(self: var UI): Widget =
+  result = self.frames[^1].parent
+  self.frames.setLen(self.frames.len - 1)
+  self.parent = self.currentParent()
 
 template slot*(self: var UI, body: untyped): WidgetSlot =
   block:
@@ -1507,6 +1527,38 @@ template card*(
       self.column(config)
       discard self.popLayout()
 
+template floatingCardBelow*(
+    self: var UI,
+    id: WidgetID,
+    anchorID: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let anchor {.gensym.} = self.currentWidget(anchorID)
+      let layoutParent {.gensym.} =
+        self.box(id, width = config.width, height = config.height,
+            alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("floatingCardBelow", config))
+      let component {.gensym.} = Card.new()
+      component.style = config.style
+      self.attach(layoutParent, Component(component))
+      if anchor.ok:
+        discard self.layout.constrain(layoutParent.left == anchor.widget.left)
+        discard self.layout.constrain(layoutParent.top == anchor.widget.bottom)
+        discard self.layout.constrain(layoutParent.right <= self.root.right)
+        discard self.layout.constrain(layoutParent.bottom <= self.root.bottom)
+      self.floatingWidgets.add layoutParent
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.column(config)
+      discard self.popFloatingLayout()
+
 template dialogHeader*(
     self: var UI,
     id: WidgetID,
@@ -1523,6 +1575,30 @@ template dialogHeader*(
             alignSelf = config.alignSelf)
       self.setRenderKey(id, renderKey("dialogHeader", config))
       let component = DialogHeader.new()
+      component.style = config.style
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.row(config)
+      discard self.popLayout()
+
+template menuBar*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height,
+            alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("menuBar", config))
+      let component = Panel.new()
       component.style = config.style
       self.attach(layoutParent, Component(component))
       self.pushLayout(layoutParent)
@@ -1673,6 +1749,52 @@ proc button*(
   let btn = Button.new(label, textScroll)
   btn.style = style
   ui.attach(box, Component(btn))
+  ui.addChild(box)
+
+proc menu*(
+    ui: var UI,
+    id: WidgetID,
+    label: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  if ui.phase == EventPhase:
+    return ui.clicked(id)
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("menu:" & label, width, height, alignSelf))
+  ui.attach(box, Component(Menu.new(label)))
+  ui.addChild(box)
+
+template menuItem*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    body: untyped,
+) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      let layoutParent =
+        self.box(id, width = config.width, height = config.height,
+            alignSelf = config.alignSelf)
+      self.setRenderKey(id, renderKey("menuItem", config))
+      let component = MenuItem.new()
+      component.style = config.style
+      self.attach(layoutParent, Component(component))
+      self.pushLayout(layoutParent)
+      body
+      discard
+      self.row(config)
+      discard self.popLayout()
+
+proc menuDivider*(
+    ui: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("menuDivider", width, height, alignSelf))
+  ui.attach(box, Component(MenuDivider.new()))
   ui.addChild(box)
 
 proc button*(

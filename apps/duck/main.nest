@@ -1,34 +1,41 @@
 define:
-  count = 0
   rootID = id
-  titleID = id
-  decrementID = (id "decrement")
-  incrementID = (id "increment")
+  panelColor = color 100 100 100
+  menuAction = nothing
+  menuID = (id "duck" "menubar")
+
 events:
-  when (clicked decrementID):
-    -= count 1
-  when (clicked incrementID):
-    += count 1
+  when (not (= (menuResult "duck:menubar") nothing)):
+    set menuAction (menuResult "duck:menubar")
+    clearMenuResult "duck:menubar"
+
+fun duckMenuBar:
+  menuBar menuID:
+    width = fill
+    height = fixed 24
+    padding = 0
+    background = panelColor
+    alignItems = AlignStretch
+    menu "file" "File":
+      menuItem "new" "New"
+      menuItem "open" "Open"
+      menuItem "save" "Save"
+      menuItem "saveas" "Save As"
+      menuDivider
+      menuItem "quit" "Quit"
+
 panel rootID:
   width = fill
   height = fill
   gap = 12.0
-  padding = 16.0
-  alignItems = AlignCenter
-  justifyContent = JustifyCenter
-  label titleID "Counter":
+  padding = 0.0
+  alignItems = AlignStretch
+  duckMenuBar
+  label (id "duck" "title") "Duck":
     width = fit
     height = fit
-  row (id "controls"):
+    alignSelf = AlignCenter
+  label (id "duck" "menu-action") menuAction:
     width = fit
     height = fit
-    gap = 8
-    button decrementID "-":
-      width = (fixed 32)
-      height = fit
-    label (id "count") count:
-      width = (fixed 80)
-      height = fit
-    button incrementID "+":
-      width = (fixed 32)
-      height = fit
+    alignSelf = AlignCenter

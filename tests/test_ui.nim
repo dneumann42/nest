@@ -1,7 +1,7 @@
 import std/[sets, strutils, unittest]
 
 import nest as nestApp
-import nest/[palette, resources, ui]
+import nest/[appConfig, dialogAnchors, layerShellSdl3Driver, palette, resources, ui]
 import uirelays/screen
 
 const
@@ -34,6 +34,7 @@ const
   OutsideHeader = WidgetID(127)
   OutsideFooter = WidgetID(128)
   Slider1 = WidgetID(129)
+  FloatingPanel = WidgetID(130)
 
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
@@ -61,6 +62,24 @@ suite "ui layout nesting":
     check styled.style.background == color(12'u8, 24'u8, 36'u8)
     check styled.style.hasOpacity
     check styled.style.opacity == 0.42
+
+  test "dialog anchors place top popovers below the trigger":
+    let app = AppConfig.init(width = 260, height = 120)
+    let anchored = app.applyDialogAnchor(DialogAnchor(
+      ok: true,
+      x: 8,
+      y: 0,
+      width: 42,
+      height: 24,
+      windowWidth: 800,
+      windowHeight: 600,
+    ))
+
+    check anchored.layerShell
+    check EdgeTop in anchored.layerShellConfig.anchors
+    check EdgeLeft in anchored.layerShellConfig.anchors
+    check anchored.layerShellConfig.marginTop == 24
+    check anchored.layerShellConfig.marginLeft == 8
 
   test "fit button remains visible after a fill label in a row":
     let originalFontRelays = fontRelays
@@ -94,6 +113,50 @@ suite "ui layout nesting":
       checkFrame(ui.widget(HeaderRow), 0, 0, 500, 24)
       checkFrame(ui.widget(HeaderLabel), 0, 0, 460, 18)
       checkFrame(ui.widget(HeaderNewButton), 460, 0, 40, 24)
+    finally:
+      fontRelays = originalFontRelays
+
+  test "floating card below anchor does not affect parent column flow":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var resources = Resources.new()
+      resources.loadFont("font", "", 18)
+      var ui = UI.init()
+      ui.beginLayout(300, 180)
+
+      ui.column(Body, cfg(width = fill(), height = fill(),
+          alignItems = AlignStretch)):
+        ui.button(Button1, "File", fixed(60), fixed(24))
+        ui.label(Label1, "Duck", fit(), fit(), alignSelf = AlignCenter)
+        ui.floatingCardBelow(FloatingPanel, Button1,
+            cfg(width = fixed(120), height = fit(), padding = 4,
+                alignItems = AlignStretch)):
+          ui.label(Label2, "Save As", fill(), fit())
+
+      ui.applyIntrinsicSizes(resources)
+      ui.endLayout()
+
+      let
+        buttonFrame = ui.widget(Button1).frame
+        labelFrame = ui.widget(Label1).frame
+        floatingFrame = ui.widget(FloatingPanel).frame
+      check labelFrame.y == buttonFrame.y + buttonFrame.height
+      check floatingFrame.x == buttonFrame.x
+      check floatingFrame.y == buttonFrame.y + buttonFrame.height
     finally:
       fontRelays = originalFontRelays
 

@@ -34,6 +34,33 @@ events:
     check runtime.get("count").kind == Number
     check runtime.get("count").number == 2
 
+  test "imports are loaded once per runtime":
+    let dir = getTempDir() / "nest-crow-import-once-test"
+    createDir(dir)
+    writeFile(dir / "module.nest", """
+fun importedLabel:
+  label (id "imported") "Imported":
+    width = fit
+    height = fit
+""")
+
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+    ui.loadFont("font", "", 18)
+
+    let source = """
+import "module.nest"
+importedLabel
+"""
+    let before = registeredSourceCount()
+    runtime.render(ui, parse(source, dir / "main.nest"))
+    let afterFirst = registeredSourceCount()
+    runtime.render(ui, parse(source, dir / "main.nest"))
+
+    check afterFirst == before + 2
+    check registeredSourceCount() == afterFirst
+
   test "async shell output can refresh state after first render":
     let runtime = NestCrowRuntime.init()
     var ui = UI.init()
@@ -400,6 +427,98 @@ panel (id "root"):
     discard runtime.evaluator.exec(parse("clearDialogResult \"start\"\n"))
     let cleared = runtime.evaluator.exec(parse("dialogResult \"start\"\n"))
     check cleared.kind == Nothing
+
+  test "menu result commands track completed child paths":
+    var runtime = NestCrowRuntime.init()
+    runtime.dialogResults["menu:main"] = "file.saveas"
+
+    let result = runtime.evaluator.exec(parse("menuResult \"main\"\n"))
+    check result.kind == Text
+    check result.text == "file.saveas"
+
+    discard runtime.evaluator.exec(parse("clearMenuResult \"main\"\n"))
+    let cleared = runtime.evaluator.exec(parse("menuResult \"main\"\n"))
+    check cleared.kind == Nothing
+
+  test "crow menubar renders top menus and arbitrary menu item bodies":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(360, 160)
+      ui.loadFont("font", "", 18)
+
+      runtime.renderLayoutOnly(ui, parse("""
+menuBar (id "main"):
+  width = fill
+  height = fixed 28
+  menu "file" "File":
+    menuItem "saveas" "Save As":
+      row (id "saveas-row"):
+        width = fill
+        height = fit
+        label (id "saveas-label") "Save As":
+          width = fill
+          height = fit
+    menuDivider
+    menuItem "quit" "Quit"
+  menu "edit" "Edit":
+    menuItem "copy" "Copy"
+"""), 360, 160)
+
+      check not runtime.hasError
+      check ui.widget(ui.id("main")).frame.width == 360
+      check ui.widget(ui.id("main", "file")).frame.width > 0
+      check ui.widget(ui.id("main", "edit")).frame.x > ui.widget(ui.id("main", "file")).frame.x
+    finally:
+      fontRelays = originalFontRelays
+
+  test "menu popover item pattern closes with full item path":
+    let runtime = NestCrowRuntime.init()
+    let itemID = UI.init().id("menu", "item", "0")
+    var ui = UI.init()
+    ui.initContext(260, 80)
+    ui.loadFont("font", "", 18)
+
+    runtime.evaluator.native "clicked":
+      discard layout
+      discard bodyNodes
+      if arguments.len == 0:
+        return boolean(false)
+      let value = env.eval(arguments[0])
+      boolean(value.kind == Native and value.native of WidgetIDValue and
+        WidgetIDValue(value.native).value == itemID)
+
+    runtime.render(ui, parse("""
+events:
+  when (clicked (id "menu" "item" "0")):
+    closeDialog "file.saveas"
+card (id "menu" "panel"):
+  width = fill
+  height = fill
+  menuItem (id "menu" "item" "0"):
+    width = fill
+    height = fit
+    label (id "menu" "label" "0") "Save As":
+      width = fill
+      height = fit
+"""))
+
+    check runtime.requestQuit
+    check runtime.dialogCloseValue == "file.saveas"
 
   test "crow events can test pressed keys":
     let runtime = NestCrowRuntime.init()
