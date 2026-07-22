@@ -1,7 +1,7 @@
 import std/[sets, strutils, unittest]
 
 import nest as nestApp
-import nest/[appConfig, dialogAnchors, layerShellSdl3Driver, palette, resources, ui]
+import nest/[appConfig, coords, dialogAnchors, layerShellSdl3Driver, palette, resources, ui]
 import nest/screen
 
 const
@@ -295,6 +295,81 @@ suite "ui layout nesting":
     finally:
       fontRelays = originalFontRelays
 
+  test "editor horizontal scroll clips text outside line number gutter":
+    type TextDraw = object
+      x: int
+      clip: Rect
+
+    let
+      originalFontRelays = fontRelays
+      originalWindowRelays = windowRelays
+    var
+      currentClip = rect(0, 0, 0, 0)
+      textDraws: seq[TextDraw]
+    windowRelays = WindowRelays(
+      createWindow: proc(layout: var ScreenLayout) =
+        discard,
+      refresh: proc() =
+        discard,
+      saveState: proc() =
+        discard,
+      restoreState: proc() =
+        discard,
+      setClipRect: proc(r: Rect) =
+        currentClip = r,
+      setCursor: proc(c: CursorKind) =
+        discard,
+      setWindowTitle: proc(title: string) =
+        discard,
+    )
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      if text == "abcdefghijklmnopqrstuvwxyz":
+        textDraws.add TextDraw(x: x, clip: currentClip)
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var resources = Resources.new()
+      resources.loadFont("font", "", 18)
+      var ui = UI.init()
+      var state = EditorState.new("abcdefghijklmnopqrstuvwxyz")
+      state.scrollX = 30
+      state.targetX = 30
+
+      ui.beginLayout(160, 80)
+      ui.textEditor(
+        Input1,
+        state,
+        width = fixed(120),
+        height = fixed(60),
+        lineNumbers = true,
+      )
+      ui.applyIntrinsicSizes(resources)
+      ui.endLayout()
+
+      var drawContext = DrawContext(
+        resources: resources, palette: Palette.init(), windowWidth: 160,
+            windowHeight: 80, dirtyAll: true
+      )
+      discard ui.draw(drawContext)
+
+      check textDraws.len == 1
+      check textDraws[0].x < textDraws[0].clip.x
+      check textDraws[0].clip.x > ui.widget(Input1).frame.x.toInt
+    finally:
+      fontRelays = originalFontRelays
+      windowRelays = originalWindowRelays
+
   test "editor mouse wheel scrolls content with easing":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -329,6 +404,54 @@ suite "ui layout nesting":
       check state.targetY > 0
       check state.scrollY > 0
       check state.scrollY < state.targetY
+    finally:
+      fontRelays = originalFontRelays
+
+  test "editor scroll target overshoots and snaps back with easing":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new("one\ntwo\nthree\nfour\nfive\nsix")
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      ui.mouseMove(10, 10)
+      ui.mouseWheel(0, 1)
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      let
+        overshotTargetY = state.targetY
+        overshotScrollY = state.scrollY
+      check overshotTargetY < 0
+      check overshotScrollY < 0
+
+      ui.beginInputFrame()
+      for _ in 0 ..< 24:
+        ui.layout:
+          ui.textEditor(Input1, state, width = fixed(200), height = fixed(60))
+
+      check state.targetY > overshotTargetY
+      check state.scrollY > overshotScrollY
+      check state.targetY <= 0
+      check state.scrollY <= 0
     finally:
       fontRelays = originalFontRelays
 
@@ -528,6 +651,50 @@ suite "ui layout nesting":
 
       check state.targetX > 0
       check state.scrollX > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "editor click maps through scroll offset to move cursor":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(160, 80)
+      ui.loadFont("font", "", 18)
+      var state = EditorState.new(
+        "abcdefghijklmnopqrstuvwxyz\nsecond line\nthird line\nfourth line"
+      )
+      state.cursor = 0
+      state.scrollX = 54
+      state.targetX = 54
+      state.scrollY = 22
+      state.targetY = 22
+
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(120), height = fixed(60))
+
+      ui.mouseMove(20, 15)
+      ui.mouseDown()
+      ui.layout:
+        ui.textEditor(Input1, state, width = fixed(120), height = fixed(60))
+
+      check state.cursor == 34
+      check state.targetX == 54
+      check state.targetY == 22
+      ui.mouseUp()
     finally:
       fontRelays = originalFontRelays
 

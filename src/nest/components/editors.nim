@@ -1,4 +1,4 @@
-import std/strutils
+import std/[math, strutils]
 
 import ../[resources, widgets2]
 import component
@@ -228,8 +228,20 @@ proc editorScrollWheelStep(): float64 =
 proc editorScrollLerpFactor(): float64 =
   0.35
 
+proc editorSnapBackLerpFactor(): float64 =
+  0.22
+
 proc editorScrollbarSize(): float64 =
   10.0
+
+proc editorOverscrollLimit(viewport: float64): float64 =
+  min(72.0, max(viewport * 0.35, 16.0))
+
+proc editorSnapTarget(value, lo, hi: float64): float64 =
+  let target = value.clamp(lo, hi)
+  result = value.lerp(target, editorSnapBackLerpFactor())
+  if abs(result - target) < 0.25:
+    result = target
 
 proc expandTabs(text: string): string =
   text.replace("\t", "    ")
@@ -319,16 +331,64 @@ proc editorContentSize(
     max(height + EditorPaddingY * 2, EditorMinHeight).toFloat,
   )
 
+proc columnAtContentX(resources: Resources, fontName, line: string, x: float64): int =
+  if x <= 0:
+    return 0
+  var previousWidth = 0
+  for column in 1 .. line.len:
+    let width = resources.measureText(fontName, line[0 ..< column].expandTabs).width
+    if x < (previousWidth + width).toFloat / 2.0:
+      return column - 1
+    previousWidth = width
+  line.len
+
+proc cursorAtMouse(
+    self: Editor, resources: Resources, f: Frame, mouseX, mouseY: int
+): int =
+  let
+    (_, metrics) = resources.get(self.fontName)
+    lineHeight = max(metrics.lineHeight, resources.measureText(self.fontName, "M").height)
+    lines =
+      if self.singleLine:
+        @[self.state.text]
+      else:
+        editorLines(self.state.text)
+    gutterWidth = self.editorLineNumberWidth(resources, lines.len)
+    textLeft = f.x.toInt + EditorPaddingX + gutterWidth
+    textTop = f.y.toInt + EditorPaddingY
+    contentY = mouseY.toFloat - textTop.toFloat + self.state.scrollY
+    lineIndex = floor(contentY / lineHeight.toFloat).toInt.clamp(0, lines.len - 1)
+    contentX = mouseX.toFloat - textLeft.toFloat + self.state.scrollX
+    column = resources.columnAtContentX(self.fontName, lines[lineIndex], contentX)
+
+  for index in 0 ..< lineIndex:
+    result += lines[index].len
+    if not self.singleLine:
+      inc result
+  result + column
+
 proc updateScrollBounds(state: EditorState, f: Frame) =
   state.maxX = max(state.contentWidth - f.width, 0.0)
   state.maxY = max(state.contentHeight - f.height, 0.0)
-  state.targetX = state.targetX.clamp(0.0, state.maxX)
-  state.targetY = state.targetY.clamp(0.0, state.maxY)
+  let
+    overscrollX = editorOverscrollLimit(f.width)
+    overscrollY = editorOverscrollLimit(f.height)
+  state.targetX = state.targetX.clamp(-overscrollX, state.maxX + overscrollX)
+  state.targetY = state.targetY.clamp(-overscrollY, state.maxY + overscrollY)
+  if state.dragging != EditorScrollX:
+    state.targetX = state.targetX.editorSnapTarget(0.0, state.maxX)
+  if state.dragging != EditorScrollY:
+    state.targetY = state.targetY.editorSnapTarget(0.0, state.maxY)
+  if state.maxX <= 0 and state.dragging == EditorScrollX:
+    state.dragging = NoEditorScroll
+  if state.maxY <= 0 and state.dragging == EditorScrollY:
+    state.dragging = NoEditorScroll
 
 method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
   let isHot = widget.frame.frameContains(ctx.mouseX, ctx.mouseY)
   let handlesWheel = isHot or ctx.focused(widget.id)
   let f = widget.frame
+  var clickedScrollbar = false
   if not self.singleLine and ctx.resources.ready:
     let (contentWidth, contentHeight) = self.editorContentSize(ctx.resources)
     self.state.contentWidth = contentWidth
@@ -337,20 +397,29 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
   if isHot:
     ctx.setHot(widget.id)
   if handlesWheel and not self.singleLine:
+    let
+      overscrollX = editorOverscrollLimit(f.width)
+      overscrollY = editorOverscrollLimit(f.height)
     if ctx.mouseWheelY != 0 and self.state.maxY > 0:
       self.state.targetY = (
         self.state.targetY - ctx.mouseWheelY * editorScrollWheelStep()
-      ).clamp(0.0, self.state.maxY)
+      ).clamp(-overscrollY, self.state.maxY + overscrollY)
       ctx.setActive(widget.id)
     if ctx.mouseWheelX != 0 and self.state.maxX > 0:
       self.state.targetX = (
         self.state.targetX - ctx.mouseWheelX * editorScrollWheelStep()
-      ).clamp(0.0, self.state.maxX)
+      ).clamp(-overscrollX, self.state.maxX + overscrollX)
       ctx.setActive(widget.id)
   if not self.singleLine and self.scrollbars:
+    let
+      overscrollX = editorOverscrollLimit(f.width)
+      overscrollY = editorOverscrollLimit(f.height)
     if not ctx.mouseLeftDown:
       self.state.dragging = NoEditorScroll
     if ctx.mouseLeftPressed:
+      clickedScrollbar =
+        (self.state.maxY > 0 and verticalTrack(f).contains(ctx.mouseX, ctx.mouseY)) or
+        (self.state.maxX > 0 and horizontalTrack(f).contains(ctx.mouseX, ctx.mouseY))
       if self.state.maxY > 0 and verticalThumb(f, self.state).contains(ctx.mouseX, ctx.mouseY):
         self.state.dragging = EditorScrollY
         self.state.dragStartMouse = ctx.mouseY.toFloat
@@ -371,7 +440,7 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
       self.state.targetY = (
         self.state.dragStartScroll +
         (ctx.mouseY.toFloat - self.state.dragStartMouse) * self.state.maxY / travel
-      ).clamp(0.0, self.state.maxY)
+      ).clamp(-overscrollY, self.state.maxY + overscrollY)
       ctx.setActive(widget.id)
     of EditorScrollX:
       let
@@ -381,14 +450,28 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
       self.state.targetX = (
         self.state.dragStartScroll +
         (ctx.mouseX.toFloat - self.state.dragStartMouse) * self.state.maxX / travel
-      ).clamp(0.0, self.state.maxX)
+      ).clamp(-overscrollX, self.state.maxX + overscrollX)
       ctx.setActive(widget.id)
     of NoEditorScroll:
       discard
   if ctx.mouseLeftPressed:
     if isHot:
       ctx.setFocus(widget.id)
-      self.state.ensureCursorVisible = true
+      if not clickedScrollbar and ctx.resources.ready:
+        let
+          lines =
+            if self.singleLine:
+              @[self.state.text]
+            else:
+              editorLines(self.state.text)
+          gutterWidth = self.editorLineNumberWidth(ctx.resources, lines.len)
+          textLeft = f.x.toInt + EditorPaddingX + gutterWidth
+        if ctx.mouseX >= textLeft:
+          self.state.cursor = self.cursorAtMouse(ctx.resources, f, ctx.mouseX, ctx.mouseY)
+          self.state.resetPreferredColumn()
+          self.state.ensureCursorVisible = true
+      elif not clickedScrollbar:
+        self.state.ensureCursorVisible = true
     elif ctx.focused(widget.id):
       ctx.clearFocus()
 
@@ -507,18 +590,21 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
       ).toFloat.clamp(0.0, self.state.maxY)
     self.state.ensureCursorVisible = false
 
-  self.state.scrollX = self.state.scrollX.clamp(0.0, self.state.maxX).lerp(
-    self.state.targetX, editorScrollLerpFactor()
-  )
-  self.state.scrollY = self.state.scrollY.clamp(0.0, self.state.maxY).lerp(
-    self.state.targetY, editorScrollLerpFactor()
-  )
+  let
+    overscrollX = editorOverscrollLimit(f.width)
+    overscrollY = editorOverscrollLimit(f.height)
+  self.state.scrollX = self.state.scrollX.clamp(
+    -overscrollX, self.state.maxX + overscrollX
+  ).lerp(self.state.targetX, editorScrollLerpFactor())
+  self.state.scrollY = self.state.scrollY.clamp(
+    -overscrollY, self.state.maxY + overscrollY
+  ).lerp(self.state.targetY, editorScrollLerpFactor())
   if not self.state.scrollX.nearlyEqual(self.state.targetX) or
       not self.state.scrollY.nearlyEqual(self.state.targetY):
     ctx.requestRedrawAfter(16)
 
   var y = textTop - self.state.scrollY.toInt
-  for index, line in lines:
+  for index in 0 ..< lines.len:
     if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
       if self.lineNumbers:
         let number = $(index + 1)
@@ -531,14 +617,6 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
           ctx.palette.foreground,
           bg,
         )
-      discard drawText(
-        Font(font),
-        textLeft - self.state.scrollX.toInt,
-        y,
-        line.expandTabs,
-        ctx.palette.textColor,
-        bg,
-      )
     y += lineHeight
 
   if self.lineNumbers:
@@ -549,6 +627,29 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
       (f.y + f.height).toInt - 1,
       border,
     )
+
+  let
+    textClipLeft = f.x.toInt + gutterWidth + 1
+    textClipRight = (f.x + f.width).toInt - 1
+  saveState()
+  setClipRect(ctx.clippedRect(rect(
+    textClipLeft,
+    f.y.toInt + 1,
+    max(textClipRight - textClipLeft, 0),
+    max(f.height.toInt - 2, 0),
+  )))
+  y = textTop - self.state.scrollY.toInt
+  for line in lines:
+    if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
+      discard drawText(
+        Font(font),
+        textLeft - self.state.scrollX.toInt,
+        y,
+        line.expandTabs,
+        ctx.palette.textColor,
+        bg,
+      )
+    y += lineHeight
 
   if focused:
     let cursor = self.state.cursorLineAndColumn()
@@ -573,6 +674,7 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
       min(cursorY + lineHeight, (f.y + f.height).toInt - EditorPaddingY),
       ctx.palette.textColor,
     )
+  restoreState()
   if self.scrollbars:
     if self.state.maxY > 0:
       let
