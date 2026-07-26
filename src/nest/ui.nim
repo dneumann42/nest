@@ -1,4 +1,4 @@
-import std/[macros, sets, strutils, tables]
+import std/[math, macros, sets, strutils, tables]
 
 import layouts, components, palette, resources, widgets2
 export layouts, components
@@ -180,8 +180,9 @@ proc init*(T: typedesc[UI]): T =
     context: UIContext(
       update: UpdateContext(),
       draw:
-        DrawContext(resources: Resources.new(), palette: Palette.init(), dirtyAll: true),
-    ),
+    DrawContext(resources: Resources.new(), palette: Palette.init(),
+        dirtyAll: true),
+  ),
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
   )
 
@@ -201,6 +202,10 @@ proc resources*(self: UI): Resources =
 
 proc palette*(self: UI): Palette =
   self.context.draw.palette
+
+proc font*(self: UI, name = "font"): screen.Font =
+  let (font, _) = self.context.draw.resources.get(name)
+  screen.Font(font)
 
 proc loadFont*(self: UI, name, path: string, size: Positive) =
   self.context.draw.resources.loadFont(name, path, size)
@@ -347,7 +352,8 @@ proc renderKey(kind: string, config: BoxConfig): string =
     $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars & "|" &
     config.fontName & "|" & config.syntax & styleKey
 
-proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): string =
+proc renderKey(kind: string, width, height: SizePolicy,
+    alignSelf: Alignment): string =
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
 
 proc beginInputFrame*(self: var UI) =
@@ -619,7 +625,8 @@ proc verticalTrack(parent: Widget): Frame =
 proc horizontalThumb(parent: Widget, state: ScrollState): Frame =
   let track = horizontalTrack(parent)
   if state.maxX <= 0 or state.contentWidth <= 0 or track.width <= 0:
-    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+    return Frame(x: track.x, y: track.y, width: track.width,
+        height: track.height)
   let thumbWidth =
     max(24.0, track.width * min(parent.frame.width / state.contentWidth, 1.0))
   let travel = max(track.width - thumbWidth, 0.0)
@@ -633,7 +640,8 @@ proc horizontalThumb(parent: Widget, state: ScrollState): Frame =
 proc verticalThumb(parent: Widget, state: ScrollState): Frame =
   let track = verticalTrack(parent)
   if state.maxY <= 0 or state.contentHeight <= 0 or track.height <= 0:
-    return Frame(x: track.x, y: track.y, width: track.width, height: track.height)
+    return Frame(x: track.x, y: track.y, width: track.width,
+        height: track.height)
   let thumbHeight =
     max(24.0, track.height * min(parent.frame.height / state.contentHeight, 1.0))
   let travel = max(track.height - thumbHeight, 0.0)
@@ -645,7 +653,8 @@ proc verticalThumb(parent: Widget, state: ScrollState): Frame =
   )
 
 proc contains(frame: Frame, x, y: int): bool =
-  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and y.toFloat >= frame.y and
+  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and y.toFloat >=
+      frame.y and
     y.toFloat < frame.y + frame.height
 
 proc shiftDescendants(
@@ -677,6 +686,9 @@ proc updateScrollState(self: var UI, parent: Widget) =
     maxBottom = max(maxBottom, f.y + f.height)
 
   var state = self.scrollStates.getOrDefault(parent.id)
+  let
+    previousScrollX = state.scrollX
+    previousScrollY = state.scrollY
   let parentFrame = parent.frame
   if minLeft == Inf:
     state.contentWidth = parentFrame.width
@@ -696,12 +708,16 @@ proc updateScrollState(self: var UI, parent: Widget) =
     state.targetX = state.targetX.snapTarget(0.0, state.maxX)
   if state.dragging != ScrollY:
     state.targetY = state.targetY.snapTarget(0.0, state.maxY)
-  state.scrollX = state.scrollX.clamp(-overscrollX, state.maxX + overscrollX).lerp(
-      state.targetX, scrollLerpFactor()
+  state.scrollX = state.scrollX.clamp(-overscrollX, state.maxX +
+      overscrollX).lerp(state.targetX, scrollLerpFactor()
     )
-  state.scrollY = state.scrollY.clamp(-overscrollY, state.maxY + overscrollY).lerp(
-      state.targetY, scrollLerpFactor()
+  state.scrollY = state.scrollY.clamp(-overscrollY, state.maxY +
+      overscrollY).lerp(state.targetY, scrollLerpFactor()
     )
+  if abs(state.scrollX - previousScrollX) > 0.01 or
+      abs(state.scrollY - previousScrollY) > 0.01:
+    self.markDirty(parent.id)
+    self.requestRedrawAfterSafe(0)
   if state.maxX <= 0 and state.dragging == ScrollX:
     state.dragging = NoScroll
   if state.maxY <= 0 and state.dragging == ScrollY:
@@ -779,13 +795,15 @@ proc preferredWidth(
     var width = widget.widthPolicy.min
     for child in pending.children:
       width =
-        max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
+        max(width, self.preferredWidth(child, pendingByParent) +
+            pending.padding * 2.0)
     width.clampPolicy(widget.widthPolicy)
   of OverlayLayout:
     var width = widget.widthPolicy.min
     for child in pending.children:
       width =
-        max(width, self.preferredWidth(child, pendingByParent) + pending.padding * 2.0)
+        max(width, self.preferredWidth(child, pendingByParent) +
+            pending.padding * 2.0)
     width.clampPolicy(widget.widthPolicy)
 
 proc preferredHeight(
@@ -1017,7 +1035,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       directParents.incl pending.parent.id
     elif self.floatingBelowAnchors.hasKey(pending.parent.id):
       directParents.incl pending.parent.id
-    elif pending.parent.id in scrollParentIDs or pending.parent.id.hasScrollAncestor():
+    elif pending.parent.id in scrollParentIDs or
+        pending.parent.id.hasScrollAncestor():
       directParents.incl pending.parent.id
 
   for i in countdown(self.pendingLayouts.high, 0):
@@ -1092,8 +1111,10 @@ proc endLayout*(self: var UI): bool {.discardable.} =
               anchor.frame.y + anchor.frame.height
             else:
               rootFrame.y
-          x = min(max(x, rootFrame.x), rootFrame.x + max(rootFrame.width - width, 0.0))
-          y = min(max(y, rootFrame.y), rootFrame.y + max(rootFrame.height - height, 0.0))
+          x = min(max(x, rootFrame.x), rootFrame.x + max(rootFrame.width -
+              width, 0.0))
+          y = min(max(y, rootFrame.y), rootFrame.y + max(rootFrame.height -
+              height, 0.0))
           parent.setFrame(Frame(x: x, y: y, width: width, height: height))
           self.assignDirectStack(pendingByParent[parentID], pendingByParent)
         elif parentID in self.scrollContainers:
@@ -1177,7 +1198,8 @@ proc place*(self: var UI, slot: WidgetSlot) {.layoutOnly.} =
 proc place*(self: var UI, widget: Widget) {.layoutOnly.} =
   self.addChild(widget)
 
-proc attach*(self: var UI, widget: Widget, component: Component) {.layoutOnly.} =
+proc attach*(self: var UI, widget: Widget,
+    component: Component) {.layoutOnly.} =
   self.components.add((component, widget))
   self.componentByID[widget.id] = component
 
@@ -1268,9 +1290,6 @@ template layout*(
     updateContext.sliderDragging =
       if updateContext.mouseLeftDown: drawContext.sliderDragging else: InvalidWidgetID
     ui.update(updateContext)
-    if updateContext.mouseWheelX != 0 or updateContext.mouseWheelY != 0 or
-        updateContext.mouseLeftDown:
-      drawContext.dirtyAll = true
     ui.markStateChanges(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext
     )
@@ -1321,9 +1340,6 @@ template layout*(ui: var UI, blk: untyped): auto =
       else:
         InvalidWidgetID
     ui.update(ui.context.update)
-    if ui.context.update.mouseWheelX != 0 or ui.context.update.mouseWheelY != 0 or
-        ui.context.update.mouseLeftDown:
-      ui.markAllDirty()
     ui.markStateChanges(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, ui.context.update
     )
@@ -1337,21 +1353,27 @@ template layout*(ui: var UI, blk: untyped): auto =
     ui.context.update.activeWidgets.clear()
   ui.reset()
 
-proc updateScrollbarDrag(self: var UI, parent: Widget, context: var UpdateContext) =
+proc updateScrollbarDrag(self: var UI, parent: Widget,
+    context: var UpdateContext) =
   if parent.id notin self.scrollContainers:
     return
   var state = self.scrollStates.getOrDefault(parent.id)
+  let
+    previousTargetX = state.targetX
+    previousTargetY = state.targetY
   let
     overscrollX = overscrollLimit(parent.frame.width)
     overscrollY = overscrollLimit(parent.frame.height)
   if parent.frame.contains(context.mouseX, context.mouseY):
     if state.maxY > 0 and context.mouseWheelY != 0:
-      state.targetY = (state.targetY - context.mouseWheelY * scrollWheelStep()).clamp(
+      state.targetY = (state.targetY - context.mouseWheelY * scrollWheelStep(
+          )).clamp(
         -overscrollY, state.maxY + overscrollY
       )
       context.setActive(parent.id)
     if state.maxX > 0 and context.mouseWheelX != 0:
-      state.targetX = (state.targetX - context.mouseWheelX * scrollWheelStep()).clamp(
+      state.targetX = (state.targetX - context.mouseWheelX * scrollWheelStep(
+          )).clamp(
         -overscrollX, state.maxX + overscrollX
       )
       context.setActive(parent.id)
@@ -1396,6 +1418,10 @@ proc updateScrollbarDrag(self: var UI, parent: Widget, context: var UpdateContex
     discard
 
   self.scrollStates[parent.id] = state
+  if abs(state.targetX - previousTargetX) > 0.01 or
+      abs(state.targetY - previousTargetY) > 0.01:
+    self.markDirty(parent.id)
+    self.requestRedrawAfterSafe(0)
 
 proc updateWidgetTree(
     self: var UI,
@@ -1447,28 +1473,33 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
       let track = verticalTrack(widget)
       let thumb = verticalThumb(widget, state)
       fillRect(
-        rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt),
+        rect(track.x.toInt, track.y.toInt, track.width.toInt,
+            track.height.toInt),
         drawContext.palette.panelMuted,
       )
       fillRect(
-        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt),
+        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt,
+            thumb.height.toInt),
         drawContext.palette.cardAccent,
       )
     if state.maxX > 0:
       let track = horizontalTrack(widget)
       let thumb = horizontalThumb(widget, state)
       fillRect(
-        rect(track.x.toInt, track.y.toInt, track.width.toInt, track.height.toInt),
+        rect(track.x.toInt, track.y.toInt, track.width.toInt,
+            track.height.toInt),
         drawContext.palette.panelMuted,
       )
       fillRect(
-        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt, thumb.height.toInt),
+        rect(thumb.x.toInt, thumb.y.toInt, thumb.width.toInt,
+            thumb.height.toInt),
         drawContext.palette.cardAccent,
       )
 
   proc drawWidgetTree(widget: Widget, inheritedDirty = false) =
     let dirty =
-      drawContext.dirtyAll or inheritedDirty or widget.id in drawContext.dirtyWidgets
+      drawContext.dirtyAll or inheritedDirty or widget.id in
+          drawContext.dirtyWidgets
     if dirty and self.componentByID.hasKey(widget.id):
       self.componentByID[widget.id].draw(widget, drawContext)
 
@@ -1585,7 +1616,8 @@ template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("row", config))
       self.pushLayout(layoutParent)
@@ -1601,7 +1633,8 @@ template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("column", config))
       self.pushLayout(layoutParent)
@@ -1610,14 +1643,16 @@ template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       self.column(config)
       discard self.popLayout()
 
-template overlay*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template overlay*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("overlay", config))
       self.pushLayout(layoutParent)
@@ -1626,7 +1661,8 @@ template overlay*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) 
       self.overlay(config)
       discard self.popLayout()
 
-template center*(self: var UI, id: WidgetID, w = fill(), h = fill(), body: untyped) =
+template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
@@ -1658,7 +1694,8 @@ template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("panel", config))
       let component = Panel.new()
@@ -1677,7 +1714,8 @@ template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("card", config))
       let component = Card.new()
@@ -1716,14 +1754,16 @@ template floatingCardBelow*(
       self.column(config)
       discard self.popFloatingLayout()
 
-template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("dialogHeader", config))
       let component = DialogHeader.new()
@@ -1745,7 +1785,8 @@ template modalDialog*(
         discard
       else:
         let layoutParent {.gensym.} = self.box(
-          id, width = config.width, height = config.height, alignSelf = config.alignSelf
+          id, width = config.width, height = config.height,
+          alignSelf = config.alignSelf
         )
         self.setRenderKey(id, renderKey("modalDialog", config))
         let component {.gensym.} = Card.new()
@@ -1764,14 +1805,16 @@ template modalDialog*(
         self.column(config)
         discard self.popFloatingLayout()
 
-template menuBar*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template menuBar*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("menuBar", config))
       let component = Panel.new()
@@ -1790,7 +1833,8 @@ template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("table", config))
       let component = TableView.new()
@@ -1802,14 +1846,16 @@ template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       self.column(config)
       discard self.popLayout()
 
-template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("tableHeader", config))
       let component = TableHeaderView.new()
@@ -1821,14 +1867,16 @@ template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig, body: untyp
       self.row(config)
       discard self.popLayout()
 
-template tableRow*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template tableRow*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("tableRow", config))
       let component = TableRowView.new()
@@ -1840,14 +1888,16 @@ template tableRow*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped)
       self.row(config)
       discard self.popLayout()
 
-template tableCell*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template tableCell*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("tableCell", config))
       let component = TableCellView.new()
@@ -1899,7 +1949,8 @@ proc button*(
   ui.setRenderKey(
     id,
     renderKey("button:" & label & ":" & $textScroll, width, height, alignSelf) & "|" &
-      $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity & "|" &
+      $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity &
+          "|" &
       $style.opacity,
   )
   if textScroll:
@@ -1924,14 +1975,16 @@ proc menu*(
   ui.attach(box, Component(Menu.new(label)))
   ui.addChild(box)
 
-template menuItem*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+template menuItem*(self: var UI, id: WidgetID, config: BoxConfig,
+    body: untyped) =
   block:
     if self.phase == EventPhase:
       body
       discard
     else:
       let layoutParent = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        id, width = config.width, height = config.height,
+        alignSelf = config.alignSelf
       )
       self.setRenderKey(id, renderKey("menuItem", config))
       let component = MenuItem.new()
@@ -1959,6 +2012,43 @@ proc button*(
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
   ui.button(ui.id(key), label, width, height, alignSelf)
+
+proc tabs*(
+    ui: var UI,
+    id: WidgetID,
+    labels: openArray[string],
+    selected: var int,
+    width = fill(),
+    height = fit(),
+    alignSelf = AlignAuto,
+    tabStyle = TabStyle(),
+) =
+  if labels.len == 0:
+    return
+  selected = max(min(selected, labels.len - 1), 0)
+
+  if ui.phase == EventPhase:
+    for i, _ in labels:
+      if ui.clicked(ui.id(id, "tab", i)):
+        selected = i
+        ui.markAllDirty()
+        ui.requestRedrawAfter(0)
+    return
+
+  let layoutParent = ui.box(id, width = width, height = height,
+      alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("tabs:" & labels.join("|") & ":" & $selected,
+      width, height, alignSelf))
+  ui.pushLayout(layoutParent)
+  for i, label in labels:
+    let tabID = ui.id(id, "tab", i)
+    let box = ui.box(tabID, width = fill(), height = fixed(30))
+    ui.setRenderKey(tabID, renderKey("tab:" & label & ":" & $(i == selected),
+        fill(), fixed(30), AlignAuto))
+    ui.attach(box, Component(TabButton.new(label, i == selected, tabStyle)))
+    ui.addChild(box)
+  ui.row(cfg(width = fill(), height = fit(), gap = 0, padding = 0))
+  discard ui.popLayout()
 
 proc label*(
     ui: var UI,
@@ -2079,6 +2169,26 @@ proc imageButton*(
   ui.attach(box, Component(img))
   ui.addChild(box)
 
+proc mesh2d*(
+    ui: var UI,
+    id: WidgetID,
+    state: var Mesh2DState,
+    imagePath: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  if ui.phase == EventPhase:
+    result = ui.submitted(id)
+    if result:
+      state.changed = false
+    return
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("mesh2d:" & imagePath & ":" &
+      $state.points.len & ":" & $state.triangles.len, width, height, alignSelf))
+  let editor = Mesh2DEditor.new(state, imagePath)
+  ui.attach(box, Component(editor))
+  ui.addChild(box)
+
 proc slider*(
     ui: var UI,
     id: WidgetID,
@@ -2098,10 +2208,11 @@ proc slider*(
           ui.context.update.mouseY.toFloat >= f.y and
           ui.context.update.mouseY.toFloat < f.y + f.height
         dragging = ui.context.draw.sliderDragging == id
-      if (ui.context.update.mouseLeftDown and (hot or ui.active(id) or dragging)) or
-          ((not ui.context.update.mouseLeftDown) and dragging):
+      if (ui.context.update.mouseLeftDown and (hot or ui.active(id) or
+          dragging)) or((not ui.context.update.mouseLeftDown) and dragging):
         let value = sliderValueFromMouse(
-          f, ui.context.update.mouseX, ui.context.update.mouseY, minimum, maximum,
+          f, ui.context.update.mouseX, ui.context.update.mouseY, minimum,
+          maximum,
           orientation,
         )
         ui.context.draw.sliderValues[id] = value
@@ -2120,7 +2231,8 @@ proc slider*(
   ui.setRenderKey(
     id,
     renderKey(
-      "slider:" & $drawValue & ":" & $minimum & ":" & $maximum & ":" & $orientation,
+      "slider:" & $drawValue & ":" & $minimum & ":" & $maximum & ":" &
+      $orientation,
       width,
       height,
       alignSelf,
@@ -2184,7 +2296,8 @@ proc combobox*(
             ui.context.update.mouseY.float64 >= f.y and
             ui.context.update.mouseY.float64 < f.y + f.height
           optionIndex = comboboxPopupIndex(
-            f, options.len, height.value, ui.windowHeight, ui.context.update.mouseX,
+            f, options.len, height.value, ui.windowHeight,
+            ui.context.update.mouseX,
             ui.context.update.mouseY,
           )
         ui.eventActiveWidgets.clear()
@@ -2215,9 +2328,10 @@ proc combobox*(
     box,
     Component(
       ComboBox.new(
-        options[clampedSelected], options, clampedSelected, open, height.value.int
-      )
-    ),
+        options[clampedSelected], options, clampedSelected, open,
+            height.value.int
+    )
+  ),
   )
   ui.addChild(box)
   if open:
@@ -2279,7 +2393,7 @@ proc textEditor*(
         syntax = syntax,
         gutterMarkers = gutterMarkers,
         activeLine = activeLine,
-      )
-    ),
+    )
+  ),
   )
   ui.addChild(box)

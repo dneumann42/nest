@@ -39,10 +39,8 @@ proc dialogError*(): string =
 proc toSdlFilters(request: DialogRequest) =
   request.sdlFilters.setLen(request.filters.len)
   for i, filter in request.filters:
-    request.sdlFilters[i] = DialogFileFilter(
-      name: filter.name.cstring,
-      pattern: filter.pattern.cstring,
-    )
+    request.sdlFilters[i] =
+      DialogFileFilter(name: filter.name.cstring, pattern: filter.pattern.cstring)
 
 proc removePending(request: DialogRequest) =
   let index = pendingRequests.find(request)
@@ -58,7 +56,9 @@ proc collectPaths(filelist: cstringArray): seq[string] =
     result.add $filelist[i]
     inc i
 
-proc openFileCallback(userdata: pointer, filelist: cstringArray, filter: cint) {.cdecl.} =
+proc openFileCallback(
+    userdata: pointer, filelist: cstringArray, filter: cint
+) {.cdecl.} =
   let request = cast[DialogRequest](userdata)
   if filelist.isNil:
     lastDialogError = $sdl3.getError()
@@ -66,9 +66,7 @@ proc openFileCallback(userdata: pointer, filelist: cstringArray, filter: cint) {
   if not request.callback.isNil:
     request.callback(
       FileDialogResult(
-        paths: paths,
-        selectedFilter: filter.int,
-        canceled: paths.len == 0,
+        paths: paths, selectedFilter: filter.int, canceled: paths.len == 0
       )
     )
   removePending(request)
@@ -85,10 +83,7 @@ proc showOpenFileDialog*(options: OpenFileDialogOptions, callback: FileDialogCal
   pendingRequests.add request
 
   let defaultLocation =
-    if request.defaultLocation.len > 0:
-      request.defaultLocation.cstring
-    else:
-      nil
+    if request.defaultLocation.len > 0: request.defaultLocation.cstring else: nil
 
   if request.sdlFilters.len > 0:
     sdl3.showOpenFileDialog(
@@ -165,20 +160,17 @@ proc pick*(
     window = window,
   )
 
-proc showOpenFolderDialog*(options: OpenFolderDialogOptions, callback: FileDialogCallback) =
+proc showOpenFolderDialog*(
+    options: OpenFolderDialogOptions, callback: FileDialogCallback
+) =
   discard sdl3.clearError()
   lastDialogError = ""
-  var request = DialogRequest(
-    callback: callback,
-    defaultLocation: options.defaultLocation,
-  )
+  var request =
+    DialogRequest(callback: callback, defaultLocation: options.defaultLocation)
   pendingRequests.add request
 
   let defaultLocation =
-    if request.defaultLocation.len > 0:
-      request.defaultLocation.cstring
-    else:
-      nil
+    if request.defaultLocation.len > 0: request.defaultLocation.cstring else: nil
 
   sdl3.showOpenFolderDialog(
     openFileCallback,
@@ -199,17 +191,13 @@ proc showOpenFolderDialog*(
 ) =
   showOpenFolderDialog(
     OpenFolderDialogOptions(
-      window: window,
-      defaultLocation: defaultLocation,
-      allowMany: allowMany,
+      window: window, defaultLocation: defaultLocation, allowMany: allowMany
     ),
     callback,
   )
 
 proc browseFolder*(
-    callback: proc(path: string),
-    defaultLocation = "",
-    window: Window = nil,
+    callback: proc(path: string), defaultLocation = "", window: Window = nil
 ) =
   showOpenFolderDialog(
     proc(result: FileDialogResult) =
