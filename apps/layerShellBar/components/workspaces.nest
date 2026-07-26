@@ -1,3 +1,5 @@
+import "../variables.nest"
+
 fun workspaceLabel workspace:
   define:
     name = (dict-get workspace "name")
@@ -29,12 +31,12 @@ component workspaces key:
   row (id keyText "workspaces"):
     width = fit
     height = fit
-    gap = 1
+    gap = WorkspaceGap
     alignItems = AlignCenter
     if (empty? workspaceList):
       then:
         label (id keyText "empty") "-":
-          width = (fixed 24)
+          width = (fixed WorkspaceEmptyWidth)
           height = fit
       else:
         for workspace (iter workspaceList):
@@ -43,9 +45,8 @@ component workspaces key:
             workspaceID = (id keyText "workspace" name)
           events:
             when (clicked workspaceID):
-              shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) 0
+              shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) ImmediateInterval
           button workspaceID (workspaceLabel workspace):
             width = fit
             height = fit
 	    background = (workspaceBackgroundColor workspace)
-

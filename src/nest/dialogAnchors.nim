@@ -77,7 +77,7 @@ proc applyDialogAnchor*(app: AppConfig; anchor: DialogAnchor): AppConfig =
 
   if topZone:
     result.layerShellConfig.anchors.incl EdgeTop
-    result.layerShellConfig.marginTop = edgeDistance(anchor.y + anchor.height)
+    result.layerShellConfig.marginTop = edgeDistance(anchor.y)
   else:
     result.layerShellConfig.anchors.incl EdgeBottom
     result.layerShellConfig.marginBottom =

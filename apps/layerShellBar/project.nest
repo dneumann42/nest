@@ -1,6 +1,9 @@
+import "variables.nest"
+
 main = "main.nest"
 title = "Nest Layer Shell Bar"
 width = 1
-height = 30
+height = BarHeight
 layerShell = "top"
 namespace = "nest-layer-shell-bar"
+theme = "dark"

@@ -1,3 +1,5 @@
+import "../variables.nest"
+
 component activeWindow key:
   define:
     keyText = (eval key)
@@ -6,11 +8,11 @@ component activeWindow key:
   if (= title ""):
     then:
       label (id keyText "active-window") " ":
-        width = fixed 120
+        width = fixed ActiveWindowWidth
         height = fit
         textScroll = true
     else:
       label (id keyText "active-window") title:
-        width = fixed 120
+        width = fixed ActiveWindowWidth
         height = fit
         textScroll = true

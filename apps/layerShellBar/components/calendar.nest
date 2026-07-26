@@ -1,3 +1,5 @@
+import "../variables.nest"
+
 component dateSelector key target:
   define:
     keyText = (eval key)
@@ -19,53 +21,53 @@ component dateSelector key target:
   card (id keyText "calendar"):
     width = fill
     height = fit
-    padding = 8
-    gap = 6
+    padding = CalendarPadding
+    gap = CalendarGap
     alignItems = AlignStretch
     row (id keyText "calendar-header"):
       width = fill
       height = fit
-      gap = 6
+      gap = CalendarGap
       alignItems = AlignCenter
       button previousID "<":
-        width = (fixed 28)
+        width = (fixed CalendarNavButtonWidth)
         height = fit
       label (id keyText "calendar-title") (date-month-title year month):
         width = fill
         height = fit
       button nextID ">":
-        width = (fixed 28)
+        width = (fixed CalendarNavButtonWidth)
         height = fit
     row (id keyText "calendar-weekdays"):
       width = fill
       height = fit
-      gap = 4
+      gap = CalendarWeekGap
       label (id keyText "weekday" 0) "Su":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
       label (id keyText "weekday" 1) "Mo":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
       label (id keyText "weekday" 2) "Tu":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
       label (id keyText "weekday" 3) "We":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
       label (id keyText "weekday" 4) "Th":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
       label (id keyText "weekday" 5) "Fr":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
       label (id keyText "weekday" 6) "Sa":
-        width = (fixed 34)
+        width = (fixed CalendarWeekdayWidth)
         height = fit
     for week (range 0 6):
       row (id keyText "week" week):
         width = fill
         height = fit
-        gap = 4
+        gap = CalendarWeekGap
         for weekday (range 0 7):
           if (and (>= cellDay 1) (<= cellDay days)):
             then:
@@ -76,12 +78,12 @@ component dateSelector key target:
                 when (clicked dayID):
                   set (value-of target) cellDate
               button dayID cellDay:
-                width = (fixed 40)
+                width = (fixed CalendarDayWidth)
                 height = fit
             else:
               spacer (id keyText "blank" week weekday):
-                width = (fixed 40)
-                height = (fixed 24)
+                width = (fixed CalendarDayWidth)
+                height = (fixed CalendarBlankHeight)
           += cellDay 1
     label (id keyText "selected-date") selected:
       width = fill
@@ -108,31 +110,31 @@ component dateSelectorWithSignal key target clickedTarget:
   card (id keyText "calendar"):
     width = fill
     height = fit
-    padding = 16
-    gap = 6
+    padding = CalendarPopoverPadding
+    gap = CalendarGap
     alignItems = AlignStretch
     background = color 0 0 0
-    opacity = 0.5
+    opacity = CalendarPopoverOpacity
     row (id keyText "calendar-header"):
       width = fill
       height = fit
-      gap = 6
+      gap = CalendarGap
       alignItems = AlignCenter
       button previousID "<":
-        width = (fixed 28)
+        width = (fixed CalendarNavButtonWidth)
         height = fit
       label (id keyText "calendar-title") (date-month-title year month):
         width = fill
         height = fit
       button nextID ">":
-        width = (fixed 28)
+        width = (fixed CalendarNavButtonWidth)
         height = fit
     define:
-      bw = 42
+      bw = CalendarPopoverDayWidth
     row (id keyText "calendar-weekdays"):
       width = fill
       height = fit
-      gap = 4
+      gap = CalendarWeekGap
       label (id keyText "weekday" 0) "Su":
         width = (fixed bw)
         height = fit
@@ -158,7 +160,7 @@ component dateSelectorWithSignal key target clickedTarget:
       row (id keyText "week" week):
         width = fill
         height = fit
-        gap = 4
+        gap = CalendarWeekGap
         for weekday (range 0 7):
           if (and (>= cellDay 1) (<= cellDay days)):
             then:
@@ -175,7 +177,7 @@ component dateSelectorWithSignal key target clickedTarget:
             else:
               spacer (id keyText "blank" week weekday):
                 width = (fixed bw)
-                height = (fixed 24)
+                height = (fixed CalendarBlankHeight)
           += cellDay 1
     label (id keyText "selected-date") selected:
       width = fill

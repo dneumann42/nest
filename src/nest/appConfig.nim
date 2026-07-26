@@ -1,4 +1,4 @@
-import nest/[crowdsl, layerShellSdl3Driver]
+import nest/[crowdsl, dialogs, layerShellSdl3Driver]
 import nest/[backend, screen]
 
 type AppConfig* = object
@@ -7,6 +7,7 @@ type AppConfig* = object
   layerShell*: bool
   layerShellConfig*: LayerShellConfig
   alwaysRun60Fps*: bool
+  themeName*: string
 
 proc init*(
     T: typedesc[AppConfig],
@@ -21,6 +22,7 @@ proc init*(
     height: height,
     layerShellConfig: layerShellSdl3Driver.dockTop(height.Positive),
     alwaysRun60Fps: alwaysRun60Fps,
+    themeName: "",
   )
 
 proc layerShell*(cfg: AppConfig, config: LayerShellConfig): AppConfig =
@@ -81,4 +83,14 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
     initBackend()
   crowdsl.runtimeWake = layerShellSdl3Driver.wakeEventLoop
   result = createWindow(cfg.width, cfg.height)
+  crowdsl.pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+    try:
+      dialogs.browse(callback, window = layerShellSdl3Driver.currentSdlWindow())
+    except CatchableError:
+      discard
+  crowdsl.pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+    try:
+      dialogs.browseFolder(callback, window = layerShellSdl3Driver.currentSdlWindow())
+    except CatchableError:
+      discard
   setWindowTitle(cfg.title)

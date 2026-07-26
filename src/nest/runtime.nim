@@ -124,7 +124,7 @@ template application*(cfg: AppConfig, blk: untyped) =
       UpdateContext(windowWidth: window.width, windowHeight: window.height)
     drawContext {.inject.} = DrawContext(
       resources: Resources.new(),
-      palette: Palette.init(),
+      palette: Palette.init(cfg.themeName),
       windowWidth: window.width,
       windowHeight: window.height,
       dirtyAll: true,
@@ -198,6 +198,7 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
     FixedFrameNumerator = 1000
     FixedFrameDenominator = 60
   var running {.inject.} = true
+  ui.setTheme(cfg.themeName)
   ui.initContext(window.width, window.height)
   ui.loadFont("font", "", 18)
   ui.loadFont("editor", "nerd-monospace", 18)

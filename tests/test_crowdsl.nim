@@ -1,7 +1,7 @@
 import std/[os, strutils, tables, unittest]
 
 import crow
-import nest/[crowdsl, resources, ui]
+import nest/[crowdsl, input, projectConfig, resources, ui]
 import nest/[coords, screen]
 
 proc widget(ui: UI, id: WidgetID): Widget =
@@ -145,6 +145,25 @@ label (id "value") value:
     if fileExists(outputPath):
       check readFile(outputPath) == "launched"
       removeFile(outputPath)
+
+  test "shellQuote and copyText expose shell-safe clipboard actions":
+    let runtime = NestCrowRuntime.init()
+    let originalClipboard = clipboardRelays
+    var copied = ""
+    clipboardRelays = ClipboardRelays(
+      getText: proc (): string = copied,
+      putText: proc (text: string) =
+        copied = text,
+    )
+    defer:
+      clipboardRelays = originalClipboard
+
+    check runtime.evaluator.exec(parse("shellQuote \"dev's path\"\n")).text ==
+      "'dev'\\''s path'"
+    let copiedValue = runtime.evaluator.exec(parse("copyText \"debug output\"\n"))
+    check copiedValue.kind == Boolean
+    check copiedValue.boolean
+    check copied == "debug output"
 
   test "start popover terminal commands use foot with script paths":
     let source = readFile("apps/layerShellBar/startPopover/main.nest")
@@ -336,23 +355,24 @@ panel (id "root"):
     try:
       app = NestCrowApp.init("apps/layerShellBar/main.nest")
       var ui = UI.init()
-      ui.initContext(800, 30)
+      let barHeight = loadProjectConfig("apps/layerShellBar").height
+      ui.initContext(800, barHeight)
       ui.loadFont("font", "", 18)
 
-      app.runtime.renderLayoutOnly(ui, app.program, 800, 30)
+      app.runtime.renderLayoutOnly(ui, app.program, 800, barHeight)
 
       check app.runtime.lastError == ""
       if app.runtime.lastError == "":
         check app.runtime.get("startID").kind == Native
         check app.runtime.get("clock").kind == Command
-        check ui.widget(ui.id("bar")).frame.height == 30
+        check ui.widget(ui.id("bar")).frame.height == barHeight
         check ui.widget(ui.id("content")).frame.width > 0
         let clockFrame = ui.widget(ui.id("clock")).frame
         check abs((clockFrame.x + clockFrame.width / 2) - 400) <= 2
         check ui.widget(ui.id("right")).frame.width > 0
         check ui.widget(ui.id("bar", "active-window")).frame.width > 0
         check ui.widget(ui.id("bar", "volume")).frame.width > 0
-        check ui.widget(ui.id("bar-media", "art")).frame.width == 26
+        check ui.widget(ui.id("bar-media", "art")).frame.width == 32
         check ui.widget(ui.id("bar", "cpu")).frame.width > 0
         check ui.widget(ui.id("bar", "memory")).frame.width > 0
         check ui.widget(ui.id("bar", "storage")).frame.width > 0
@@ -361,18 +381,20 @@ panel (id "root"):
 
       let mediaApp = NestCrowApp.init("apps/layerShellBar/media/main.nest")
       var mediaUi = UI.init()
-      mediaUi.initContext(420, 560)
+      mediaUi.initContext(760, 400)
       mediaUi.loadFont("font", "", 18)
 
-      mediaApp.runtime.renderLayoutOnly(mediaUi, mediaApp.program, 420, 560)
+      mediaApp.runtime.renderLayoutOnly(mediaUi, mediaApp.program, 760, 400)
 
       check mediaApp.runtime.lastError == ""
       if mediaApp.runtime.lastError == "":
         let artworkFrame = mediaUi.widget(mediaUi.id("media", "artwork")).frame
         let tableFrame = mediaUi.widget(mediaUi.id("media", "metadata-table")).frame
-        check artworkFrame.height == 280
+        let detailsFrame = mediaUi.widget(mediaUi.id("media", "details")).frame
+        check artworkFrame.height == 240
         check tableFrame.width > 0
-        check tableFrame.x > artworkFrame.x + artworkFrame.width
+        check detailsFrame.x > artworkFrame.x + artworkFrame.width
+        check tableFrame.x >= detailsFrame.x
 
       for spec in [
         ("apps/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu", "panel")),

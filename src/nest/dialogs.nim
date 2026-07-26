@@ -31,6 +31,10 @@ type
     sdlFilters: seq[DialogFileFilter]
 
 var pendingRequests: seq[DialogRequest]
+var lastDialogError* = ""
+
+proc dialogError*(): string =
+  lastDialogError
 
 proc toSdlFilters(request: DialogRequest) =
   request.sdlFilters.setLen(request.filters.len)
@@ -56,6 +60,8 @@ proc collectPaths(filelist: cstringArray): seq[string] =
 
 proc openFileCallback(userdata: pointer, filelist: cstringArray, filter: cint) {.cdecl.} =
   let request = cast[DialogRequest](userdata)
+  if filelist.isNil:
+    lastDialogError = $sdl3.getError()
   let paths = collectPaths(filelist)
   if not request.callback.isNil:
     request.callback(
@@ -68,6 +74,8 @@ proc openFileCallback(userdata: pointer, filelist: cstringArray, filter: cint) {
   removePending(request)
 
 proc showOpenFileDialog*(options: OpenFileDialogOptions, callback: FileDialogCallback) =
+  discard sdl3.clearError()
+  lastDialogError = ""
   var request = DialogRequest(
     callback: callback,
     defaultLocation: options.defaultLocation,
@@ -101,6 +109,9 @@ proc showOpenFileDialog*(options: OpenFileDialogOptions, callback: FileDialogCal
       defaultLocation,
       options.allowMany,
     )
+  let error = $sdl3.getError()
+  if error.len > 0:
+    lastDialogError = error
 
 proc showOpenFileDialog*(
     callback: FileDialogCallback,
@@ -155,6 +166,8 @@ proc pick*(
   )
 
 proc showOpenFolderDialog*(options: OpenFolderDialogOptions, callback: FileDialogCallback) =
+  discard sdl3.clearError()
+  lastDialogError = ""
   var request = DialogRequest(
     callback: callback,
     defaultLocation: options.defaultLocation,
@@ -174,6 +187,9 @@ proc showOpenFolderDialog*(options: OpenFolderDialogOptions, callback: FileDialo
     defaultLocation,
     options.allowMany,
   )
+  let error = $sdl3.getError()
+  if error.len > 0:
+    lastDialogError = error
 
 proc showOpenFolderDialog*(
     callback: FileDialogCallback,

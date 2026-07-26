@@ -75,6 +75,7 @@ type
     scrollStates: Table[WidgetID, ScrollState]
     scrollContainers: HashSet[WidgetID]
     frameByID: Table[WidgetID, Frame]
+    dialogResults: Table[string, string]
     liveWidgetIDs: HashSet[WidgetID]
     previousWidgetIDs: HashSet[WidgetID]
     renderKeys: Table[WidgetID, string]
@@ -86,6 +87,8 @@ type
     hasScheduledRedraw: bool
     frameRedrawn: bool
     phase: UIPhase
+    autoIDCounter: uint64
+    themeName*: string
 
   ListItem*[T] = object
     index*: int
@@ -172,12 +175,16 @@ proc init*(T: typedesc[UI]): T =
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
   )
 
+proc setTheme*(self: var UI; themeName: string) =
+  self.themeName = themeName
+  self.context.draw.palette = Palette.init(themeName)
+
 proc initContext*(self: var UI, windowWidth, windowHeight: int) =
   self.context.update.windowWidth = windowWidth
   self.context.update.windowHeight = windowHeight
   self.context.draw.windowWidth = windowWidth
   self.context.draw.windowHeight = windowHeight
-  self.context.draw.palette = Palette.init()
+  self.context.draw.palette = Palette.init(self.themeName)
 
 proc resources*(self: UI): Resources =
   self.context.draw.resources
@@ -243,6 +250,74 @@ proc redrewFrame*(self: UI): bool {.raises: [].} =
 proc setDrawTicks*(self: var UI, ticks: int) =
   self.context.draw.ticks = ticks
 
+proc setDrawCommands*(self: var UI, commands: ptr seq[DrawCommand]) =
+  self.context.draw.drawCommands = commands
+
+proc setDrawCommandRelays*(
+    self: var UI,
+    commands: ptr seq[DrawCommand],
+    measureText: proc(f: Font, text: string): TextExtent {.nimcall.},
+) =
+  self.context.draw.drawCommands = commands
+  self.context.draw.commandMeasureText = measureText
+
+proc setIO*(self: var UI, io: IO) =
+  self.context.draw.io = io
+
+proc io*(self: UI): IO =
+  self.context.draw.io
+
+proc pick*(files: FileIO, id: WidgetID, defaultLocation = ""): bool {.discardable.} =
+  if files.openFile.isNil:
+    false
+  else:
+    files.openFile(id, defaultLocation.cstring)
+
+proc value*(files: FileIO, id: WidgetID): string =
+  if files.fileValue.isNil:
+    ""
+  else:
+    $files.fileValue(id)
+
+proc error*(files: FileIO, id: WidgetID): string =
+  if files.fileError.isNil:
+    ""
+  else:
+    $files.fileError(id)
+
+proc clear*(files: FileIO, id: WidgetID) =
+  if not files.clearFile.isNil:
+    files.clearFile(id)
+
+proc openDialog*(self: var UI, open: var bool) =
+  open = true
+  self.requestRedrawAfter(0)
+
+proc closeDialog*(self: var UI, open: var bool) =
+  open = false
+  self.requestRedrawAfter(0)
+
+proc toggleDialog*(self: var UI, open: var bool): bool {.discardable.} =
+  open = not open
+  self.requestRedrawAfter(0)
+  open
+
+proc returnDialog*(
+    self: var UI, key, value: string, open: var bool
+): string {.discardable.} =
+  self.dialogResults[key] = value
+  self.closeDialog(open)
+  value
+
+proc hasDialogResult*(self: UI, key: string): bool =
+  self.dialogResults.hasKey(key)
+
+proc dialogResult*(self: UI, key: string): string =
+  self.dialogResults.getOrDefault(key)
+
+proc clearDialogResult*(self: var UI, key: string) =
+  self.dialogResults.del key
+
 proc setRenderKey*(self: var UI, id: WidgetID, key: string) =
   let previous = self.renderKeys.getOrDefault(id)
   if previous != key:
@@ -266,15 +341,16 @@ proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): s
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
 
 proc beginInputFrame*(self: var UI) =
+  discard
+
+proc finishInputFrame*(self: var UI) =
+  self.context.update.mouseLeftPressed = false
   self.context.update.keyInputs.setLen(0)
   self.context.update.textInputs.setLen(0)
   self.context.update.mouseWheelX = 0
   self.context.update.mouseWheelY = 0
   self.context.update.submittedWidgets.clear()
   self.context.update.sliderValues.clear()
-
-proc finishInputFrame*(self: var UI) =
-  self.context.update.mouseLeftPressed = false
 
 proc mouseMove*(self: var UI, x, y: int) =
   self.context.update.mouseX = x
@@ -326,9 +402,17 @@ proc keyedWidgetID(parts: openArray[string]): WidgetID =
 
 proc id*(self: UI, parts: varargs[string, `$`]): WidgetID =
   var scoped = self.idScopes
-  for part in parts:
-    scoped.add part
+  if parts.len == 0 and scoped.len == 0:
+    scoped.add "_nest_empty_id"
+  else:
+    for part in parts:
+      scoped.add part
   keyedWidgetID(scoped)
+
+proc nextAutoID*(self: var UI): WidgetID =
+  let key = "_nest_auto_id:" & $self.autoIDCounter
+  inc self.autoIDCounter
+  self.id(key)
 
 template scope*(self: var UI, key: untyped, body: untyped) =
   block:
@@ -341,6 +425,7 @@ template scope*(self: var UI, key: untyped, body: untyped) =
 
 proc beginEvents(self: var UI, context: DrawContext) =
   self.phase = EventPhase
+  self.autoIDCounter = 0
   self.eventActiveWidgets = context.activeWidgets
   self.eventSubmittedWidgets = context.submittedWidgets
   self.eventFocusedWidget = context.focusedWidget
@@ -448,6 +533,7 @@ proc reset*(self: var UI) =
   self.phase = LayoutPhase
 
 proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
+  self.autoIDCounter = 0
   self.layout.root(self.root)
   self.parent = self.root
   self.frames = @[LayoutFrame(parent: self.root)]
@@ -1113,6 +1199,14 @@ template layout*(
 ): auto =
   # This could totally be done at compile time, the only reason I am
   # avoiding doing that, is I want to allow loading ui from a dynamic module
+  let previousDrawCommands {.gensym.} = screen.drawCommands
+  let previousCommandMeasureText {.gensym.} = screen.commandMeasureText
+  screen.drawCommands = drawContext.drawCommands
+  screen.commandMeasureText = drawContext.commandMeasureText
+  defer:
+    screen.drawCommands = previousDrawCommands
+    screen.commandMeasureText = previousCommandMeasureText
+
   ui.frameRedrawn = false
   ui.beginEvents(drawContext)
   blk
@@ -1155,6 +1249,14 @@ template layout*(
   ui.reset()
 
 template layout*(ui: var UI, blk: untyped): auto =
+  let previousDrawCommands {.gensym.} = screen.drawCommands
+  let previousCommandMeasureText {.gensym.} = screen.commandMeasureText
+  screen.drawCommands = ui.context.draw.drawCommands
+  screen.commandMeasureText = ui.context.draw.commandMeasureText
+  defer:
+    screen.drawCommands = previousDrawCommands
+    screen.commandMeasureText = previousCommandMeasureText
+
   ui.frameRedrawn = false
   ui.beginEvents(ui.context.draw)
   blk
@@ -1288,6 +1390,11 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
     return false
 
   var drawContext = context
+  let previousDrawCommands = screen.drawCommands
+  screen.drawCommands = drawContext.drawCommands
+  defer:
+    screen.drawCommands = previousDrawCommands
+
   drawContext.hasRedrawRequest = false
   fillRect(
     rect(0, 0, drawContext.windowWidth, drawContext.windowHeight), color(0, 0, 0, 0)
@@ -1588,6 +1695,35 @@ template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig, body: unty
       discard
       self.row(config)
       discard self.popLayout()
+
+template modalDialog*(
+    self: var UI, id: WidgetID, open: bool, config: BoxConfig, body: untyped
+) =
+  block:
+    if open:
+      if self.phase == EventPhase:
+        body
+        discard
+      else:
+        let layoutParent {.gensym.} = self.box(
+          id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        )
+        self.setRenderKey(id, renderKey("modalDialog", config))
+        let component {.gensym.} = Card.new()
+        component.style = config.style
+        self.attach(layoutParent, Component(component))
+        discard self.layout.constrain(layoutParent.left >= self.root.left)
+        discard self.layout.constrain(layoutParent.top >= self.root.top)
+        discard self.layout.constrain(layoutParent.right <= self.root.right)
+        discard self.layout.constrain(layoutParent.bottom <= self.root.bottom)
+        self.layout.alignCenterX(layoutParent, self.root)
+        self.layout.alignCenterY(layoutParent, self.root)
+        self.floatingWidgets.add layoutParent
+        self.pushLayout(layoutParent)
+        body
+        discard
+        self.column(config)
+        discard self.popFloatingLayout()
 
 template menuBar*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
@@ -2034,7 +2170,9 @@ proc lineInput*(
     width, height: SizePolicy,
     fontName = "font",
     alignSelf = AlignAuto,
-) {.layoutOnly.} =
+) =
+  if ui.phase == EventPhase:
+    return
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id, renderKey("lineInput:" & state.text & ":" & fontName, width, height, alignSelf)

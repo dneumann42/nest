@@ -1,3 +1,5 @@
+import "../variables.nest"
+
 define:
   commands = []:
     {}:
@@ -67,14 +69,14 @@ events:
 card (id "menu" "panel"):
   width = fill
   height = fill
-  padding = 32
-  gap = 12
+  padding = StartMenuPadding
+  gap = DialogSectionGap
   alignItems = AlignStretch
   background = color 0 0 0
-  opacity = 0.85
+  opacity = DialogStrongOpacity
   image (id "menu" "banner") "apps/layerShellBar/assets/nomicon.bmp":
-    width = fixed 256
-    height = fixed 70
+    width = fixed StartMenuBannerWidth
+    height = fixed StartMenuBannerHeight
     alignSelf = AlignCenter
   label (id "menu" "subtitle") "Applications and desktop controls":
     width = fit
@@ -83,12 +85,12 @@ card (id "menu" "panel"):
   row (id "menu" "apps"):
     width = fill
     height = fill
-    gap = 12
+    gap = DialogSectionGap
     alignItems = AlignStretch
     column (id "menu" "left"):
       width = fill
       height = fit
-      gap = 8
+      gap = DialogGap
       alignItems = AlignStretch
       for cmd (iter commands):
 	when (= cmd.place "left"):
@@ -98,7 +100,7 @@ card (id "menu" "panel"):
     column (id "menu" "right"):
       width = fill
       height = fit
-      gap = 8
+      gap = DialogGap
       alignItems = AlignStretch
       for cmd (iter commands):
 	when (= cmd.place "right"):
@@ -108,11 +110,11 @@ card (id "menu" "panel"):
   row (id "menu" "power"):
     width = fill
     height = fit
-    gap = 8
+    gap = DialogGap
     alignItems = AlignCenter
     justifyContent = JustifyCenter
     for cmd (iter commands):
       when (= cmd.place "bottom"):
         button cmd.name cmd.label:
-          width = fixed 116
+          width = fixed StartMenuPowerButtonWidth
           height = fit

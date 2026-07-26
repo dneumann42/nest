@@ -1,7 +1,7 @@
 main = "main.nest"
 title = "Media"
-width = 1200
-height = 480
+width = 760
+height = 400
 layerShell = "top-center"
 namespace = "nest-layer-shell-media"
 exclusiveZone = 0

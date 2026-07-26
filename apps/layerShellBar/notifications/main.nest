@@ -1,3 +1,4 @@
+import "../variables.nest"
 import "../components/notifications.nest"
 
 define:
@@ -7,7 +8,7 @@ define:
   rows = list
   rowIndex = 0
 
-set rows (textLines (shellAsync (id "notifications" "list-query") (notificationListCommand) 1000))
+set rows (textLines (shellAsync (id "notifications" "list-query") (notificationListCommand) FastPollInterval))
 set rowIndex 0
 
 events:
@@ -16,41 +17,41 @@ events:
   when (clicked closeID):
     closeDialog ""
   when (clicked clearID):
-    shellAsync (id "notifications" "clear-action") (notificationClearCommand) 0
+    shellAsync (id "notifications" "clear-action") (notificationClearCommand) ImmediateInterval
   when (clicked restoreID):
-    shellAsync (id "notifications" "restore-action") "makoctl restore" 0
+    shellAsync (id "notifications" "restore-action") "makoctl restore" ImmediateInterval
 
 card (id "notifications" "panel"):
   width = fill
   height = fill
-  padding = 10
-  gap = 8
+  padding = DialogPadding
+  gap = DialogGap
   alignItems = AlignStretch
   background = color 0 0 0
-  opacity = 0.52
+  opacity = DialogOpacity
   dialogHeader (id "notifications" "header"):
     width = fill
-    height = fixed 32
-    padding = 8
+    height = fixed DialogHeaderHeight
+    padding = DialogHeaderPadding
     alignItems = AlignCenter
     label (id "notifications" "title") "Mailbox":
       width = fill
       height = fit
     button closeID "x":
-      width = fixed 28
+      width = fixed DialogCloseButtonWidth
       height = fit
   column (id "notifications" "list"):
     width = fill
     height = fill
-    gap = 4
+    gap = NotificationListGap
     scrollY = true
     for rowText (iter rows):
       card (id "notifications" "row" rowIndex):
         width = fill
         height = fit
-        padding = 8
+        padding = NotificationRowPadding
         background = color 0 0 0
-        opacity = 0.35
+        opacity = DialogMutedOpacity
         label (id "notifications" "row-label" rowIndex) rowText:
           width = fill
           height = fit
@@ -59,7 +60,7 @@ card (id "notifications" "panel"):
   row (id "notifications" "actions"):
     width = fill
     height = fit
-    gap = 8
+    gap = DialogGap
     button restoreID "Restore latest":
       width = fill
       height = fit

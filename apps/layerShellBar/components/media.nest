@@ -1,17 +1,22 @@
+import "../variables.nest"
+
 fun mediaPlayerCommand command:
-  string "p=$(playerctl -l 2>/dev/null | while IFS= read -r n; do if [ \"$(playerctl -p \"$n\" status 2>/dev/null)\" = Playing ]; then printf '%s\n' \"$n\"; exit; fi; done); if [ -z \"$p\" ]; then p=$(playerctl -l 2>/dev/null | sed -n '1p'); fi; if [ -n \"$p\" ]; then playerctl -p \"$p\" " command "; else playerctl " command "; fi"
+  string "uid=$(id -u); : ${XDG_RUNTIME_DIR:=/run/user/$uid}; export XDG_RUNTIME_DIR; : ${DBUS_SESSION_BUS_ADDRESS:=unix:path=$XDG_RUNTIME_DIR/bus}; export DBUS_SESSION_BUS_ADDRESS; p=$(playerctl -l 2>/dev/null | while IFS= read -r n; do if [ \"$(playerctl -p \"$n\" status 2>/dev/null)\" = Playing ]; then printf '%s\n' \"$n\"; exit; fi; done); if [ -z \"$p\" ]; then p=$(playerctl -l 2>/dev/null | sed -n '1p'); fi; if [ -n \"$p\" ]; then playerctl -p \"$p\" " command "; else playerctl " command "; fi"
 
 fun mediaQuery key command:
-  shellAsync key (mediaPlayerCommand command) 2000
+  shellAsync key (mediaPlayerCommand command) FastPollInterval
+
+fun mediaCachedQuery key cacheName command fallback:
+  mediaQuery key (string command " | sed -n '1p' | { IFS= read -r v || true; cache=/tmp/nest-media-" cacheName ".cache; if [ -n \"$v\" ]; then printf '%s' \"$v\" > \"$cache\"; printf '%s' \"$v\"; elif [ -f \"$cache\" ]; then cat \"$cache\"; else printf '%s' '" fallback "'; fi; }")
 
 fun mediaAction key command:
-  shellAsync key (mediaPlayerCommand command) 0
+  shellAsync key (mediaPlayerCommand command) ImmediateInterval
 
 fun mediaSeekCommand value:
   mediaPlayerCommand (string "position " value " 2>/dev/null")
 
 fun mediaArtwork key:
-  mediaQuery key "metadata mpris:artUrl 2>/dev/null | while IFS= read -r p; do case \"$p\" in file://*) src=${p#file://}; key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); bmp=/tmp/nest-media-art-$key.bmp; if [ -f \"$bmp\" ] && [ \"$bmp\" -nt \"$src\" ]; then printf '%s' \"$bmp\"; else magick \"$src\" \"$bmp\" >/dev/null 2>&1 && printf '%s' \"$bmp\"; fi;; http://*|https://*) key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); src=/tmp/nest-media-art-$key.src; bmp=/tmp/nest-media-art-$key.bmp; if [ ! -f \"$bmp\" ]; then curl -L -s --max-time 10 -o \"$src\" \"$p\" >/dev/null 2>&1 && magick \"$src\" \"$bmp\" >/dev/null 2>&1; fi; [ -f \"$bmp\" ] && printf '%s' \"$bmp\";; esac; done"
+  mediaQuery key "metadata mpris:artUrl 2>/dev/null | sed -n '1p' | { IFS= read -r p || true; cache=/tmp/nest-media-art.cache; if [ -z \"$p\" ]; then if [ -f \"$cache\" ]; then cached=$(cat \"$cache\"); [ -f \"$cached\" ] && printf '%s' \"$cached\"; fi; exit; fi; key=$(printf '%s' \"$p\" | cksum | awk '{print $1}'); bmp=/tmp/nest-media-art-$key.bmp; tmp=/tmp/nest-media-art-$key.tmp.bmp; src=/tmp/nest-media-art-$key.src; case \"$p\" in file://*) raw=${p#file://}; path=$(printf '%s' \"$raw\" | sed 's/%20/ /g;s/%23/#/g;s/%25/%/g'); if [ -f \"$bmp\" ]; then cached_mtime=$(stat -c %Y \"$bmp\" 2>/dev/null || printf 0); source_mtime=$(stat -c %Y \"$path\" 2>/dev/null || printf 0); if [ \"$cached_mtime\" -ge \"$source_mtime\" ]; then printf '%s' \"$bmp\" | tee \"$cache\"; exit; fi; fi; if magick \"$path\" \"$tmp\" >/dev/null 2>&1 && mv \"$tmp\" \"$bmp\"; then printf '%s' \"$bmp\" | tee \"$cache\"; elif [ -f \"$bmp\" ]; then printf '%s' \"$bmp\" | tee \"$cache\"; fi;; http://*|https://*) refresh=0; if [ ! -f \"$bmp\" ]; then refresh=1; elif [ -f \"$src\" ] && [ \"$src\" -nt \"$bmp\" ]; then refresh=1; fi; if [ \"$refresh\" = 1 ]; then curl -L -s --max-time 10 -o \"$src\" \"$p\" >/dev/null 2>&1 && magick \"$src\" \"$tmp\" >/dev/null 2>&1 && mv \"$tmp\" \"$bmp\"; fi; [ -f \"$bmp\" ] && printf '%s' \"$bmp\" | tee \"$cache\";; esac; rm -f \"$tmp\"; }"
 
 fun mediaLengthSeconds key:
   mediaQuery key "metadata --format '{{mpris:length}}' 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1 / 1000000; else printf \"0\" }'"
@@ -22,19 +27,19 @@ fun mediaPositionSeconds key:
 fun mediaMetadataRow key labelText valueText:
   tableRow (id key "metadata" labelText):
     width = fill
-    height = (fixed 38)
+    height = (fixed MediaMetadataRowHeight)
     alignItems = AlignCenter
     tableCell (id key "metadata-label-cell" labelText):
-      width = (fixed 110)
+      width = (fixed MediaMetadataLabelWidth)
       height = fill
-      padding = 8
+      padding = MediaMetadataPadding
       label (id key "metadata-label" labelText) labelText:
         width = fill
         height = fit
     tableCell (id key "metadata-value-cell" labelText):
       width = fill
       height = fill
-      padding = 8
+      padding = MediaMetadataPadding
       label (id key "metadata-value" labelText) valueText:
         width = fill
         height = fit

@@ -1,3 +1,5 @@
+import "../variables.nest"
+
 fun cpuCommand:
   string "a=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); sleep 0.2; b=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); set -- $a $b; total=$(($3-$1)); idle=$(($4-$2)); if [ \"$total\" -gt 0 ]; then printf '%d%%' $(( (100 * (total - idle)) / total )); else printf '0%%'; fi"
 
@@ -20,29 +22,29 @@ fun tint col-name:
     0.55
 
 component cpuMeter key:
-  button (id (eval key) "cpu") (string "◉ " (shellAsync (id (eval key) "cpu-query") (cpuCommand) 1000)):
-    width = fixed 100
+  button (id (eval key) "cpu") (string "◉ " (shellAsync (id (eval key) "cpu-query") (cpuCommand) FastPollInterval)):
+    width = fixed MetricCpuWidth
     height = fit
     background = tint "primary"
     textScroll = true
 
 component memoryMeter key:
-  button (id (eval key) "memory") (string "▣ " (shellAsync (id (eval key) "memory-query") (memoryCommand) 2000)):
-    width = fixed 150
+  button (id (eval key) "memory") (string "▣ " (shellAsync (id (eval key) "memory-query") (memoryCommand) MediaPollInterval)):
+    width = fixed MetricMemoryWidth
     height = fit
     background = tint "rose"
     textScroll = true
 
 component storageMeter key:
-  button (id (eval key) "storage") (string "▤ " (shellAsync (id (eval key) "storage-query") (storageCommand) 8000)):
-    width = fixed 100
+  button (id (eval key) "storage") (string "▤ " (shellAsync (id (eval key) "storage-query") (storageCommand) StoragePollInterval)):
+    width = fixed MetricStorageWidth
     height = fit
     background = tint "mauve"
     textScroll = true
 
 component networkMeter key:
-  button (id (eval key) "network") (string "⇅ " (shellAsync (id (eval key) "network-query") (networkCommand (eval key)) 1000)):
-    width = fixed 200
+  button (id (eval key) "network") (string "⇅ " (shellAsync (id (eval key) "network-query") (networkCommand (eval key)) FastPollInterval)):
+    width = fixed MetricNetworkWidth
     height = fit
     background = tint "sky"
     textScroll = true

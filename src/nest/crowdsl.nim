@@ -1242,7 +1242,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     discard layout
     discard bodyNodes
     if arguments.len == 0:
-      return widgetValue(nextWidgetID())
+      return widgetValue(runtime.requireUi().nextAutoID())
     var parts: seq[string]
     for value in env.evalArgs(arguments):
       parts.add value.asString
@@ -1434,6 +1434,26 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if values.len != 1:
       raise newException(EvaluatorError, "shell expects one command")
     text(shellOutput(values[0].asString))
+
+  runtime.evaluator.native "shellQuote":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "shellQuote expects one value")
+    text(shellSingleQuote(values[0].asString))
+
+  runtime.evaluator.native "copyText":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "copyText expects one value")
+    try:
+      putClipboardText(values[0].asString)
+      boolean(true)
+    except Exception:
+      boolean(false)
 
   runtime.evaluator.native "shellAsync":
     discard layout

@@ -46,6 +46,21 @@ type
     width*, height*: float64
 
   WidgetID* = uint64
+
+  IOOpenFile* = proc(id: WidgetID, defaultLocation: cstring): bool {.cdecl.}
+  IOFileValue* = proc(id: WidgetID): cstring {.cdecl.}
+  IOFileError* = proc(id: WidgetID): cstring {.cdecl.}
+  IOClearFile* = proc(id: WidgetID) {.cdecl.}
+
+  FileIO* = object
+    openFile*: IOOpenFile
+    fileValue*: IOFileValue
+    fileError*: IOFileError
+    clearFile*: IOClearFile
+
+  IO* = object
+    files*: FileIO
+
   Widget* = object
     id*: WidgetID
     x*, y*, w*, h*: Variable
@@ -71,6 +86,9 @@ type
     clipRect*: Rect
     hasRedrawRequest*: bool
     redrawDelayMs*: int
+    drawCommands*: ptr seq[DrawCommand]
+    commandMeasureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
+    io*: IO
 
   UpdateContext* = object
     resources*: Resources

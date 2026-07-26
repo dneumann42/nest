@@ -1,3 +1,4 @@
+import "variables.nest"
 import "components/media.nest"
 
 component mediaWidget key:
@@ -15,21 +16,23 @@ component mediaWidget key:
     displayStatus = ""
     playPauseLabel = "Play"
 
-  set title (mediaQuery (id keyText "query" "title") "metadata --format '{{artist}} - {{title}}' 2>/dev/null || printf 'No media'")
-  set status (mediaQuery (id keyText "query" "status") "status 2>/dev/null || printf 'Stopped'")
+  set title (mediaCachedQuery (id keyText "query" "title") "bar-title" "metadata --format '{{artist}} - {{title}}' 2>/dev/null" "No media")
+  set status (mediaCachedQuery (id keyText "query" "status") "bar-status" "status 2>/dev/null" "Stopped")
   set art (mediaArtwork (id keyText "query" "art"))
   when (= status statusOverride):
     set statusOverride ""
   set displayStatus (pick (= statusOverride "") status statusOverride)
   set playPauseLabel (pick (= displayStatus "Playing") "❚❚" "▶")
 
-  redrawAfter 2000
+  redrawAfter MediaPollInterval
 
   events:
     when (clicked previousID):
       mediaAction (id keyText "action" "previous") "previous 2>/dev/null"
     when (and (clicked artID) (not (dialogOpen? "media"))):
       openDialog "media" "./media" "" artID
+    when (and (clicked titleID) (not (dialogOpen? "media"))):
+      openDialog "media" "./media" "" titleID
     when (clicked playPauseID):
       set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
       set displayStatus statusOverride
@@ -41,21 +44,21 @@ component mediaWidget key:
   row (id keyText "media"):
     width = fit
     height = fit
-    gap = 0
+    gap = NoSpacing
     alignItems = AlignCenter
     button previousID "◀":
-      width = (fixed 28)
+      width = (fixed MediaBarButtonWidth)
       height = fit
     imageButton artID art:
-      width = (fixed 32)
-      height = (fixed 32)
+      width = (fixed MediaBarArtSize)
+      height = (fixed MediaBarArtSize)
     button titleID title:
-      width = (fixed 150)
+      width = (fixed MediaBarTitleWidth)
       height = fit
       textScroll = true
     button playPauseID playPauseLabel:
-      width = (fixed 56)
+      width = (fixed MediaBarPlayButtonWidth)
       height = fit
     button nextID "▶":
-      width = (fixed 28)
+      width = (fixed MediaBarButtonWidth)
       height = fit

@@ -52,7 +52,13 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     else:
       ctx.palette.background,
   )
-  drawLine(f.x.toInt + 1, f.y.toInt + 1, (f.x + f.width - 2).toInt, f.y.toInt + 1, ctx.palette.buttonHighlight)
+  drawLine(
+    f.x.toInt + 1,
+    f.y.toInt + 1,
+    (f.x + f.width - 2).toInt,
+    f.y.toInt + 1,
+    ctx.palette.buttonHighlight,
+  )
   drawBorder(
     f,
     if active and hot:
@@ -75,15 +81,24 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       offset = (ctx.ticks div 24) mod cycle
     saveState()
     setClipRect(ctx.clippedRect(rect(textX, f.y.toInt, textWidth, f.height.toInt)))
-    discard drawText(Font(font), textX - offset, textY, self.label, ctx.palette.textColor, color(0, 0, 0, 0))
-    discard drawText(Font(font), textX - offset + cycle, textY, self.label, ctx.palette.textColor, color(0, 0, 0, 0))
-    restoreState()
-  else:
     discard drawText(
       Font(font),
-      textX,
+      textX - offset,
       textY,
       self.label,
       ctx.palette.textColor,
       color(0, 0, 0, 0),
+    )
+    discard drawText(
+      Font(font),
+      textX - offset + cycle,
+      textY,
+      self.label,
+      ctx.palette.textColor,
+      color(0, 0, 0, 0),
+    )
+    restoreState()
+  else:
+    discard drawText(
+      Font(font), textX, textY, self.label, ctx.palette.textColor, color(0, 0, 0, 0)
     )

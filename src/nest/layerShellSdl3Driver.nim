@@ -193,6 +193,9 @@ var
   currentClip: ClipState
   useLayerShell: bool
 
+proc currentSdlWindow*(): sdl3.Window =
+  win
+
 proc clearMeasureCache() =
   measureCache.clear()
 
@@ -403,9 +406,12 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
   if layerResult != 0:
     quit("Could not configure Wayland layer-shell surface: " & $layerResult)
 
-  if configuredWidth > 0:
+  let
+    requestedWidth = layerSurfaceWidth(layerShellConfig, layout.width)
+    requestedHeight = layerSurfaceHeight(layerShellConfig, layout.height)
+  if requestedWidth == 0 and configuredWidth > 0:
     layout.width = configuredWidth.int
-  if configuredHeight > 0:
+  if requestedHeight == 0 and configuredHeight > 0:
     layout.height = configuredHeight.int
   discard setWindowSize(win, layout.width.cint, layout.height.cint)
   discard showWindow(win)
@@ -923,6 +929,10 @@ proc installSdl3Relays() =
 
 proc initSdl3Driver*() =
   useLayerShell = false
+  if getEnv("WAYLAND_DISPLAY").len > 0 and
+      getEnv("SDL_VIDEODRIVER").len == 0 and
+      getEnv("SDL_VIDEO_DRIVER").len == 0:
+    selectWaylandVideoDriver()
   installSdl3Relays()
 
 proc initLayerShellSdl3Driver*() =

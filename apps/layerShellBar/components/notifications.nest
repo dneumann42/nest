@@ -1,3 +1,5 @@
+import "../variables.nest"
+
 fun notificationCountCommand:
   string "python3 -c 'import json,subprocess; total=0\nfor cmd in ((\"makoctl\",\"list\",\"-j\"),(\"makoctl\",\"history\",\"-j\")):\n    try:\n        total += len(json.loads(subprocess.check_output(cmd, stderr=subprocess.DEVNULL) or b\"[]\"))\n    except Exception:\n        pass\nprint(total, end=\"\")'"
 
@@ -11,7 +13,7 @@ component notificationWidget key:
   define:
     keyText = (eval key)
     buttonID = (id keyText "notifications")
-    count = (shellAsync (id keyText "notification-count") (notificationCountCommand) 1000)
+    count = (shellAsync (id keyText "notification-count") (notificationCountCommand) FastPollInterval)
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "notifications"))):

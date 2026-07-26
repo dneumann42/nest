@@ -1,0 +1,76 @@
+define:
+  ImmediateInterval = 0
+  FastPollInterval = 1000
+  MediaPollInterval = 2000
+  StoragePollInterval = 8000
+  NoSpacing = 0
+
+  BarHeight = 42
+  BarIconSize = 28
+  BarOpacity = 0.85
+  BarLeftGap = 14
+  BarRightGap = 8
+
+  DialogPadding = 10
+  DialogPaddingWide = 16
+  DialogGap = 8
+  DialogSectionGap = 12
+  DialogHeaderHeight = 32
+  DialogHeaderHeightTall = 34
+  DialogHeaderPadding = 8
+  DialogCloseButtonWidth = 28
+  DialogCloseButtonWidthLarge = 32
+  DialogOpacity = 0.52
+  DialogStrongOpacity = 0.85
+  DialogMutedOpacity = 0.35
+  DialogPanelOpacity = 0.9
+
+  ActiveWindowWidth = 120
+  WorkspaceGap = 1
+  WorkspaceEmptyWidth = 24
+
+  MetricCpuWidth = 100
+  MetricMemoryWidth = 150
+  MetricStorageWidth = 100
+  MetricNetworkWidth = 200
+
+  MediaBarButtonWidth = 28
+  MediaBarArtSize = 32
+  MediaBarTitleWidth = 150
+  MediaBarPlayButtonWidth = 56
+  MediaPopoverLeftWidth = 260
+  MediaPopoverArtworkHeight = 240
+  MediaControlGap = 8
+  MediaControlButtonWidth = 64
+  MediaPlayButtonWidth = 92
+  MediaControlHeight = 36
+  MediaSeekHeight = 30
+  MediaDetailsGap = 10
+  MediaMetadataRowHeight = 34
+  MediaMetadataLabelWidth = 88
+  MediaMetadataPadding = 7
+
+  VolumeMax = 150
+  VolumeBodyGap = 12
+  VolumeSmallButtonWidth = 48
+  VolumeMuteButtonWidth = 78
+  VolumeSliderWidth = 46
+
+  NotificationListGap = 4
+  NotificationRowPadding = 8
+
+  StartMenuPadding = 32
+  StartMenuBannerWidth = 256
+  StartMenuBannerHeight = 70
+  StartMenuPowerButtonWidth = 116
+
+  CalendarPadding = 8
+  CalendarPopoverPadding = 16
+  CalendarGap = 6
+  CalendarWeekGap = 4
+  CalendarNavButtonWidth = 28
+  CalendarWeekdayWidth = 34
+  CalendarDayWidth = 40
+  CalendarPopoverDayWidth = 42
+  CalendarBlankHeight = 24
+  CalendarPopoverOpacity = 0.5

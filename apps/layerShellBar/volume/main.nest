@@ -1,3 +1,4 @@
+import "../variables.nest"
 import "../components/volume.nest"
 import "../../../lib/components/radioGroup.nest"
 
@@ -23,17 +24,17 @@ events:
   when (keyPressed "escape"):
     closeDialog ""
   when (clicked muteID):
-    shellAsync (id "volume" "action" "mute") (volumeActionCommand "toggle") 0
+    shellAsync (id "volume" "action" "mute") (volumeActionCommand "toggle") ImmediateInterval
   when (clicked downID):
-    shellAsync (id "volume" "action" "down") (volumeActionCommand "down") 0
+    shellAsync (id "volume" "action" "down") (volumeActionCommand "down") ImmediateInterval
   when (clicked upID):
-    shellAsync (id "volume" "action" "up") (volumeActionCommand "up") 0
+    shellAsync (id "volume" "action" "up") (volumeActionCommand "up") ImmediateInterval
   when (clicked mixerID):
-    shellAsync (id "volume" "action" "mixer") (volumeActionCommand "mixer") 0
-  set draggedVolume (verticalSlider sliderID percent 0 150)
+    shellAsync (id "volume" "action" "mixer") (volumeActionCommand "mixer") ImmediateInterval
+  set draggedVolume (verticalSlider sliderID percent 0 VolumeMax)
   when (not (= draggedVolume nothing)):
     set percent draggedVolume
-    shellAsync (id "volume" "set") (volumeSetCommand draggedVolume) 0
+    shellAsync (id "volume" "set") (volumeSetCommand draggedVolume) ImmediateInterval
   when (clicked closeID):
     closeDialog ""
   for sink (iter sinks):
@@ -46,32 +47,32 @@ events:
 card (id "volume" "panel"):
   width = fill
   height = fill
-  padding = 10
-  gap = 8
+  padding = DialogPadding
+  gap = DialogGap
   alignItems = AlignStretch
   background = color 0 0 0
-  opacity = 0.52
+  opacity = DialogOpacity
   dialogHeader (id "volume" "header"):
     width = fill
-    height = fixed 32
-    padding = 8
+    height = fixed DialogHeaderHeight
+    padding = DialogHeaderPadding
     alignItems = AlignCenter
     label (id "volume" "title") "Volume":
       width = fill
       height = fit
     button closeID "x":
-      width = fixed 28
+      width = fixed DialogCloseButtonWidth
       height = fit
   row (id "volume" "body"):
     width = fill
     height = fill
-    gap = 12
+    gap = VolumeBodyGap
     alignItems = AlignCenter
     justifyContent = JustifyStart
     column (id "volume" "readout"):
       width = fill
       height = fill
-      gap = 8
+      gap = DialogGap
       alignItems = AlignStretch
       justifyContent = JustifyCenter
       label (id "volume" "status") (string "♫ " status):
@@ -83,22 +84,22 @@ card (id "volume" "panel"):
       row (id "volume" "actions"):
         width = fill
         height = fit
-        gap = 8
+        gap = DialogGap
         alignItems = AlignCenter
         justifyContent = JustifyCenter
         button downID "-":
-          width = fixed 48
+          width = fixed VolumeSmallButtonWidth
           height = fit
         button muteID "Mute":
-          width = fixed 78
+          width = fixed VolumeMuteButtonWidth
           height = fit
         button upID "+":
-          width = fixed 48
+          width = fixed VolumeSmallButtonWidth
           height = fit
       button mixerID "Open mixer":
         width = fill
         height = fit
       radioGroup "volume-sources" sinks defaultSink
-    verticalSlider sliderID percent 0 150:
-      width = fixed 46
+    verticalSlider sliderID percent 0 VolumeMax:
+      width = fixed VolumeSliderWidth
       height = fill

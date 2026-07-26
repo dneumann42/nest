@@ -2,6 +2,7 @@ define:
   selectedDate = (today-date)
   clickedDate = nothing
 
+import "../variables.nest"
 import "../components/calendar.nest"
 
 events:
@@ -13,15 +14,15 @@ events:
 card (id "start-popover"):
   width = fill
   height = fill
-  padding = 16
-  gap = 0
+  padding = DialogPaddingWide
+  gap = NoSpacing
   alignItems = AlignStretch
   background = color 0 0 0
-  opacity = 0.52
+  opacity = DialogOpacity
   dialogHeader (id "start-popover" "header"):
     width = fill
-    height = (fixed 32)
-    padding = 8
+    height = (fixed DialogHeaderHeight)
+    padding = DialogHeaderPadding
     alignItems = AlignCenter
     label (id "start-popover" "title") (clock "dddd, MMMM d"):
       width = fit
@@ -29,7 +30,7 @@ card (id "start-popover"):
   column (id "start-popover" "actions"):
     width = fill
     height = fit
-    padding = 0
-    gap = 0
+    padding = NoSpacing
+    gap = NoSpacing
     alignItems = AlignStretch
     dateSelectorWithSignal "clock-calendar" selectedDate clickedDate

@@ -1,4 +1,4 @@
-import std/[os, strutils]
+import std/[os, strutils, tables]
 
 import crow/[parser, syntax]
 import nest/[appConfig, layerShellSdl3Driver]
@@ -9,6 +9,7 @@ type ProjectConfig* = object
   width*, height*: int
   layerShell*: string
   namespace*: string
+  theme*: string
   exclusiveZone*: int
   marginTop*, marginRight*, marginBottom*, marginLeft*: int
 
@@ -20,6 +21,7 @@ proc defaultProjectConfig*(): ProjectConfig =
     height: 600,
     layerShell: "none",
     namespace: "nest",
+    theme: "",
     exclusiveZone: low(int),
     marginTop: 0,
     marginRight: 0,
@@ -33,20 +35,79 @@ proc parseProjectInt(value: string, fallback: int): int =
   except ValueError:
     fallback
 
-proc valueString(node: SyntaxNode): tuple[ok: bool, value: string] =
+type ProjectVariables = Table[string, string]
+
+proc valueString(
+    node: SyntaxNode; variables: ProjectVariables = initTable[string, string]()
+): tuple[ok: bool, value: string] =
   case node.kind
   of String:
     (true, node.stringValue)
   of Symbol:
-    (true, node.symbol)
+    (true, variables.getOrDefault(node.symbol, node.symbol))
   of Command:
     if node.arguments.len == 0 and node.layout == NoLayout and
         node.callee.kind == Symbol:
-      (true, node.callee.symbol)
+      (true, variables.getOrDefault(node.callee.symbol, node.callee.symbol))
     else:
       (false, "")
   else:
     (false, "")
+
+proc commandName(node: SyntaxNode): string =
+  if node.kind == Command and node.callee.kind == Symbol:
+    node.callee.symbol.normalize
+  else:
+    ""
+
+proc collectProjectVariables(
+    path: string; variables: var ProjectVariables; seen: var seq[string]
+)
+
+proc collectImportedProjectVariables(
+    baseDir: string; node: SyntaxNode; variables: var ProjectVariables; seen: var seq[string]
+) =
+  if node.commandName != "import" or node.arguments.len != 1:
+    return
+  let imported = node.arguments[0].valueString(variables)
+  if not imported.ok:
+    return
+  let importPath =
+    if imported.value.isAbsolute:
+      imported.value.normalizedPath
+    else:
+      (baseDir / imported.value).normalizedPath
+  collectProjectVariables(importPath, variables, seen)
+
+proc collectDefinedProjectVariables(node: SyntaxNode; variables: var ProjectVariables) =
+  if node.commandName != "define":
+    return
+  for entry in node.body:
+    if entry.kind != Binding or variables.hasKey(entry.bindingSymbol):
+      continue
+    let parsed = entry.value.valueString(variables)
+    if parsed.ok:
+      variables[entry.bindingSymbol] = parsed.value
+
+proc collectProjectVariables(
+    path: string; variables: var ProjectVariables; seen: var seq[string]
+) =
+  let normalized = path.normalizedPath
+  if normalized in seen or not fileExists(normalized):
+    return
+  seen.add normalized
+
+  var program: SyntaxNode
+  try:
+    program = parse(readFile(normalized), normalized)
+  except CatchableError:
+    return
+
+  let baseDir = normalized.parentDir
+  for node in program.statements:
+    collectImportedProjectVariables(baseDir, node, variables, seen)
+  for node in program.statements:
+    node.collectDefinedProjectVariables(variables)
 
 proc loadProjectConfig*(projectDir: string): ProjectConfig =
   result = defaultProjectConfig()
@@ -60,10 +121,18 @@ proc loadProjectConfig*(projectDir: string): ProjectConfig =
   except CatchableError:
     return
 
+  var
+    variables = initTable[string, string]()
+    seen: seq[string] = @[]
+  for node in program.statements:
+    collectImportedProjectVariables(projectDir, node, variables, seen)
+  for node in program.statements:
+    node.collectDefinedProjectVariables(variables)
+
   for node in program.statements:
     if node.kind != Binding:
       continue
-    let parsed = node.value.valueString
+    let parsed = node.value.valueString(variables)
     if not parsed.ok:
       continue
 
@@ -80,6 +149,8 @@ proc loadProjectConfig*(projectDir: string): ProjectConfig =
       result.layerShell = parsed.value.normalize
     of "namespace":
       result.namespace = parsed.value
+    of "theme":
+      result.theme = parsed.value.normalize
     of "exclusivezone":
       result.exclusiveZone = parseProjectInt(parsed.value, result.exclusiveZone)
     of "margintop":
@@ -127,7 +198,7 @@ proc anchoredAppConfig(config: ProjectConfig; anchors: set[LayerShellEdge]): App
     )
 
 proc appConfig*(config: ProjectConfig): AppConfig =
-  case config.layerShell.normalize
+  result = case config.layerShell.normalize
   of "top":
     AppConfig.dockTop(positive(config.height), config.title,
         config.namespace).withLayerShellMargins(config)
@@ -152,6 +223,7 @@ proc appConfig*(config: ProjectConfig): AppConfig =
       height = max(config.height, 1),
       title = config.title,
     )
+  result.themeName = config.theme
 
 proc projectMainPath*(projectDir: string, config: ProjectConfig): string =
   if config.main.isAbsolute:

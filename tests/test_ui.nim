@@ -64,7 +64,7 @@ suite "ui layout nesting":
     check styled.style.hasOpacity
     check styled.style.opacity == 0.42
 
-  test "dialog anchors place top popovers below the trigger":
+  test "dialog anchors do not double-offset top layer-shell popovers":
     let app = AppConfig.init(width = 260, height = 120)
     let anchored = app.applyDialogAnchor(DialogAnchor(
       ok: true,
@@ -79,8 +79,18 @@ suite "ui layout nesting":
     check anchored.layerShell
     check EdgeTop in anchored.layerShellConfig.anchors
     check EdgeLeft in anchored.layerShellConfig.anchors
-    check anchored.layerShellConfig.marginTop == 24
+    check anchored.layerShellConfig.marginTop == 0
     check anchored.layerShellConfig.marginLeft == 8
+
+  test "palette provides clean dark and light themes":
+    let
+      dark = Palette.dark()
+      light = Palette.light()
+
+    check dark.panelBackground != light.panelBackground
+    check dark.textColor != light.textColor
+    check dark.colorByName("panel-background", color(0, 0, 0)) == dark.panelBackground
+    check light.colorByName("card-accent", color(0, 0, 0)) == light.cardAccent
 
   test "fit button remains visible after a fill label in a row":
     let originalFontRelays = fontRelays

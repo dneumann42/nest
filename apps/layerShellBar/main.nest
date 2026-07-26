@@ -1,3 +1,5 @@
+import "variables.nest"
+
 define:
   startID = (id "start")
   clockID = (id "clock")
@@ -5,8 +7,8 @@ define:
 
 fun startMenu lbl:  
   imageButton startID "apps/layerShellBar/assets/nomicon-small.bmp":
-    width = fixed 28
-    height = fixed 28
+    width = fixed BarIconSize
+    height = fixed BarIconSize
 
 fun dateTime:
   button clockID (clock "MMM d, yyyy   hh:mm:ss tt"):
@@ -46,11 +48,11 @@ column (id "root"):
   alignItems = AlignStretch
   panel (id "bar"):
     width = fill
-    height = fixed 30
-    padding = 0
+    height = fixed BarHeight
+    padding = NoSpacing
     alignItems = AlignStretch
-    background = color 0 0 0
-    opacity = 0.52
+    background = theme-color "panel"
+    opacity = BarOpacity
     overlay (id "content"):
       width = fill
       height = fill
@@ -58,7 +60,7 @@ column (id "root"):
       row (id "left"):
         width = fill
         height = fill
-        gap = 14
+        gap = BarLeftGap
         alignItems = AlignCenter
         alignSelf = AlignStretch
         justifyContent = JustifyStart
@@ -68,7 +70,7 @@ column (id "root"):
       row (id "right"):
         width = fill
         height = fill
-        gap = 8
+        gap = BarRightGap
         alignItems = AlignCenter
         justifyContent = JustifyEnd
         alignSelf = AlignStretch
