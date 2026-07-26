@@ -44,7 +44,10 @@ type
     textScroll*: bool
     lineNumbers*: bool
     scrollbars*: bool
+    gutterMarkers*: HashSet[int]
+    activeLine*: int
     fontName*: string
+    syntax*: string
     style*: ComponentStyle
 
   PendingLayout = object
@@ -68,6 +71,7 @@ type
     childrenWidgets*: seq[Widget]
     components*: seq[ComponentWidget]
     floatingWidgets: seq[Widget]
+    floatingBelowAnchors: Table[WidgetID, WidgetID]
     componentByID: Table[WidgetID, Component]
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
@@ -132,7 +136,10 @@ proc cfg*(
     textScroll = false,
     lineNumbers = false,
     scrollbars = true,
+    gutterMarkers: HashSet[int] = initHashSet[int](),
+    activeLine = 0,
     fontName = "font",
+    syntax = "",
     style = ComponentStyle(),
 ): BoxConfig =
   BoxConfig(
@@ -148,7 +155,10 @@ proc cfg*(
     textScroll: textScroll,
     lineNumbers: lineNumbers,
     scrollbars: scrollbars,
+    gutterMarkers: gutterMarkers,
+    activeLine: activeLine,
     fontName: fontName,
+    syntax: syntax,
     style: style,
   )
 
@@ -335,13 +345,18 @@ proc renderKey(kind: string, config: BoxConfig): string =
     $config.padding & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
     $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars & "|" &
-    config.fontName & styleKey
+    config.fontName & "|" & config.syntax & styleKey
 
 proc renderKey(kind: string, width, height: SizePolicy, alignSelf: Alignment): string =
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
 
 proc beginInputFrame*(self: var UI) =
-  discard
+  self.context.update.keyInputs.setLen(0)
+  self.context.update.textInputs.setLen(0)
+  self.context.update.mouseWheelX = 0
+  self.context.update.mouseWheelY = 0
+  self.context.update.submittedWidgets.clear()
+  self.context.update.sliderValues.clear()
 
 proc finishInputFrame*(self: var UI) =
   self.context.update.mouseLeftPressed = false
@@ -518,6 +533,7 @@ proc reset*(self: var UI) =
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
   self.floatingWidgets.setLen(0)
+  self.floatingBelowAnchors.clear()
   self.componentByID.clear()
   if self.intrinsicByID.isNil:
     self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
@@ -540,6 +556,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
   self.floatingWidgets.setLen(0)
+  self.floatingBelowAnchors.clear()
   self.componentByID.clear()
   if self.intrinsicByID.isNil:
     self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
@@ -998,6 +1015,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
   for pending in self.pendingLayouts:
     if pending.scrollX or pending.scrollY:
       directParents.incl pending.parent.id
+    elif self.floatingBelowAnchors.hasKey(pending.parent.id):
+      directParents.incl pending.parent.id
     elif pending.parent.id in scrollParentIDs or pending.parent.id.hasScrollAncestor():
       directParents.incl pending.parent.id
 
@@ -1040,12 +1059,6 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         justifyContent = pending.justifyContent,
       )
 
-  if self.floatingWidgets.len > 0:
-    if self.layoutChildren.hasKey(self.root.id):
-      self.layoutChildren[self.root.id].add self.floatingWidgets
-    else:
-      self.layoutChildren[self.root.id] = self.floatingWidgets
-
   result = self.layout.solve()
   if result:
     for box in self.layout.boxes:
@@ -1060,8 +1073,31 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         self.renderKeys.del id
     self.previousWidgetIDs = self.liveWidgetIDs
     for parentID in directParents:
-      if parentID in self.scrollContainers and pendingByParent.hasKey(parentID):
-        self.assignDirectStack(pendingByParent[parentID], pendingByParent)
+      if pendingByParent.hasKey(parentID):
+        if self.floatingBelowAnchors.hasKey(parentID):
+          let
+            parent = pendingByParent[parentID].parent
+            anchorID = self.floatingBelowAnchors[parentID]
+            anchor = self.widgetFrame(anchorID)
+            rootFrame = self.root.frame
+            width = self.preferredWidth(parent, pendingByParent)
+            height = self.preferredHeight(parent, pendingByParent)
+          var x =
+            if anchor.ok:
+              anchor.frame.x
+            else:
+              rootFrame.x
+          var y =
+            if anchor.ok:
+              anchor.frame.y + anchor.frame.height
+            else:
+              rootFrame.y
+          x = min(max(x, rootFrame.x), rootFrame.x + max(rootFrame.width - width, 0.0))
+          y = min(max(y, rootFrame.y), rootFrame.y + max(rootFrame.height - height, 0.0))
+          parent.setFrame(Frame(x: x, y: y, width: width, height: height))
+          self.assignDirectStack(pendingByParent[parentID], pendingByParent)
+        elif parentID in self.scrollContainers:
+          self.assignDirectStack(pendingByParent[parentID], pendingByParent)
     self.applyScrollOffsets()
     self.frameByID.clear()
     for box in self.layout.boxes:
@@ -1384,6 +1420,8 @@ proc updateWidgetTree(
 
 proc update*(self: var UI, context: var UpdateContext) =
   self.updateWidgetTree(self.root, self.componentByID, context)
+  for widget in self.floatingWidgets:
+    self.updateWidgetTree(widget, self.componentByID, context)
 
 proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
   if not context.dirtyAll and context.dirtyWidgets.len == 0:
@@ -1458,6 +1496,8 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
         drawWidgetTree(child, dirty)
 
   drawWidgetTree(self.root)
+  for widget in self.floatingWidgets:
+    drawWidgetTree(widget, true)
   for (component, widget) in self.components:
     component.drawOverlay(widget, drawContext)
   context.hasRedrawRequest = drawContext.hasRedrawRequest
@@ -1657,20 +1697,19 @@ template floatingCardBelow*(
       body
       discard
     else:
-      let anchor {.gensym.} = self.currentWidget(anchorID)
+      let floatingID {.gensym.} = id
       let layoutParent {.gensym.} = self.box(
-        id, width = config.width, height = config.height, alignSelf = config.alignSelf
+        floatingID,
+        width = config.width,
+        height = config.height,
+        alignSelf = config.alignSelf,
       )
-      self.setRenderKey(id, renderKey("floatingCardBelow", config))
+      self.setRenderKey(floatingID, renderKey("floatingCardBelow", config))
       let component {.gensym.} = Card.new()
       component.style = config.style
       self.attach(layoutParent, Component(component))
-      if anchor.ok:
-        discard self.layout.constrain(layoutParent.left == anchor.widget.left)
-        discard self.layout.constrain(layoutParent.top == anchor.widget.bottom)
-        discard self.layout.constrain(layoutParent.right <= self.root.right)
-        discard self.layout.constrain(layoutParent.bottom <= self.root.bottom)
       self.floatingWidgets.add layoutParent
+      self.floatingBelowAnchors[floatingID] = anchorID
       self.pushLayout(layoutParent)
       body
       discard
@@ -1944,6 +1983,28 @@ proc label*(
   ui.attach(box, Component(lbl))
   ui.addChild(box)
 
+proc checkbox*(
+    ui: var UI,
+    id: WidgetID,
+    label: string,
+    checked: bool,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(
+    id,
+    renderKey(
+      "checkbox:" & label & ":" & $checked & ":" & fontName,
+      width,
+      height,
+      alignSelf,
+    ),
+  )
+  ui.attach(box, Component(Checkbox.new(label, checked, fontName)))
+  ui.addChild(box)
+
 proc coloredLabel*(
     ui: var UI,
     id: WidgetID,
@@ -2190,13 +2251,17 @@ proc textEditor*(
     alignSelf = AlignAuto,
     lineNumbers = false,
     scrollbars = true,
+    syntax = "",
+    gutterMarkers: HashSet[int] = initHashSet[int](),
+    activeLine = 0,
 ) {.layoutOnly.} =
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
     renderKey(
       "textEditor:" & state.text & ":" & $state.cursor & ":" & fontName & ":" &
-        $lineNumbers & ":" & $scrollbars,
+        $lineNumbers & ":" & $scrollbars & ":" & syntax & ":" & $gutterMarkers &
+        ":" & $activeLine,
       width,
       height,
       alignSelf,
@@ -2211,6 +2276,9 @@ proc textEditor*(
         singleLine = false,
         lineNumbers = lineNumbers,
         scrollbars = scrollbars,
+        syntax = syntax,
+        gutterMarkers = gutterMarkers,
+        activeLine = activeLine,
       )
     ),
   )

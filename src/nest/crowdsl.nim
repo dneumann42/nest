@@ -189,6 +189,31 @@ proc asNumber(value: Value, fallback = 0.0): float64 =
   else:
     fallback
 
+proc asIntSet(value: Value): HashSet[int] =
+  proc addToken(result: var HashSet[int], token: string) =
+    let item = token.strip
+    if item.len == 0:
+      return
+    try:
+      let parsed = parseInt(item)
+      if parsed > 0:
+        result.incl parsed
+    except ValueError:
+      discard
+
+  case value.kind
+  of Number:
+    let parsed = value.number.int
+    if parsed > 0:
+      result.incl parsed
+  of List:
+    for item in value.items:
+      for token in item.asString.replace(",", " ").splitWhitespace:
+        result.addToken(token)
+  else:
+    for token in value.asString.replace(",", " ").splitWhitespace:
+      result.addToken(token)
+
 proc asWidgetID(runtime: NestCrowRuntime, value: Value): WidgetID =
   if value.kind == Native and value.native of WidgetIDValue:
     WidgetIDValue(value.native).value
@@ -313,8 +338,14 @@ proc evalConfig(
       result.lineNumbers = value.isTruthy
     of "scrollbars":
       result.scrollbars = value.isTruthy
+    of "gutterMarkers":
+      result.gutterMarkers = value.asIntSet
+    of "activeLine":
+      result.activeLine = value.asNumber.int
     of "fontName":
       result.fontName = value.asString
+    of "syntax", "syntaxHighlighter":
+      result.syntax = value.asString
     of "background", "backgroundColor":
       result.style.hasBackground = true
       result.style.background = value.asColor(result.style.background)
@@ -604,6 +635,17 @@ proc parseSwayWorkspaceValues(output: string): Value {.raises: [].} =
   except OSError:
     discard
   list(items)
+
+proc tsvCellValue(content: string; row, col: int): string {.raises: [].} =
+  if row < 0 or col < 0:
+    return ""
+  let lines = content.splitLines
+  if row >= lines.len:
+    return ""
+  let cells = lines[row].split('\t')
+  if col >= cells.len:
+    return ""
+  cells[col]
 
 proc wakeRuntimeUi() {.gcsafe, raises: [].} =
   {.cast(gcsafe).}:
@@ -1455,6 +1497,20 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     except Exception:
       boolean(false)
 
+  runtime.evaluator.native "windowWidth":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    number(runtime.requireUi().windowWidth.float64)
+
+  runtime.evaluator.native "windowHeight":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    number(runtime.requireUi().windowHeight.float64)
+
   runtime.evaluator.native "shellAsync":
     discard layout
     discard bodyNodes
@@ -1478,6 +1534,14 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if values.len != 1:
       raise newException(EvaluatorError, "shellLaunch expects one command")
     boolean(launchShellCommand(values[0].asString))
+
+  runtime.evaluator.native "tsvCell":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 3:
+      raise newException(EvaluatorError, "tsvCell expects text, row, and column")
+    text(tsvCellValue(values[0].asString, values[1].asNumber.int, values[2].asNumber.int))
 
   runtime.evaluator.native "swayWorkspaces":
     discard layout
@@ -1545,6 +1609,33 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     else:
       text("")
 
+  runtime.evaluator.native "editorCursor":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorCursor expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key in runtime.editorStates:
+      number(runtime.editorStates[key].cursor.float64)
+    else:
+      number(0)
+
+  runtime.evaluator.native "setEditorCursor":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "setEditorCursor expects editor id and cursor")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    runtime.editorStates[key].cursor = values[1].asNumber.int.clamp(
+      0, runtime.editorStates[key].text.len
+    )
+    runtime.editorStates[key].preferredColumn = -1
+    nothing()
+
   runtime.evaluator.native "setEditorText":
     discard layout
     discard bodyNodes
@@ -1554,9 +1645,11 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     let key = env.idKey(arguments[0], values[0].asString)
     if key notin runtime.editorStates:
       runtime.editorStates[key] = EditorState.new("")
-    runtime.editorStates[key].text = values[1].asString
-    runtime.editorStates[key].cursor = runtime.editorStates[key].text.len
-    runtime.editorStates[key].preferredColumn = -1
+    let replacement = values[1].asString
+    if runtime.editorStates[key].text != replacement:
+      runtime.editorStates[key].text = replacement
+      runtime.editorStates[key].cursor = min(runtime.editorStates[key].cursor, replacement.len)
+      runtime.editorStates[key].preferredColumn = -1
     nothing()
 
   runtime.evaluator.native "clearEditor":
@@ -1865,7 +1958,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     runtime.currentUi[].menuBar(id, config):
       for menu in menus:
         let menuID = runtime.requireUi().id(key, menu.path)
-        if runtime.requireUi().menu(menuID, menu.label, fit(), fill()):
+        let menuWidth = fixed(max(64, menu.label.len * 10 + 24).float64)
+        if runtime.requireUi().menu(menuID, menu.label, menuWidth, fill()):
           if runtime.openMenus.getOrDefault(key) == menu.path:
             runtime.openMenus.del key
           else:
@@ -2200,6 +2294,9 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       alignSelf = config.alignSelf,
       lineNumbers = config.lineNumbers,
       scrollbars = config.scrollbars,
+      syntax = config.syntax,
+      gutterMarkers = config.gutterMarkers,
+      activeLine = config.activeLine,
     )
     nothing()
 

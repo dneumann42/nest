@@ -1,4 +1,4 @@
-import std/[math, strutils]
+import std/[math, sets, strutils]
 
 import ../[resources, widgets2]
 import component
@@ -38,6 +38,9 @@ type
     singleLine*: bool
     lineNumbers*: bool
     scrollbars*: bool
+    syntax*: string
+    gutterMarkers*: HashSet[int]
+    activeLine*: int
 
 proc new*(T: typedesc[EditorState], text = ""): T =
   T(text: text, cursor: text.len, preferredColumn: -1)
@@ -52,6 +55,9 @@ proc new*(
     singleLine = false,
     lineNumbers = false,
     scrollbars = true,
+    syntax = "",
+    gutterMarkers: HashSet[int] = initHashSet[int](),
+    activeLine = 0,
 ): T =
   state.clampCursor()
   T(
@@ -60,6 +66,9 @@ proc new*(
     singleLine: singleLine,
     lineNumbers: lineNumbers and not singleLine,
     scrollbars: scrollbars and not singleLine,
+    syntax: syntax.normalize,
+    gutterMarkers: gutterMarkers,
+    activeLine: activeLine,
   )
 
 proc lineStart(text: string, index: int): int =
@@ -245,6 +254,118 @@ proc editorSnapTarget(value, lo, hi: float64): float64 =
 
 proc expandTabs(text: string): string =
   text.replace("\t", "    ")
+
+type EditorTokenKind = enum
+  EditorTokenPlain
+  EditorTokenKeyword
+  EditorTokenType
+  EditorTokenString
+  EditorTokenNumber
+  EditorTokenComment
+  EditorTokenOperator
+
+proc isIdentStart(ch: char): bool =
+  ch == '_' or ch.isAlphaAscii
+
+proc isIdentPart(ch: char): bool =
+  ch == '_' or ch.isAlphaNumeric
+
+proc nimTokenKind(token: string): EditorTokenKind =
+  case token
+  of "addr", "and", "as", "asm", "bind", "block", "break", "case", "cast", "concept",
+      "const", "continue", "converter", "defer", "discard", "distinct", "do", "elif",
+      "else", "end", "enum", "except", "export", "finally", "for", "from", "func",
+      "if", "import", "in", "include", "interface", "is", "isnot", "iterator", "let",
+      "macro", "method", "mixin", "nil", "not", "notin", "object", "of", "or", "out",
+      "proc", "ptr", "raise", "ref", "return", "shl", "shr", "static", "template",
+      "try", "tuple", "type", "using", "var", "when", "while", "xor", "yield":
+    EditorTokenKeyword
+  of "bool", "char", "cstring", "float", "float32", "float64", "int", "int8", "int16",
+      "int32", "int64", "string", "uint", "uint8", "uint16", "uint32", "uint64":
+    EditorTokenType
+  else:
+    EditorTokenPlain
+
+proc tokenColor(ctx: var DrawContext, kind: EditorTokenKind): Color =
+  case kind
+  of EditorTokenKeyword:
+    ctx.palette.mauve
+  of EditorTokenType:
+    ctx.palette.sky
+  of EditorTokenString:
+    ctx.palette.butter
+  of EditorTokenNumber:
+    ctx.palette.peach
+  of EditorTokenComment:
+    ctx.palette.foreground
+  of EditorTokenOperator:
+    ctx.palette.rose
+  of EditorTokenPlain:
+    ctx.palette.textColor
+
+proc drawHighlightedLine(
+    self: Editor,
+    ctx: var DrawContext,
+    font: Font,
+    x, y: int,
+    line: string,
+    bg: Color,
+) =
+  if self.syntax.len == 0:
+    discard drawText(font, x, y, line.expandTabs, ctx.palette.textColor, bg)
+    return
+
+  var
+    cursor = 0
+    drawX = x
+  template drawSegment(segment: string, kind: EditorTokenKind) =
+    block:
+      let rendered = segment.expandTabs
+      if rendered.len > 0:
+        let extent = drawText(font, drawX, y, rendered, ctx.tokenColor(kind), bg)
+        drawX += extent.w
+
+  while cursor < line.len:
+    let ch = line[cursor]
+    if ch == '#':
+      drawSegment(line[cursor .. ^1], EditorTokenComment)
+      return
+    elif ch in {'"', '\''}:
+      let quote = ch
+      var stop = cursor + 1
+      while stop < line.len:
+        if line[stop] == quote and (stop == cursor + 1 or line[stop - 1] != '\\'):
+          inc stop
+          break
+        inc stop
+      drawSegment(line[cursor ..< min(stop, line.len)], EditorTokenString)
+      cursor = min(stop, line.len)
+    elif ch.isDigit:
+      var stop = cursor + 1
+      while stop < line.len and (line[stop].isAlphaNumeric or line[stop] in {'_', '.'}):
+        inc stop
+      drawSegment(line[cursor ..< stop], EditorTokenNumber)
+      cursor = stop
+    elif ch.isIdentStart:
+      var stop = cursor + 1
+      while stop < line.len and line[stop].isIdentPart:
+        inc stop
+      let token = line[cursor ..< stop]
+      let kind =
+        case self.syntax
+        of "nim":
+          nimTokenKind(token)
+        else:
+          EditorTokenPlain
+      drawSegment(token, kind)
+      cursor = stop
+    elif ch in {'=', '+', '-', '*', '/', '<', '>', '!', '?', ':', '.', ',', ';', '|', '&', '^',
+        '%', '@', '~'}:
+      drawSegment($ch, EditorTokenOperator)
+      inc cursor
+    else:
+      drawSegment($ch, EditorTokenPlain)
+      inc cursor
 
 proc nearlyEqual(a, b: float64): bool =
   abs(a - b) < 0.5
@@ -606,9 +727,34 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
   var y = textTop - self.state.scrollY.toInt
   for index in 0 ..< lines.len:
     if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
+      if self.activeLine == index + 1:
+        fillRect(
+          rect(
+            f.x.toInt + 1,
+            y,
+            max(f.width.toInt - 2, 0),
+            lineHeight,
+          ),
+          ctx.palette.panelMuted,
+        )
+        fillRect(
+          rect(
+            f.x.toInt + 1,
+            y,
+            max(gutterWidth, 8),
+            lineHeight,
+          ),
+          ctx.palette.sky,
+        )
       if self.lineNumbers:
         let number = $(index + 1)
         let numberWidth = ctx.resources.measureText(self.fontName, number).width
+        if (index + 1) in self.gutterMarkers:
+          let
+            markerSize = min(8, max(lineHeight div 2, 5))
+            markerX = f.x.toInt + max((EditorPaddingX - markerSize) div 2, 1)
+            markerY = y + max((lineHeight - markerSize) div 2, 0)
+          fillRect(rect(markerX, markerY, markerSize, markerSize), ctx.palette.rose)
         discard drawText(
           Font(font),
           f.x.toInt + EditorPaddingX + gutterWidth - EditorPaddingX - numberWidth,
@@ -617,6 +763,15 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
           ctx.palette.foreground,
           bg,
         )
+        if self.activeLine == index + 1:
+          discard drawText(
+            Font(font),
+            f.x.toInt + 2,
+            y,
+            ">",
+            ctx.palette.textColor,
+            ctx.palette.sky,
+          )
     y += lineHeight
 
   if self.lineNumbers:
@@ -639,15 +794,20 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
     max(f.height.toInt - 2, 0),
   )))
   y = textTop - self.state.scrollY.toInt
-  for line in lines:
+  for index, line in lines:
     if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
-      discard drawText(
+      let lineBg =
+        if self.activeLine == index + 1:
+          ctx.palette.panelMuted
+        else:
+          bg
+      self.drawHighlightedLine(
+        ctx,
         Font(font),
         textLeft - self.state.scrollX.toInt,
         y,
-        line.expandTabs,
-        ctx.palette.textColor,
-        bg,
+        line,
+        lineBg,
       )
     y += lineHeight
 

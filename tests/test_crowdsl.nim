@@ -653,9 +653,15 @@ events:
 define:
   editorID = (id "test" "editor")
   captured = ""
+  cursorBefore = 0
+  cursorAfter = 0
 events:
   when (= captured ""):
     setEditorText editorID "first\nsecond"
+    setEditorCursor editorID 3
+    set cursorBefore (editorCursor editorID)
+    setEditorText editorID "first\nsecond"
+    set cursorAfter (editorCursor editorID)
     set captured (editorText editorID)
 panel (id "root"):
   width = fill
@@ -663,11 +669,14 @@ panel (id "root"):
   editor editorID:
     width = fill
     height = fill
+    syntax = "nim"
 """))
 
     let captured = runtime.get("captured")
     check captured.kind == Text
     check captured.text == "first\nsecond"
+    check runtime.get("cursorBefore").number == 3
+    check runtime.get("cursorAfter").number == 3
 
   test "crow menubar renders top menus and arbitrary menu item bodies":
     let originalFontRelays = fontRelays
@@ -712,6 +721,62 @@ menuBar (id "main"):
       check ui.widget(ui.id("main")).frame.width == 360
       check ui.widget(ui.id("main", "file")).frame.width > 0
       check ui.widget(ui.id("main", "edit")).frame.x > ui.widget(ui.id("main", "file")).frame.x
+    finally:
+      fontRelays = originalFontRelays
+
+  test "open menu popover does not move menubar items":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let source = parse("""
+column (id "root"):
+  width = fill
+  height = fill
+  menuBar (id "main"):
+    width = fill
+    height = fixed 28
+    menu "file" "File":
+      menuItem "open" "Open"
+    menu "build" "Build":
+      menuItem "compile" "Compile"
+    menu "breakpoints" "Breakpoints":
+      menuItem "add" "Add"
+  label (id "below") "below":
+    width = fill
+    height = fixed 24
+""")
+      var runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(420, 180)
+      ui.loadFont("font", "", 18)
+
+      runtime.renderLayoutOnly(ui, source, 420, 180)
+      let closedBuild = ui.widget(ui.id("main", "build")).frame
+      let closedBreakpoints = ui.widget(ui.id("main", "breakpoints")).frame
+      let closedBelow = ui.widget(ui.id("below")).frame
+
+      runtime.openMenus["main"] = "breakpoints"
+      ui = UI.init()
+      ui.initContext(420, 180)
+      ui.loadFont("font", "", 18)
+      runtime.renderLayoutOnly(ui, source, 420, 180)
+
+      check ui.widget(ui.id("main", "build")).frame.x == closedBuild.x
+      check ui.widget(ui.id("main", "breakpoints")).frame.x == closedBreakpoints.x
+      check ui.widget(ui.id("below")).frame.y == closedBelow.y
+      check ui.widgetFrame(ui.id("main", "item", "0")).ok
     finally:
       fontRelays = originalFontRelays
 
