@@ -60,6 +60,7 @@ type
       fg*, bg*: Color
     of DrawImage:
       image*: Image
+      imagePath*: string
       src*, dst*: Rect
 
   WindowRelays* = object
@@ -72,12 +73,14 @@ type
     setWindowTitle*: proc(title: string) {.nimcall.}
 
   FontRelays* = object
-    openFont*: proc(path: string, size: int, metrics: var FontMetrics): Font {.nimcall.}
+    openFont*: proc(path: string, size: int,
+        metrics: var FontMetrics): Font {.nimcall.}
     closeFont*: proc(f: Font) {.nimcall.}
     getFontMetrics*: proc(f: Font): FontMetrics {.nimcall.}
     measureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
     drawText*:
-      proc(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent {.nimcall.}
+      proc(f: Font, x, y: int, text: string, fg,
+          bg: Color): TextExtent {.nimcall.}
 
   DrawRelays* = object
     fillRect*: proc(r: Rect, color: Color) {.nimcall.}
@@ -111,41 +114,44 @@ var windowRelays* = WindowRelays(
 
 var fontRelays* = FontRelays(
   openFont: proc(path: string, size: int, metrics: var FontMetrics): Font =
-    Font(0),
+  Font(0),
   closeFont: proc(f: Font) =
-    discard,
+  discard,
   getFontMetrics: proc(f: Font): FontMetrics =
-    FontMetrics(),
+  FontMetrics(),
   measureText: proc(f: Font, text: string): TextExtent =
-    TextExtent(),
+  TextExtent(),
   drawText: proc(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent =
-    TextExtent(),
+  TextExtent(),
 )
 
 var drawRelays* = DrawRelays(
   fillRect: proc(r: Rect, color: Color) =
-    discard,
+  discard,
   lineRect: proc(r: Rect, color: Color) =
-    discard,
+  discard,
   drawLine: proc(x1, y1, x2, y2: int, color: Color) =
-    discard,
+  discard,
   drawPoint: proc(x, y: int, color: Color) =
-    discard,
+  discard,
   loadImage: proc(path: string): Image =
-    Image(0),
+  Image(0),
   freeImage: proc(img: Image) =
-    discard,
+  discard,
   drawImage: proc(img: Image, src, dst: Rect) =
-    discard,
+  discard,
   imageSize: proc(img: Image): TextExtent =
-    TextExtent(),
+  TextExtent(),
 )
 
 var drawCommands*: ptr seq[DrawCommand]
 var commandMeasureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
+var commandMeasureImage*: proc(path: string): TextExtent {.nimcall.}
 
-proc createWindow*(requestedW, requestedH: int, fullScreen = false): ScreenLayout =
-  result = ScreenLayout(width: requestedW, height: requestedH, fullScreen: fullScreen)
+proc createWindow*(requestedW, requestedH: int,
+    fullScreen = false): ScreenLayout =
+  result = ScreenLayout(width: requestedW, height: requestedH,
+      fullScreen: fullScreen)
   windowRelays.createWindow(result)
 
 proc refresh*() =
@@ -231,7 +237,8 @@ proc drawLine*(x1, y1, x2, y2: int, color: Color) =
 
 proc drawPoint*(x, y: int, color: Color) =
   if drawCommands != nil:
-    drawCommands[].add DrawCommand(kind: DrawPoint, x: x, y: y, pointColor: color)
+    drawCommands[].add DrawCommand(kind: DrawPoint, x: x, y: y,
+        pointColor: color)
     return
   drawRelays.drawPoint(x, y, color)
 
@@ -249,6 +256,24 @@ proc drawImage*(img: Image, src, dst: Rect) =
 
 proc imageSize*(img: Image): TextExtent =
   drawRelays.imageSize(img)
+
+proc measureImage*(path: string): TextExtent =
+  if drawCommands != nil and commandMeasureImage != nil:
+    return commandMeasureImage(path)
+  let image = loadImage(path)
+  if image.int == 0:
+    return TextExtent()
+  imageSize(image)
+
+proc drawImage*(path: string, src, dst: Rect) =
+  if drawCommands != nil:
+    drawCommands[].add DrawCommand(
+      kind: DrawImage, image: Image(0), imagePath: path, src: src, dst: dst
+    )
+    return
+  let image = loadImage(path)
+  if image.int != 0:
+    drawRelays.drawImage(image, src, dst)
 
 proc color*(r, g, b: uint8, a: uint8 = 255): Color =
   Color(r: r, g: g, b: b, a: a)

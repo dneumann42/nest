@@ -1,16 +1,300 @@
 define:
   rootID = id
-  panelColor = color 100 100 100
   menuID = (id "duck" "menubar")
-  editorID = (id "duck" "editor")
+  tabBarID = (id "duck" "tabs")
+  findInputID = (id "duck" "find" "input")
+  replaceFindInputID = (id "duck" "replace" "find")
+  replaceWithInputID = (id "duck" "replace" "with")
+  gotoInputID = (id "duck" "goto" "line")
+  findNextID = (id "duck" "find" "next")
+  findCloseID = (id "duck" "find" "close")
+  replaceNextID = (id "duck" "replace" "next")
+  replaceOneID = (id "duck" "replace" "one")
+  replaceAllID = (id "duck" "replace" "all")
+  replaceCloseID = (id "duck" "replace" "close")
+  gotoButtonID = (id "duck" "goto" "go")
+  gotoCloseID = (id "duck" "goto" "close")
+  aboutCloseID = (id "duck" "about" "close")
   menuAction = nothing
   pickedFile = ""
+  statusText = "Ready"
+  activeBuffer = 0
+  nextBuffer = 2
+  showFind = false
+  showReplace = false
+  showGoto = false
+  showAbout = false
+  matchCase = false
+  wordWrap = false
+  showStatusBar = true
+  showLineNumbers = false
+  lastFindStart = -1
+  lastFindStop = -1
+  buffers = []:
+    {}:
+      path = ""
+      name = "Untitled 1"
+      savedText = ""
+
+fun editorIDFor index:
+  id "duck" "editor" index
+
+fun activeEditorID:
+  editorIDFor activeBuffer
+
+fun activeText:
+  editorText (activeEditorID)
+
+fun bufferDirtyAt index buffer:
+  not (= (editorText (editorIDFor index)) buffer.savedText)
+
+fun bufferTitle index buffer:
+  if (bufferDirtyAt index buffer):
+    then:
+      string "*" buffer.name
+    else:
+      buffer.name
+
+fun bufferLabels source:
+  define:
+    labels = list
+    bufferIndex = 0
+  for buffer (iter source):
+    set labels (listAppend labels (bufferTitle bufferIndex buffer))
+    += bufferIndex 1
+  labels
+
+fun removeAt values index:
+  if (empty? values):
+    then:
+      list
+    else:
+      if (= index 0):
+        then:
+          rest values
+        else:
+          cons (first values) (removeAt (rest values) (- index 1))
+
+fun textReplaceAllFrom source needle replacement start:
+  define:
+    found = (textFind source needle start false)
+  if (= found -1):
+    then:
+      textSlice source start (length source)
+    else:
+      string
+        (textSlice source start found)
+        replacement
+        (textReplaceAllFrom source needle replacement (+ found (length needle)))
+
+fun textReplaceAll source needle replacement:
+  if (= needle ""):
+    then:
+      source
+    else:
+      textReplaceAllFrom source needle replacement 0
+
+fun timeDateStamp:
+  formatNow "h:mm tt M/d/yyyy"
+
+fun clampActiveBuffer:
+  when (empty? buffers):
+    newBuffer
+  when (>= activeBuffer (length buffers)):
+    set activeBuffer (- (length buffers) 1)
+  when (< activeBuffer 0):
+    set activeBuffer 0
+
+fun newBuffer:
+  define:
+    buffer = {}:
+      path = ""
+      name = (string "Untitled " nextBuffer)
+      savedText = ""
+  set buffers (listAppend buffers buffer)
+  set activeBuffer (- (length buffers) 1)
+  += nextBuffer 1
+  clearEditor (activeEditorID)
+  set statusText "New document"
 
 fun openFileInEditor path:
+  define:
+    content = ""
+    buffer = {}:
+      path = path
+      name = (pathBaseName path)
+      savedText = ""
   with (open-file path "rb") stream:
+    set content (read-all stream)
+  set buffer.savedText content
+  set buffers (listAppend buffers buffer)
+  set activeBuffer (- (length buffers) 1)
+  setEditorText (activeEditorID) content
+  set statusText (string "Opened " path)
+
+fun saveActiveBufferAs path:
+  define:
+    content = (activeText)
+  with (open-file path "wb") stream:
+    write stream content
+  set buffers.[activeBuffer].path path
+  set buffers.[activeBuffer].name (pathBaseName path)
+  set buffers.[activeBuffer].savedText content
+  set statusText (string "Saved " path)
+
+fun saveActiveBuffer:
+  if (= buffers.[activeBuffer].path ""):
+    then:
+      pickFileEvent "duck:saveAsPicked"
+    else:
+      saveActiveBufferAs buffers.[activeBuffer].path
+
+fun closeActiveBuffer:
+  if (> (length buffers) 1):
+    then:
+      set buffers (removeAt buffers activeBuffer)
+      clampActiveBuffer
+      set statusText "Buffer closed"
+    else:
+      clearEditor (activeEditorID)
+      set buffers.[0].path ""
+      set buffers.[0].name "Untitled 1"
+      set buffers.[0].savedText ""
+      set activeBuffer 0
+      set statusText "Last buffer cleared"
+
+fun openFindDialog:
+  set showFind true
+  set showReplace false
+  set showGoto false
+  setEditorText findInputID (editorText findInputID)
+
+fun openReplaceDialog:
+  set showReplace true
+  set showFind false
+  set showGoto false
+  setEditorText replaceFindInputID (editorText findInputID)
+
+fun findFrom start query:
+  define:
+    found = (textFind (activeText) query start (not matchCase))
+  when (= found -1):
+    set found (textFind (activeText) query 0 (not matchCase))
+  found
+
+fun findNextWith query:
+  if (= query ""):
+    then:
+      set statusText "Enter text to find"
+    else:
+      define:
+        start = (+ (editorCursor (activeEditorID)) 1)
+        found = (findFrom start query)
+      if (= found -1):
+        then:
+          set statusText (string "Cannot find \"" query "\"")
+        else:
+          set lastFindStart found
+          set lastFindStop (+ found (length query))
+          setEditorSelection (activeEditorID) lastFindStart lastFindStop
+          set statusText (string "Found \"" query "\"")
+
+fun findNext:
+  findNextWith (editorText findInputID)
+
+fun replaceCurrent:
+  define:
+    query = (editorText replaceFindInputID)
+    replacement = (editorText replaceWithInputID)
+  when (or (= lastFindStart -1) (= lastFindStop -1)):
+    findNextWith query
+  when (and (>= lastFindStart 0) (>= lastFindStop lastFindStart)):
     define:
-      content = (read-all stream)
-    setEditorText editorID content
+      before = (textSlice (activeText) 0 lastFindStart)
+      after = (textSlice (activeText) lastFindStop (length (activeText)))
+      replaced = (string before replacement after)
+    setEditorText (activeEditorID) replaced
+    setEditorCursor (activeEditorID) (+ lastFindStart (length replacement))
+    set lastFindStart -1
+    set lastFindStop -1
+    set statusText "Replaced"
+
+fun replaceAll:
+  define:
+    query = (editorText replaceFindInputID)
+    replacement = (editorText replaceWithInputID)
+  if (= query ""):
+    then:
+      set statusText "Enter text to replace"
+    else:
+      setEditorText (activeEditorID) (textReplaceAll (activeText) query replacement)
+      set statusText "Replace All complete"
+
+fun gotoLine:
+  define:
+    line = (editorText gotoInputID)
+  setEditorLineColumn (activeEditorID) line 1
+  set showGoto false
+  set statusText (string "Line " line)
+
+fun timeDate:
+  insertEditorText (activeEditorID) (timeDateStamp)
+  set statusText "Inserted time/date"
+
+fun handleMenuAction action:
+  when (= action "file.new"):
+    newBuffer
+  when (= action "file.open"):
+    pickFileEvent "duck:filePicked"
+  when (= action "file.save"):
+    saveActiveBuffer
+  when (= action "file.saveas"):
+    pickFileEvent "duck:saveAsPicked"
+  when (= action "file.pagesetup"):
+    set statusText "Page Setup is not available"
+  when (= action "file.print"):
+    set statusText "Print is not available"
+  when (= action "file.exit"):
+    closeDialog ""
+  when (= action "edit.undo"):
+    undoEditor (activeEditorID)
+  when (= action "edit.redo"):
+    redoEditor (activeEditorID)
+  when (= action "edit.cut"):
+    cutEditorSelection (activeEditorID)
+  when (= action "edit.copy"):
+    copyEditorSelection (activeEditorID)
+  when (= action "edit.paste"):
+    pasteEditorClipboard (activeEditorID)
+  when (= action "edit.delete"):
+    deleteEditorSelection (activeEditorID)
+  when (= action "edit.selectall"):
+    selectEditorAll (activeEditorID)
+  when (= action "edit.timedate"):
+    timeDate
+  when (= action "search.find"):
+    openFindDialog
+  when (= action "search.findnext"):
+    findNext
+  when (= action "search.replace"):
+    openReplaceDialog
+  when (= action "search.goto"):
+    set showGoto true
+    set showFind false
+    set showReplace false
+    setEditorText gotoInputID (editorLine (activeEditorID))
+  when (= action "format.wordwrap"):
+    set wordWrap (not wordWrap)
+  when (= action "view.statusbar"):
+    set showStatusBar (not showStatusBar)
+  when (= action "view.linenumbers"):
+    set showLineNumbers (not showLineNumbers)
+  when (= action "buffer.close"):
+    closeActiveBuffer
+  when (= action "help.about"):
+    set showAbout true
+
+clampActiveBuffer
 
 events:
   when (external "duck:filePicked"):
@@ -19,12 +303,50 @@ events:
     set menuAction pickedFile
     clearPickResult "duck:filePicked"
 
+  when (external "duck:saveAsPicked"):
+    set pickedFile (pickResult "duck:saveAsPicked")
+    saveActiveBufferAs pickedFile
+    set menuAction pickedFile
+    clearPickResult "duck:saveAsPicked"
+
+  when (keyPressed "f3"):
+    findNext
+  when (keyPressed "f5"):
+    timeDate
+  when (keyPressed "escape"):
+    set showFind false
+    set showReplace false
+    set showGoto false
+    set showAbout false
+
+  when (clicked findNextID):
+    findNext
+  when (submitted findInputID):
+    findNext
+  when (clicked findCloseID):
+    set showFind false
+  when (clicked (id "duck" "find" "match")):
+    set matchCase (not matchCase)
+  when (clicked replaceNextID):
+    findNextWith (editorText replaceFindInputID)
+  when (clicked replaceOneID):
+    replaceCurrent
+  when (clicked replaceAllID):
+    replaceAll
+  when (clicked replaceCloseID):
+    set showReplace false
+  when (clicked gotoButtonID):
+    gotoLine
+  when (submitted gotoInputID):
+    gotoLine
+  when (clicked gotoCloseID):
+    set showGoto false
+  when (clicked aboutCloseID):
+    set showAbout false
+
   when (not (= (menuResult "duck:menubar") nothing)):
     set menuAction (menuResult "duck:menubar")
-    when (= menuAction "file.open"):
-      pickFileEvent "duck:filePicked"
-    when (= menuAction "file.save"):
-      set menuAction (editorText editorID)
+    handleMenuAction menuAction
     clearMenuResult "duck:menubar"
 
 fun duckMenuBar:
@@ -32,15 +354,182 @@ fun duckMenuBar:
     width = fill
     height = fixed 24
     padding = 0
-    background = panelColor
+    gap = 4
+    background = color 100 100 100
     alignItems = AlignStretch
     menu "file" "File":
       menuItem "new" "New"
-      menuItem "open" "Open"
+      menuItem "open" "Open..."
       menuItem "save" "Save"
-      menuItem "saveas" "Save As"
+      menuItem "saveas" "Save As..."
       menuDivider
-      menuItem "quit" "Quit"
+      menuItem "pagesetup" "Page Setup..."
+      menuItem "print" "Print..."
+      menuDivider
+      menuItem "exit" "Exit"
+    menu "edit" "Edit":
+      menuItem "undo" "Undo"
+      menuItem "redo" "Redo"
+      menuDivider
+      menuItem "cut" "Cut"
+      menuItem "copy" "Copy"
+      menuItem "paste" "Paste"
+      menuItem "delete" "Delete"
+      menuDivider
+      menuItem "selectall" "Select All"
+      menuItem "timedate" "Time/Date"
+    menu "search" "Search":
+      menuItem "find" "Find..."
+      menuItem "findnext" "Find Next"
+      menuItem "replace" "Replace..."
+      menuItem "goto" "Go To..."
+    menu "format" "Format":
+      menuItem "wordwrap":
+        checkbox (id "duck" "menu" "wordwrap") "Word Wrap" wordWrap:
+          width = fill
+          height = fit
+    menu "view" "View":
+      menuItem "statusbar":
+        checkbox (id "duck" "menu" "statusbar") "Status Bar" showStatusBar:
+          width = fill
+          height = fit
+      menuItem "linenumbers":
+        checkbox (id "duck" "menu" "linenumbers") "Line Numbers" showLineNumbers:
+          width = fill
+          height = fit
+    menu "buffer" "Buffer":
+      menuItem "close" "Close Buffer"
+    menu "help" "Help":
+      menuItem "about" "About Duck"
+
+fun labeledInput rowID labelText inputID initialText:
+  row rowID:
+    width = fill
+    height = fit
+    gap = 8
+    alignItems = AlignCenter
+    label (id rowID "label") labelText:
+      width = fixed 96
+      height = fit
+    lineInput inputID initialText:
+      width = fill
+      height = fixed 30
+
+block-command actionRow rowID:
+  row (eval rowID):
+    width = fill
+    height = fit
+    gap = 8
+    justifyContent = JustifyEnd
+    eval block
+
+fun findDialog:
+  modalDialog (id "duck" "find" "dialog") showFind:
+    width = fixed 420
+    height = fit
+    padding = 12
+    gap = 10
+    alignItems = AlignStretch
+    background = color 30 30 30
+    dialogHeader (id "duck" "find" "header"):
+      width = fill
+      height = fit
+      padding = 6
+      label (id "duck" "find" "title") "Find":
+        width = fill
+        height = fit
+    labeledInput (id "duck" "find" "row") "Find what:" findInputID ""
+    checkbox (id "duck" "find" "match") "Match case" matchCase:
+      width = fit
+      height = fit
+    actionRow (id "duck" "find" "actions"):
+      button findNextID "Find Next":
+        width = fixed 100
+        height = fit
+      button findCloseID "Cancel":
+        width = fixed 82
+        height = fit
+
+fun replaceDialog:
+  modalDialog (id "duck" "replace" "dialog") showReplace:
+    width = fixed 450
+    height = fit
+    padding = 12
+    gap = 10
+    alignItems = AlignStretch
+    background = color 30 30 30
+    dialogHeader (id "duck" "replace" "header"):
+      width = fill
+      height = fit
+      padding = 6
+      label (id "duck" "replace" "title") "Replace":
+        width = fill
+        height = fit
+    labeledInput (id "duck" "replace" "findrow") "Find what:" replaceFindInputID ""
+    labeledInput (id "duck" "replace" "withrow") "Replace with:" replaceWithInputID ""
+    actionRow (id "duck" "replace" "actions"):
+      button replaceNextID "Find Next":
+        width = fixed 96
+        height = fit
+      button replaceOneID "Replace":
+        width = fixed 88
+        height = fit
+      button replaceAllID "Replace All":
+        width = fixed 110
+        height = fit
+      button replaceCloseID "Cancel":
+        width = fixed 80
+        height = fit
+
+fun gotoDialog:
+  modalDialog (id "duck" "goto" "dialog") showGoto:
+    width = fixed 340
+    height = fit
+    padding = 12
+    gap = 10
+    alignItems = AlignStretch
+    background = color 30 30 30
+    dialogHeader (id "duck" "goto" "header"):
+      width = fill
+      height = fit
+      padding = 6
+      label (id "duck" "goto" "title") "Go To Line":
+        width = fill
+        height = fit
+    labeledInput (id "duck" "goto" "row") "Line number:" gotoInputID "1"
+    actionRow (id "duck" "goto" "actions"):
+      button gotoButtonID "Go To":
+        width = fixed 82
+        height = fit
+      button gotoCloseID "Cancel":
+        width = fixed 82
+        height = fit
+
+fun aboutDialog:
+  modalDialog (id "duck" "about" "dialog") showAbout:
+    width = fixed 360
+    height = fit
+    padding = 12
+    gap = 10
+    alignItems = AlignStretch
+    background = color 30 30 30
+    dialogHeader (id "duck" "about" "header"):
+      width = fill
+      height = fit
+      padding = 6
+      label (id "duck" "about" "title") "About Duck":
+        width = fill
+        height = fit
+    label (id "duck" "about" "body") "Duck Editor":
+      width = fill
+      height = fit
+    label (id "duck" "about" "features") "A Crow/Nest Notepad-style text editor.":
+      width = fill
+      height = fit
+    actionRow (id "duck" "about" "actions"):
+      button aboutCloseID "OK":
+        width = fixed 82
+        height = fit
 
 panel rootID:
   width = fill
@@ -49,8 +538,35 @@ panel rootID:
   padding = 0.0
   alignItems = AlignStretch
   duckMenuBar
-  editor editorID:
+  tabs tabBarID (bufferLabels buffers) activeBuffer:
+    width = fill
+    height = fixed 36
+    padding = 4
+    gap = 2
+    background = color 35 40 44
+  editor (activeEditorID):
     width = fill
     height = fill
     fontName = "editor"
-    lineNumbers = true
+    lineNumbers = showLineNumbers
+    scrollbars = (not wordWrap)
+  when showStatusBar:
+    row (id "duck" "status"):
+      width = fill
+      height = fixed 24
+      padding = 4
+      gap = 12
+      background = color 70 70 70
+      label (id "duck" "status" "message") statusText:
+        width = fill
+        height = fit
+      label (id "duck" "status" "position") (string "Ln " (editorLine (activeEditorID)) ", Col " (editorColumn (activeEditorID))):
+        width = fit
+        height = fit
+      label (id "duck" "status" "count") (string (lineCount (activeText)) " lines"):
+        width = fit
+        height = fit
+  findDialog
+  replaceDialog
+  gotoDialog
+  aboutDialog

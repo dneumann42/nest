@@ -7,7 +7,7 @@ const
   CheckboxGap = 8
   CheckboxMinHeight = 24
 
-type Checkbox* = ref object of Component
+type Checkbox* = ref object of Interactive
   label: string
   checked: bool
   fontName: string
@@ -26,6 +26,17 @@ method measure*(self: Checkbox, resources: Resources): IntrinsicSize =
     (CheckboxBoxSize + CheckboxGap + measurement.width).toFloat,
     max(measurement.height, CheckboxMinHeight).toFloat,
   )
+
+method update*(self: Checkbox, widget: Widget, ctx: var UpdateContext) =
+  let
+    f = widget.frame
+    isHot =
+      ctx.mouseX.float64 >= f.x and ctx.mouseX.float64 < f.x + f.width and
+      ctx.mouseY.float64 >= f.y and ctx.mouseY.float64 < f.y + f.height
+  if isHot:
+    ctx.setHot(widget.id)
+    if ctx.mouseLeftPressed:
+      ctx.setActive(widget.id)
 
 method draw*(self: Checkbox, widget: Widget, ctx: var DrawContext) =
   let

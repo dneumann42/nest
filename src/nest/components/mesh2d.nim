@@ -29,6 +29,11 @@ type
     state: ptr Mesh2DState
     imagePath: string
 
+const
+  PointPickRadius = 14.0
+  EdgePickRadius = 7.0
+  HandleRadius = 5.0
+
 proc hash*(edge: Mesh2DEdge): Hash =
   hash((min(edge.a, edge.b), max(edge.a, edge.b)))
 
@@ -92,7 +97,7 @@ proc pointInTriangle(px, py, ax, ay, bx, by, cx, cy: float64): bool =
 
 proc pickPoint(state: Mesh2DState, view: Frame, x, y: int): int =
   result = -1
-  var best = 9.0
+  var best = PointPickRadius
   for i, point in state.points:
     let screenPoint = point.toScreen(view)
     let distance = distancePoint(x.float64, y.float64, screenPoint.x,
@@ -103,7 +108,7 @@ proc pickPoint(state: Mesh2DState, view: Frame, x, y: int): int =
 
 proc pickEdge(state: Mesh2DState, view: Frame, x, y: int): Mesh2DEdge =
   result = Mesh2DEdge(a: -1, b: -1)
-  var best = 7.0
+  var best = EdgePickRadius
   for triangle in state.triangles:
     for edge in [Mesh2DEdge(a: triangle[0], b: triangle[1]),
                  Mesh2DEdge(a: triangle[1], b: triangle[2]),
@@ -134,12 +139,17 @@ proc pickIsland(state: Mesh2DState, view: Frame, x, y: int): bool =
 
 proc beginDrag(state: var Mesh2DState, view: Frame, x, y: int) =
   state.dragPoint = state.pickPoint(view, x, y)
-  state.selectedPoints.clear()
-  state.selectedEdges.clear()
   if state.dragPoint >= 0:
-    state.dragKind = Mesh2DPointDrag
-    state.selectedPoints.incl state.dragPoint
+    if state.dragPoint in state.selectedPoints and state.selectedPoints.len > 1:
+      state.dragKind = Mesh2DIslandDrag
+    else:
+      state.selectedPoints.clear()
+      state.selectedEdges.clear()
+      state.dragKind = Mesh2DPointDrag
+      state.selectedPoints.incl state.dragPoint
   else:
+    state.selectedPoints.clear()
+    state.selectedEdges.clear()
     let edge = state.pickEdge(view, x, y)
     if edge.a >= 0:
       state.dragKind = Mesh2DEdgeDrag
@@ -188,7 +198,8 @@ method update*(self: Mesh2DEditor, widget: Widget, ctx: var UpdateContext) =
   if hot and ctx.mouseLeftPressed:
     ctx.setActive(widget.id)
     self.state[].beginDrag(view, ctx.mouseX, ctx.mouseY)
-  if ctx.active(widget.id) and ctx.mouseLeftDown:
+  if self.state[].dragKind != Mesh2DNoDrag and ctx.mouseLeftDown:
+    ctx.setActive(widget.id)
     self.state[].drag(view, ctx.mouseX, ctx.mouseY)
     if self.state[].changed:
       ctx.submit(widget.id)
@@ -197,7 +208,8 @@ method update*(self: Mesh2DEditor, widget: Widget, ctx: var UpdateContext) =
 
 proc drawHandle(x, y: float64, selected: bool) =
   let color = if selected: color(240, 200, 86) else: color(226, 235, 236)
-  fillRect(rect((x - 3).int, (y - 3).int, 7, 7), color)
+  fillRect(rect((x - HandleRadius).int, (y - HandleRadius).int,
+      (HandleRadius * 2 + 1).int, (HandleRadius * 2 + 1).int), color)
 
 method draw*(self: Mesh2DEditor, widget: Widget, ctx: var DrawContext) =
   if self.state == nil:
@@ -208,12 +220,10 @@ method draw*(self: Mesh2DEditor, widget: Widget, ctx: var DrawContext) =
   fillRect(rect(f.x.int, f.y.int, f.width.int, f.height.int),
       ctx.palette.panelMuted)
   if self.imagePath.len > 0:
-    let
-      image = ctx.resources.loadImage(self.imagePath)
-      size = ctx.resources.measureImage(self.imagePath)
-    if image.int != 0 and size.w > 0 and size.h > 0:
-      drawImage(image, rect(0, 0, size.w, size.h), rect(view.x.int, view.y.int,
-          view.width.int, view.height.int))
+    let size = ctx.resources.measureImage(self.imagePath)
+    if size.w > 0 and size.h > 0:
+      drawImage(self.imagePath, rect(0, 0, size.w, size.h), rect(view.x.int,
+          view.y.int, view.width.int, view.height.int))
   lineRect(rect(view.x.int, view.y.int, view.width.int, view.height.int),
       color(88, 102, 105))
 

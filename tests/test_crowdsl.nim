@@ -248,6 +248,78 @@ panel (id "root"):
     finally:
       fontRelays = originalFontRelays
 
+  test "tabs command renders labels and clamps selected symbol":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let runtime = NestCrowRuntime.init()
+      var ui = UI.init()
+      ui.initContext(300, 120)
+      ui.loadFont("font", "", 18)
+
+      runtime.renderLayoutOnly(ui, parse("""
+define:
+  selected = 9
+  labels = []:
+    "one"
+    "two"
+tabs (id "tabs") labels selected:
+  width = fill
+  height = fit
+"""), 300, 120)
+
+      check not runtime.hasError
+      check runtime.get("selected").number == 1
+      check ui.widget(ui.id("tabs")).frame.width > 0
+      check ui.widget(ui.id(ui.id("tabs"), "tab", 0)).frame.width > 0
+      check ui.widget(ui.id(ui.id("tabs"), "tab", 1)).frame.width > 0
+    finally:
+      fontRelays = originalFontRelays
+
+  test "duck app renders with at least one buffer tab":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+        Font(size),
+      closeFont: proc(f: Font) =
+        discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+        TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      let app = NestCrowApp.init("apps/duck/main.nest")
+      var ui = UI.init()
+      ui.initContext(800, 600)
+      ui.loadFont("font", "", 18)
+      ui.loadFont("editor", "", 18)
+
+      app.runtime.renderLayoutOnly(ui, app.program, 800, 600)
+
+      check app.runtime.lastError == ""
+      check app.runtime.get("activeBuffer").number == 0
+      check app.runtime.get("buffers").items.len >= 1
+      check ui.widget(ui.id(ui.id("duck", "tabs"), "tab", 0)).frame.width > 0
+      check ui.widget(ui.id("duck", "editor", 0)).frame.height > 0
+    finally:
+      fontRelays = originalFontRelays
+
   test "counter example renders and button clicks mutate state":
     let app = NestCrowApp.init("apps/counter/main.nest")
     var ui = UI.init()
@@ -862,6 +934,7 @@ menuBar menuID:
       ui.mouseMove(itemFrame.x.toInt + 2, itemFrame.y.toInt + 2)
       ui.mouseDown()
       runtime.render(ui, source)
+      ui.mouseUp()
       runtime.render(ui, source)
       runtime.render(ui, source)
       runtime.render(ui, source)
@@ -872,7 +945,8 @@ menuBar menuID:
       let picked = runtime.get("pickedFile")
       check picked.kind == Text
       check picked.text == duckFile
-      let editorText = runtime.evaluator.exec(parse("editorText \"duck:editor\"\n"))
+      check runtime.get("activeBuffer").number == 1
+      let editorText = runtime.evaluator.exec(parse("editorText \"duck:editor:1\"\n"))
       check editorText.kind == Text
       check editorText.text == duckContent
     finally:

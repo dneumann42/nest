@@ -1,6 +1,6 @@
 import std/[math, macros, sets, strutils, tables]
 
-import layouts, components, palette, resources, widgets2
+import layouts, components, coords, palette, resources, widgets2
 export layouts, components
 import nest/screen
 
@@ -82,6 +82,7 @@ type
     dialogResults: Table[string, string]
     liveWidgetIDs: HashSet[WidgetID]
     previousWidgetIDs: HashSet[WidgetID]
+    pointerBlockFrames: seq[Frame]
     renderKeys: Table[WidgetID, string]
     idScopes: seq[string]
     eventActiveWidgets: HashSet[WidgetID]
@@ -229,6 +230,12 @@ proc widgetFrame*(
     discard
   (false, Frame())
 
+proc pointerInputBlocked*(self: UI, x, y: int): bool {.raises: [].} =
+  for frame in self.pointerBlockFrames:
+    if x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
+        y.toFloat >= frame.y and y.toFloat < frame.y + frame.height:
+      return true
+
 proc wantsTextInput*(self: UI): bool =
   self.context.draw.focusedWidget != InvalidWidgetID
 
@@ -272,9 +279,11 @@ proc setDrawCommandRelays*(
     self: var UI,
     commands: ptr seq[DrawCommand],
     measureText: proc(f: Font, text: string): TextExtent {.nimcall.},
+    measureImage: proc(path: string): TextExtent {.nimcall.},
 ) =
   self.context.draw.drawCommands = commands
   self.context.draw.commandMeasureText = measureText
+  self.context.draw.commandMeasureImage = measureImage
 
 proc setIO*(self: var UI, io: IO) =
   self.context.draw.io = io
@@ -1123,6 +1132,10 @@ proc endLayout*(self: var UI): bool {.discardable.} =
     self.frameByID.clear()
     for box in self.layout.boxes:
       self.frameByID[box.id] = box.frame
+    self.pointerBlockFrames.setLen(0)
+    for (component, widget) in self.components:
+      if component of Interactive or component.style.hasBackground:
+        self.pointerBlockFrames.add widget.frame
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:
@@ -1259,11 +1272,14 @@ template layout*(
   # avoiding doing that, is I want to allow loading ui from a dynamic module
   let previousDrawCommands {.gensym.} = screen.drawCommands
   let previousCommandMeasureText {.gensym.} = screen.commandMeasureText
+  let previousCommandMeasureImage {.gensym.} = screen.commandMeasureImage
   screen.drawCommands = drawContext.drawCommands
   screen.commandMeasureText = drawContext.commandMeasureText
+  screen.commandMeasureImage = drawContext.commandMeasureImage
   defer:
     screen.drawCommands = previousDrawCommands
     screen.commandMeasureText = previousCommandMeasureText
+    screen.commandMeasureImage = previousCommandMeasureImage
 
   ui.frameRedrawn = false
   ui.beginEvents(drawContext)
@@ -1306,11 +1322,14 @@ template layout*(
 template layout*(ui: var UI, blk: untyped): auto =
   let previousDrawCommands {.gensym.} = screen.drawCommands
   let previousCommandMeasureText {.gensym.} = screen.commandMeasureText
+  let previousCommandMeasureImage {.gensym.} = screen.commandMeasureImage
   screen.drawCommands = ui.context.draw.drawCommands
   screen.commandMeasureText = ui.context.draw.commandMeasureText
+  screen.commandMeasureImage = ui.context.draw.commandMeasureImage
   defer:
     screen.drawCommands = previousDrawCommands
     screen.commandMeasureText = previousCommandMeasureText
+    screen.commandMeasureImage = previousCommandMeasureImage
 
   ui.frameRedrawn = false
   ui.beginEvents(ui.context.draw)
@@ -1367,13 +1386,13 @@ proc updateScrollbarDrag(self: var UI, parent: Widget,
   if parent.frame.contains(context.mouseX, context.mouseY):
     if state.maxY > 0 and context.mouseWheelY != 0:
       state.targetY = (state.targetY - context.mouseWheelY * scrollWheelStep(
-          )).clamp(
+        )).clamp(
         -overscrollY, state.maxY + overscrollY
       )
       context.setActive(parent.id)
     if state.maxX > 0 and context.mouseWheelX != 0:
       state.targetX = (state.targetX - context.mouseWheelX * scrollWheelStep(
-          )).clamp(
+        )).clamp(
         -overscrollX, state.maxX + overscrollX
       )
       context.setActive(parent.id)
@@ -1455,9 +1474,12 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
 
   var drawContext = context
   let previousDrawCommands = screen.drawCommands
+  let previousCommandMeasureImage = screen.commandMeasureImage
   screen.drawCommands = drawContext.drawCommands
+  screen.commandMeasureImage = drawContext.commandMeasureImage
   defer:
     screen.drawCommands = previousDrawCommands
+    screen.commandMeasureImage = previousCommandMeasureImage
 
   drawContext.hasRedrawRequest = false
   fillRect(
@@ -1927,6 +1949,18 @@ proc container*(
   self.attach(result, Component(component))
   self.addChild(result)
 
+proc component*(
+    self: var UI,
+    id: WidgetID,
+    component: Component,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): Widget {.discardable, layoutOnly.} =
+  result = self.box(id, width = width, height = height, alignSelf = alignSelf)
+  self.setRenderKey(id, renderKey("component", width, height, alignSelf))
+  self.attach(result, component)
+  self.addChild(result)
+
 proc spacer*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget {.discardable, layoutOnly.} =
@@ -2021,6 +2055,9 @@ proc tabs*(
     width = fill(),
     height = fit(),
     alignSelf = AlignAuto,
+    gap = 0.0,
+    padding = 0.0,
+    style = ComponentStyle(),
     tabStyle = TabStyle(),
 ) =
   if labels.len == 0:
@@ -2037,17 +2074,24 @@ proc tabs*(
 
   let layoutParent = ui.box(id, width = width, height = height,
       alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("tabs:" & labels.join("|") & ":" & $selected,
-      width, height, alignSelf))
+  ui.setRenderKey(
+    id,
+    renderKey("tabs:" & labels.join("|") & ":" & $selected, width, height, alignSelf) &
+      "|" & $gap & "|" & $padding & "|" & $style.hasBackground & "|" &
+          $style.background & "|" & $style.hasOpacity & "|" & $style.opacity,
+  )
+  let panel = Panel.new()
+  panel.style = style
+  ui.attach(layoutParent, Component(panel))
   ui.pushLayout(layoutParent)
   for i, label in labels:
     let tabID = ui.id(id, "tab", i)
-    let box = ui.box(tabID, width = fill(), height = fixed(30))
+    let box = ui.box(tabID, width = fit(), height = fixed(30))
     ui.setRenderKey(tabID, renderKey("tab:" & label & ":" & $(i == selected),
-        fill(), fixed(30), AlignAuto))
+        fit(), fixed(30), AlignAuto))
     ui.attach(box, Component(TabButton.new(label, i == selected, tabStyle)))
     ui.addChild(box)
-  ui.row(cfg(width = fill(), height = fit(), gap = 0, padding = 0))
+  ui.row(cfg(width = fill(), height = fit(), gap = gap, padding = padding))
   discard ui.popLayout()
 
 proc label*(
@@ -2154,18 +2198,63 @@ proc image*(
   ui.attach(box, Component(img))
   ui.addChild(box)
 
+proc image*(
+    ui: var UI,
+    id: WidgetID,
+    path: string,
+    source: Rect,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("image:" & path & ":" & $source, width, height, alignSelf))
+  let img = ImageView.new(path, source)
+  ui.attach(box, Component(img))
+  ui.addChild(box)
+
 proc imageButton*(
     ui: var UI,
     id: WidgetID,
     path: string,
     width, height: SizePolicy,
     alignSelf = AlignAuto,
+    style = ComponentStyle(),
 ): bool {.discardable.} =
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("imageButton:" & path, width, height, alignSelf))
+  ui.setRenderKey(
+    id,
+    renderKey("imageButton:" & path, width, height, alignSelf) & "|" &
+      $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity &
+          "|" &
+      $style.opacity,
+  )
   let img = ImageButton.new(path)
+  img.style = style
+  ui.attach(box, Component(img))
+  ui.addChild(box)
+
+proc imageButton*(
+    ui: var UI,
+    id: WidgetID,
+    path: string,
+    source: Rect,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+    style = ComponentStyle(),
+): bool {.discardable.} =
+  if ui.phase == EventPhase:
+    return ui.clicked(id)
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(
+    id,
+    renderKey("imageButton:" & path & ":" & $source, width, height, alignSelf) &
+      "|" & $style.hasBackground & "|" & $style.background & "|" &
+      $style.hasOpacity & "|" & $style.opacity,
+  )
+  let img = ImageButton.new(path, source)
+  img.style = style
   ui.attach(box, Component(img))
   ui.addChild(box)
 
@@ -2183,8 +2272,8 @@ proc mesh2d*(
       state.changed = false
     return
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(id, renderKey("mesh2d:" & imagePath & ":" &
-      $state.points.len & ":" & $state.triangles.len, width, height, alignSelf))
+  ui.setRenderKey(id, renderKey("mesh2d:" & imagePath & ":" & $state,
+      width, height, alignSelf))
   let editor = Mesh2DEditor.new(state, imagePath)
   ui.attach(box, Component(editor))
   ui.addChild(box)
@@ -2209,7 +2298,7 @@ proc slider*(
           ui.context.update.mouseY.toFloat < f.y + f.height
         dragging = ui.context.draw.sliderDragging == id
       if (ui.context.update.mouseLeftDown and (hot or ui.active(id) or
-          dragging)) or((not ui.context.update.mouseLeftDown) and dragging):
+          dragging)) or ((not ui.context.update.mouseLeftDown) and dragging):
         let value = sliderValueFromMouse(
           f, ui.context.update.mouseX, ui.context.update.mouseY, minimum,
           maximum,

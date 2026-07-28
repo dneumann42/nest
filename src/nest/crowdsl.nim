@@ -647,6 +647,29 @@ proc tsvCellValue(content: string; row, col: int): string {.raises: [].} =
     return ""
   cells[col]
 
+proc textFindValue(
+    haystack, needle: string, start = 0, ignoreCase = false
+): int {.raises: [].} =
+  if needle.len == 0:
+    return -1
+  let
+    source = if ignoreCase: haystack.toLowerAscii else: haystack
+    wanted = if ignoreCase: needle.toLowerAscii else: needle
+  source.find(wanted, max(start, 0))
+
+proc lineTextAtValue(content: string, line: int): string {.raises: [].} =
+  let lines = content.splitLines
+  if line < 1 or line > lines.len:
+    ""
+  else:
+    lines[line - 1]
+
+proc lineCountValue(content: string): int {.raises: [].} =
+  if content.len == 0:
+    1
+  else:
+    content.count('\n') + 1
+
 proc wakeRuntimeUi() {.gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     runtimeWake()
@@ -1302,6 +1325,18 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       runtime.requireUi().markAllDirty()
     boolean(clicked)
 
+  runtime.evaluator.native "submitted":
+    discard layout
+    discard bodyNodes
+    if arguments.len == 0:
+      return boolean(false)
+    let submitted =
+      runtime.requireUi().inEventPhase() and
+      runtime.requireUi().submitted(runtime.asWidgetID(env.eval(arguments[0])))
+    if submitted:
+      runtime.requireUi().markAllDirty()
+    boolean(submitted)
+
   runtime.evaluator.native "keyPressed":
     discard layout
     discard bodyNodes
@@ -1497,6 +1532,16 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     except Exception:
       boolean(false)
 
+  runtime.evaluator.native "clipboardText":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    try:
+      text(getClipboardText())
+    except Exception:
+      text("")
+
   runtime.evaluator.native "windowWidth":
     discard env
     discard arguments
@@ -1597,6 +1642,79 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         items.add text(line)
     list(items)
 
+  runtime.evaluator.native "listAppend":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "listAppend expects list and value")
+    if values[0].kind != List:
+      raise newException(EvaluatorError, "listAppend expects list and value")
+    var items = values[0].items
+    items.add values[1]
+    list(items)
+
+  runtime.evaluator.native "textFind":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len < 2 or values.len > 4:
+      raise newException(
+        EvaluatorError, "textFind expects text, needle, optional start, and optional ignoreCase"
+      )
+    number(
+      textFindValue(
+        values[0].asString,
+        values[1].asString,
+        if values.len > 2: values[2].asNumber.int else: 0,
+        if values.len > 3: values[3].isTruthy else: false,
+      ).float64
+    )
+
+  runtime.evaluator.native "textSlice":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 3:
+      raise newException(EvaluatorError, "textSlice expects text, start, and stop")
+    let
+      source = values[0].asString
+      startIndex = values[1].asNumber.int.clamp(0, source.len)
+      stopIndex = values[2].asNumber.int.clamp(startIndex, source.len)
+    text(if stopIndex > startIndex: source[startIndex ..< stopIndex] else: "")
+
+  runtime.evaluator.native "lineCount":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "lineCount expects text")
+    number(lineCountValue(values[0].asString).float64)
+
+  runtime.evaluator.native "lineTextAt":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "lineTextAt expects text and line")
+    text(lineTextAtValue(values[0].asString, values[1].asNumber.int))
+
+  runtime.evaluator.native "pathBaseName":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "pathBaseName expects path")
+    text(values[0].asString.extractFilename)
+
+  runtime.evaluator.native "formatNow":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "formatNow expects one time format")
+    text(now().format(values[0].asString))
+
   runtime.evaluator.native "editorText":
     discard layout
     discard bodyNodes
@@ -1649,6 +1767,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if runtime.editorStates[key].text != replacement:
       runtime.editorStates[key].text = replacement
       runtime.editorStates[key].cursor = min(runtime.editorStates[key].cursor, replacement.len)
+      runtime.editorStates[key].selectionAnchor = -1
       runtime.editorStates[key].preferredColumn = -1
     nothing()
 
@@ -1663,7 +1782,155 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       runtime.editorStates[key] = EditorState.new("")
     runtime.editorStates[key].text = ""
     runtime.editorStates[key].cursor = 0
+    runtime.editorStates[key].selectionAnchor = -1
     runtime.editorStates[key].preferredColumn = -1
+    nothing()
+
+  runtime.evaluator.native "insertEditorText":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "insertEditorText expects editor id and text")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    runtime.editorStates[key].insertText(values[1].asString)
+    nothing()
+
+  runtime.evaluator.native "editorLine":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorLine expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    number(runtime.editorStates[key].lineColumn.line.float64)
+
+  runtime.evaluator.native "editorColumn":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorColumn expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    number(runtime.editorStates[key].lineColumn.column.float64)
+
+  runtime.evaluator.native "setEditorLineColumn":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 3:
+      raise newException(EvaluatorError, "setEditorLineColumn expects editor id, line, and column")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    let cursor = runtime.editorStates[key].cursorForLineColumn(
+      values[1].asNumber.int, values[2].asNumber.int
+    )
+    runtime.editorStates[key].setCursor(cursor)
+    runtime.editorStates[key].ensureCursorVisible = true
+    nothing()
+
+  runtime.evaluator.native "setEditorSelection":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 3:
+      raise newException(EvaluatorError, "setEditorSelection expects editor id, start, and stop")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    let
+      startIndex = values[1].asNumber.int.clamp(0, runtime.editorStates[key].text.len)
+      stopIndex = values[2].asNumber.int.clamp(0, runtime.editorStates[key].text.len)
+    runtime.editorStates[key].selectionAnchor = startIndex
+    runtime.editorStates[key].cursor = stopIndex
+    runtime.editorStates[key].ensureCursorVisible = true
+    nothing()
+
+  runtime.evaluator.native "selectEditorAll":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "selectEditorAll expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    runtime.editorStates[key].selectAll()
+    nothing()
+
+  runtime.evaluator.native "copyEditorSelection":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "copyEditorSelection expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    text(runtime.editorStates[key].copySelection())
+
+  runtime.evaluator.native "cutEditorSelection":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "cutEditorSelection expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    text(runtime.editorStates[key].cutSelection())
+
+  runtime.evaluator.native "pasteEditorClipboard":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "pasteEditorClipboard expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    runtime.editorStates[key].pasteClipboard()
+    nothing()
+
+  runtime.evaluator.native "deleteEditorSelection":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "deleteEditorSelection expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    discard runtime.editorStates[key].deleteSelection()
+    nothing()
+
+  runtime.evaluator.native "undoEditor":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "undoEditor expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key in runtime.editorStates:
+      runtime.editorStates[key].undo()
+    nothing()
+
+  runtime.evaluator.native "redoEditor":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "redoEditor expects editor id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key in runtime.editorStates:
+      runtime.editorStates[key].redo()
     nothing()
 
   runtime.evaluator.native "date":
@@ -2267,6 +2534,109 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         style = config.style,
       )
     )
+
+  runtime.evaluator.native "checkbox":
+    discard layout
+    let values = env.evalArgs(arguments)
+    if values.len < 3:
+      raise newException(EvaluatorError, "checkbox expects id, label, and checked")
+    let
+      id = runtime.asWidgetID(values[0])
+      labelText = values[1].asString
+      checked = values[2].isTruthy
+      config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].checkbox(
+      id,
+      labelText,
+      checked,
+      config.width,
+      config.height,
+      config.fontName,
+      config.alignSelf,
+    )
+    boolean(runtime.requireUi().inEventPhase() and runtime.requireUi().clicked(id))
+
+  runtime.evaluator.native "lineInput":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let
+      id =
+        if values.len > 0:
+          runtime.asWidgetID(values[0])
+        else:
+          runtime.requireUi().id("lineInput")
+      key =
+        if arguments.len > 0:
+          env.idKey(arguments[0], values[0].asString)
+        else:
+          "lineInput"
+      initial =
+        if values.len > 1:
+          values[1].asString
+        else:
+          ""
+      config = env.evalConfig(bodyNodes)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new(initial)
+    runtime.currentUi[].lineInput(
+      id,
+      runtime.editorStates[key],
+      config.width,
+      config.height,
+      config.fontName,
+      config.alignSelf,
+    )
+    nothing()
+
+  runtime.evaluator.native "modalDialog":
+    discard layout
+    if arguments.len < 2:
+      raise newException(EvaluatorError, "modalDialog expects id and open")
+    let values = env.evalArgs(arguments)
+    let
+      id = runtime.asWidgetID(values[0])
+      open = values[1].isTruthy
+      config = env.evalConfig(bodyNodes)
+    runtime.currentUi[].modalDialog(id, open, config):
+      discard runtime.renderNodes(env, bodyNodes.childNodes)
+    nothing()
+
+  runtime.evaluator.native "tabs":
+    discard layout
+    if arguments.len != 3:
+      raise newException(EvaluatorError, "tabs expects id, labels, and selected symbol")
+    if arguments[2].kind != Symbol:
+      raise newException(EvaluatorError, "tabs selected argument must be a symbol")
+
+    let
+      values = env.evalArgs(arguments)
+      id = runtime.asWidgetID(values[0])
+      selectedSymbol = arguments[2].symbol
+      config = env.evalConfig(bodyNodes)
+
+    var labels: seq[string]
+    if values[1].kind != List:
+      raise newException(EvaluatorError, "tabs labels must be a list")
+    for item in values[1].items:
+      labels.add item.asString
+
+    var selected = values[2].asNumber.int
+    try:
+      runtime.currentUi[].tabs(
+        id,
+        labels,
+        selected,
+        config.width,
+        config.height,
+        config.alignSelf,
+        config.gap,
+        config.padding,
+        config.style,
+      )
+    except Exception as error:
+      raise newException(EvaluatorError, error.msg)
+    env.set(selectedSymbol, number(selected.float64))
+    number(selected.float64)
 
   runtime.evaluator.native "editor":
     discard layout

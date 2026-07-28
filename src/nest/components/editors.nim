@@ -22,6 +22,8 @@ type
   EditorState* = ref object
     text*: string
     cursor*: int
+    selectionAnchor*: int
+    undoStack*, redoStack*: seq[string]
     preferredColumn*: int
     scrollX*, scrollY*: float64
     targetX*, targetY*: float64
@@ -43,10 +45,63 @@ type
     activeLine*: int
 
 proc new*(T: typedesc[EditorState], text = ""): T =
-  T(text: text, cursor: text.len, preferredColumn: -1)
+  T(text: text, cursor: text.len, selectionAnchor: -1, preferredColumn: -1)
 
 proc clampCursor*(state: EditorState) =
   state.cursor = clamp(state.cursor, 0, state.text.len)
+  if state.selectionAnchor >= 0:
+    state.selectionAnchor = clamp(state.selectionAnchor, 0, state.text.len)
+
+proc clearSelection*(state: EditorState) =
+  state.selectionAnchor = -1
+
+proc hasSelection*(state: EditorState): bool =
+  state.selectionAnchor >= 0 and state.selectionAnchor != state.cursor
+
+proc selectionRange*(state: EditorState): tuple[first, last: int] =
+  if state.hasSelection:
+    result.first = min(state.selectionAnchor, state.cursor)
+    result.last = max(state.selectionAnchor, state.cursor)
+  else:
+    result.first = state.cursor
+    result.last = state.cursor
+
+proc selectedText*(state: EditorState): string =
+  let r = state.selectionRange
+  if r.last > r.first:
+    state.text[r.first ..< r.last]
+  else:
+    ""
+
+proc resetPreferredColumn(state: EditorState) =
+  state.preferredColumn = -1
+
+proc rememberUndo(state: EditorState) =
+  if state.undoStack.len == 0 or state.undoStack[^1] != state.text:
+    state.undoStack.add state.text
+    if state.undoStack.len > 100:
+      state.undoStack.delete(0)
+  state.redoStack.setLen(0)
+
+proc undo*(state: EditorState) =
+  if state.undoStack.len == 0:
+    return
+  state.redoStack.add state.text
+  state.text = state.undoStack[^1]
+  state.undoStack.setLen(state.undoStack.len - 1)
+  state.cursor = min(state.cursor, state.text.len)
+  state.clearSelection()
+  state.resetPreferredColumn()
+
+proc redo*(state: EditorState) =
+  if state.redoStack.len == 0:
+    return
+  state.undoStack.add state.text
+  state.text = state.redoStack[^1]
+  state.redoStack.setLen(state.redoStack.len - 1)
+  state.cursor = min(state.cursor, state.text.len)
+  state.clearSelection()
+  state.resetPreferredColumn()
 
 proc new*(
     T: typedesc[Editor],
@@ -114,8 +169,30 @@ proc nextLineCursor(state: EditorState): int =
       state.cursorColumn()
   nextStart + min(column, nextEnd - nextStart)
 
-proc resetPreferredColumn(state: EditorState) =
-  state.preferredColumn = -1
+proc setCursor*(state: EditorState, cursor: int, selecting = false) =
+  let previous = state.cursor
+  if selecting and state.selectionAnchor < 0:
+    state.selectionAnchor = previous
+  state.cursor = cursor.clamp(0, state.text.len)
+  if not selecting:
+    state.clearSelection()
+  state.resetPreferredColumn()
+
+proc deleteSelection*(state: EditorState): bool {.discardable.} =
+  if not state.hasSelection:
+    return false
+  state.rememberUndo()
+  let r = state.selectionRange
+  state.text.delete(r.first .. r.last - 1)
+  state.cursor = r.first
+  state.clearSelection()
+  state.resetPreferredColumn()
+  true
+
+proc selectAll*(state: EditorState) =
+  state.selectionAnchor = 0
+  state.cursor = state.text.len
+  state.resetPreferredColumn()
 
 proc insertText*(state: EditorState, text: string, singleLine = false) =
   state.clampCursor()
@@ -126,41 +203,107 @@ proc insertText*(state: EditorState, text: string, singleLine = false) =
       text.replace("\r\n", "\n").replace("\r", "\n")
   if inserted.len == 0:
     return
+  state.rememberUndo()
+  if state.hasSelection:
+    let r = state.selectionRange
+    state.text.delete(r.first .. r.last - 1)
+    state.cursor = r.first
   state.text.insert(inserted, state.cursor)
   inc state.cursor, inserted.len
+  state.clearSelection()
   state.resetPreferredColumn()
 
 proc deleteBackward*(state: EditorState) =
   state.clampCursor()
+  if state.deleteSelection():
+    return
   if state.cursor > 0:
+    state.rememberUndo()
     state.text.delete(state.cursor - 1 .. state.cursor - 1)
     dec state.cursor
+    state.clearSelection()
     state.resetPreferredColumn()
 
 proc deleteForward*(state: EditorState) =
   state.clampCursor()
+  if state.deleteSelection():
+    return
   if state.cursor < state.text.len:
+    state.rememberUndo()
     state.text.delete(state.cursor .. state.cursor)
+    state.clearSelection()
     state.resetPreferredColumn()
 
 proc killToStart*(state: EditorState) =
   state.clampCursor()
   let start = state.text.lineStart(state.cursor)
   if state.cursor > start:
+    state.rememberUndo()
     state.text.delete(start .. state.cursor - 1)
     state.cursor = start
+    state.clearSelection()
     state.resetPreferredColumn()
 
 proc killToEnd*(state: EditorState) =
   state.clampCursor()
   let stop = state.text.lineEnd(state.cursor)
   if state.cursor < stop:
+    state.rememberUndo()
     state.text.delete(state.cursor .. stop - 1)
+    state.clearSelection()
     state.resetPreferredColumn()
+
+proc copySelection*(state: EditorState): string {.raises: [].} =
+  result = state.selectedText()
+  if result.len > 0:
+    try:
+      putClipboardText(result)
+    except Exception:
+      discard
+
+proc cutSelection*(state: EditorState): string {.raises: [].} =
+  result = state.copySelection()
+  if result.len > 0:
+    try:
+      discard state.deleteSelection()
+    except Exception:
+      discard
+
+proc pasteClipboard*(state: EditorState, singleLine = false) {.raises: [].} =
+  try:
+    state.insertText(getClipboardText(), singleLine)
+  except Exception:
+    discard
+
+proc lineColumn*(state: EditorState): tuple[line, column: int] =
+  result.line = 1
+  result.column = 1
+  let stop = state.cursor.clamp(0, state.text.len)
+  var lineStart = 0
+  for index in 0 ..< stop:
+    if state.text[index] == '\n':
+      inc result.line
+      lineStart = index + 1
+  result.column = stop - lineStart + 1
+
+proc cursorForLineColumn*(state: EditorState, line, column: int): int =
+  let wantedLine = max(line, 1)
+  let wantedColumn = max(column, 1)
+  var currentLine = 1
+  var lineStart = 0
+  var index = 0
+  while index < state.text.len and currentLine < wantedLine:
+    if state.text[index] == '\n':
+      inc currentLine
+      lineStart = index + 1
+    inc index
+  let lineStop = state.text.lineEnd(lineStart)
+  lineStart + min(wantedColumn - 1, lineStop - lineStart)
 
 proc handleKey*(state: EditorState, input: KeyInput, widget: Widget,
     ctx: var UpdateContext, singleLine = false) =
   let ctrl = CtrlPressed in input.mods
+  let shift = ShiftPressed in input.mods
   case input.key
   of KeyEsc:
     ctx.clearFocus()
@@ -172,46 +315,44 @@ proc handleKey*(state: EditorState, input: KeyInput, widget: Widget,
       state.insertText("\n")
   of KeyLeft:
     if state.cursor > 0:
-      dec state.cursor
-      state.resetPreferredColumn()
+      state.setCursor(state.cursor - 1, shift)
   of KeyRight:
     if state.cursor < state.text.len:
-      inc state.cursor
-      state.resetPreferredColumn()
+      state.setCursor(state.cursor + 1, shift)
   of KeyUp:
     state.preferredColumn =
       if state.preferredColumn >= 0: state.preferredColumn else: state.cursorColumn()
-    state.cursor = state.previousLineCursor()
+    state.setCursor(state.previousLineCursor(), shift)
   of KeyDown:
     state.preferredColumn =
       if state.preferredColumn >= 0: state.preferredColumn else: state.cursorColumn()
-    state.cursor = state.nextLineCursor()
+    state.setCursor(state.nextLineCursor(), shift)
   of KeyHome:
-    state.cursor = state.text.lineStart(state.cursor)
-    state.resetPreferredColumn()
+    state.setCursor(state.text.lineStart(state.cursor), shift)
   of KeyEnd:
-    state.cursor = state.text.lineEnd(state.cursor)
-    state.resetPreferredColumn()
+    state.setCursor(state.text.lineEnd(state.cursor), shift)
   of KeyBackspace:
     state.deleteBackward()
   of KeyDelete:
     state.deleteForward()
   of KeyA:
     if ctrl:
-      state.cursor = state.text.lineStart(state.cursor)
-      state.resetPreferredColumn()
+      if singleLine:
+        state.setCursor(state.text.lineStart(state.cursor), shift)
+      else:
+        state.selectAll()
   of KeyE:
     if ctrl:
-      state.cursor = state.text.lineEnd(state.cursor)
-      state.resetPreferredColumn()
+      state.setCursor(state.text.lineEnd(state.cursor), shift)
   of KeyB:
     if ctrl and state.cursor > 0:
-      dec state.cursor
-      state.resetPreferredColumn()
+      state.setCursor(state.cursor - 1, shift)
+  of KeyC:
+    if ctrl:
+      discard state.copySelection()
   of KeyF:
     if ctrl and state.cursor < state.text.len:
-      inc state.cursor
-      state.resetPreferredColumn()
+      state.setCursor(state.cursor + 1, shift)
   of KeyD:
     if ctrl:
       state.deleteForward()
@@ -224,6 +365,18 @@ proc handleKey*(state: EditorState, input: KeyInput, widget: Widget,
   of KeyU:
     if ctrl:
       state.killToStart()
+  of KeyV:
+    if ctrl:
+      state.pasteClipboard(singleLine)
+  of KeyX:
+    if ctrl:
+      discard state.cutSelection()
+  of KeyY:
+    if ctrl:
+      state.redo()
+  of KeyZ:
+    if ctrl:
+      state.undo()
   else:
     discard
 
@@ -793,6 +946,42 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
     max(textClipRight - textClipLeft, 0),
     max(f.height.toInt - 2, 0),
   )))
+  if self.state.hasSelection:
+    let selection = self.state.selectionRange
+    var lineStartIndex = 0
+    y = textTop - self.state.scrollY.toInt
+    for index, line in lines:
+      let lineStopIndex = lineStartIndex + line.len
+      let lineSelectionStart = max(selection.first, lineStartIndex)
+      let lineSelectionStop = min(selection.last, lineStopIndex)
+      if lineSelectionStop > lineSelectionStart and y + lineHeight >= f.y.toInt and
+          y <= (f.y + f.height).toInt:
+        let
+          startColumn = lineSelectionStart - lineStartIndex
+          stopColumn = lineSelectionStop - lineStartIndex
+          beforeStart =
+            if startColumn > 0:
+              line[0 ..< min(startColumn, line.len)]
+            else:
+              ""
+          selectedPrefix =
+            if stopColumn > 0:
+              line[0 ..< min(stopColumn, line.len)]
+            else:
+              ""
+          startX =
+            textLeft - self.state.scrollX.toInt +
+            ctx.resources.measureText(self.fontName, beforeStart.expandTabs).width
+          stopX =
+            textLeft - self.state.scrollX.toInt +
+            ctx.resources.measureText(self.fontName, selectedPrefix.expandTabs).width
+        fillRect(
+          rect(startX, y, max(stopX - startX, 2), lineHeight),
+          ctx.palette.backgroundActive,
+        )
+      lineStartIndex = lineStopIndex + 1
+      y += lineHeight
+
   y = textTop - self.state.scrollY.toInt
   for index, line in lines:
     if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:

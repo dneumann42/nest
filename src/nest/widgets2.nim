@@ -88,6 +88,7 @@ type
     redrawDelayMs*: int
     drawCommands*: ptr seq[DrawCommand]
     commandMeasureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
+    commandMeasureImage*: proc(path: string): TextExtent {.nimcall.}
     io*: IO
 
   UpdateContext* = object
@@ -161,7 +162,8 @@ proc setSliderValue*(ctx: var UpdateContext, id: WidgetID, value: float64) =
   ctx.sliderValues[id] = value
   ctx.sliderDragging = id
 
-proc switchState*(updateContext: var UpdateContext, drawContext: var DrawContext) =
+proc switchState*(updateContext: var UpdateContext,
+    drawContext: var DrawContext) =
   drawContext.hotWidgets = updateContext.hotWidgets
   drawContext.activeWidgets = updateContext.activeWidgets
   drawContext.focusedWidget = updateContext.focusedWidget

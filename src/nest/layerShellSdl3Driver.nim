@@ -10,6 +10,10 @@ import nest/[coords, input, screen]
 {.compile: "wayland/layer_shell_shim.c".}
 {.passL: "-lwayland-client".}
 
+proc imgLoad(file: cstring): ptr Surface {.
+  importc: "IMG_Load", cdecl, dynlib: "libSDL3_image.so"
+.}
+
 # --- Font handle management ---
 
 type
@@ -591,10 +595,9 @@ proc getImageSlot(img: screen.Image): ptr ImageSlot {.inline.} =
     nil
 
 proc sdlLoadImage(path: string): screen.Image =
-  ## SDL3 core supports BMP loading without SDL_image.
   if ren == nil:
     return screen.Image(0)
-  let surf = loadBMP(cstring(path))
+  let surf = imgLoad(cstring(path))
   if surf == nil:
     return screen.Image(0)
   let tex = createTextureFromSurface(ren, surf)
@@ -606,7 +609,8 @@ proc sdlLoadImage(path: string): screen.Image =
   destroySurface(surf)
   result = screen.Image(images.len)
 
-proc updatePixelImage*(img: screen.Image; width, height: int; pixels: openArray[uint8]): screen.Image =
+proc updatePixelImage*(img: screen.Image; width, height: int; pixels: openArray[
+    uint8]): screen.Image =
   ## Create or update an RGBA32 texture backed by the SDL renderer.
   ## The pixel buffer is tightly packed, four bytes per pixel.
   if ren == nil or width <= 0 or height <= 0 or pixels.len < width * height * 4:
@@ -623,7 +627,8 @@ proc updatePixelImage*(img: screen.Image; width, height: int; pixels: openArray[
     slot[].w = 0
     slot[].h = 0
 
-  let tex = createTexture(ren, PIXELFORMAT_RGBA32, TEXTUREACCESS_STATIC, width.cint, height.cint)
+  let tex = createTexture(ren, PIXELFORMAT_RGBA32, TEXTUREACCESS_STATIC,
+      width.cint, height.cint)
   if tex == nil:
     return screen.Image(0)
   discard setTextureBlendMode(tex, BLENDMODE_BLEND)

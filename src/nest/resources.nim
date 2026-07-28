@@ -48,7 +48,8 @@ proc get*(
   let met = resources.fontMetrics[resolvedName]
   result = (res, met)
 
-proc measureText*(resources: Resources, fontName, text: string): TextMeasurement =
+proc measureText*(resources: Resources, fontName,
+    text: string): TextMeasurement =
   let key = fontName & "\0" & text
   if resources.textMeasurements.hasKey(key):
     return resources.textMeasurements[key]
@@ -58,7 +59,7 @@ proc measureText*(resources: Resources, fontName, text: string): TextMeasurement
   result = TextMeasurement(
     width: extent.w,
     height:
-      if extent.h > 0:
+    if extent.h > 0:
         extent.h
       else:
         metrics.lineHeight,
@@ -66,23 +67,48 @@ proc measureText*(resources: Resources, fontName, text: string): TextMeasurement
   )
   resources.textMeasurements[key] = result
 
+proc resolveImagePath(path: string): string =
+  if path.len == 0:
+    return path
+  if path.isAbsolute:
+    return path.normalizedPath
+
+  for base in [getCurrentDir(), getAppDir()]:
+    let candidate = base / path
+    if candidate.fileExists:
+      return candidate.absolutePath.normalizedPath
+
+  path.absolutePath.normalizedPath
+
 proc loadImage*(resources: Resources, path: string): Image =
   if path.len == 0:
     return Image(0)
+  let resolvedPath = resolveImagePath(path)
   let modified =
     try:
-      getLastModificationTime(path)
+      getLastModificationTime(resolvedPath)
     except OSError:
       Time()
-  if resources.images.hasKey(path) and resources.imageTimes.getOrDefault(path) == modified:
-    return resources.images[path]
-  if resources.images.hasKey(path):
-    screen.freeImage(resources.images[path])
-  result = screen.loadImage(path)
-  resources.images[path] = result
-  resources.imageMeasurements[path] = screen.imageSize(result)
-  resources.imageTimes[path] = modified
+  if resources.images.hasKey(resolvedPath) and
+      resources.imageTimes.getOrDefault(resolvedPath) == modified:
+    return resources.images[resolvedPath]
+  if resources.images.hasKey(resolvedPath):
+    screen.freeImage(resources.images[resolvedPath])
+  result = screen.loadImage(resolvedPath)
+  if result.int == 0:
+    resources.images.del(resolvedPath)
+    resources.imageMeasurements.del(resolvedPath)
+    resources.imageTimes.del(resolvedPath)
+    return
+  resources.images[resolvedPath] = result
+  resources.imageMeasurements[resolvedPath] = screen.imageSize(result)
+  resources.imageTimes[resolvedPath] = modified
 
 proc measureImage*(resources: Resources, path: string): TextExtent =
-  discard resources.loadImage(path)
-  resources.imageMeasurements.getOrDefault(path)
+  let resolvedPath = resolveImagePath(path)
+  if resources.imageMeasurements.hasKey(resolvedPath):
+    return resources.imageMeasurements[resolvedPath]
+  let size = screen.measureImage(resolvedPath)
+  if size.w > 0 and size.h > 0:
+    resources.imageMeasurements[resolvedPath] = size
+  resources.imageMeasurements.getOrDefault(resolvedPath)

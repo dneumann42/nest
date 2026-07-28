@@ -49,7 +49,7 @@ column (id "root"):
   panel (id "bar"):
     width = fill
     height = fixed BarHeight
-    padding = NoSpacing
+    padding = 8
     alignItems = AlignStretch
     background = theme-color "panel"
     opacity = BarOpacity
