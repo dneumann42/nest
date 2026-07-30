@@ -34,6 +34,13 @@ define:
   MetricStorageWidth = 100
   MetricNetworkWidth = 200
 
+  NetworkRowGap = 4
+  NetworkRowHeight = 30
+  NetworkInputHeight = 30
+  NetworkConnectButtonWidth = 92
+  NetworkActionButtonWidth = 70
+  NetworkSelectedOpacity = 0.95
+
   MediaBarButtonWidth = 28
   MediaBarArtSize = 32
   MediaBarTitleWidth = 150

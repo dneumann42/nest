@@ -662,7 +662,11 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
   let isHot = widget.frame.frameContains(ctx.mouseX, ctx.mouseY)
   let handlesWheel = isHot or ctx.focused(widget.id)
   let f = widget.frame
-  var clickedScrollbar = false
+  var
+    clickedScrollbar = false
+    manualScroll = false
+    previousTargetX = self.state.targetX
+    previousTargetY = self.state.targetY
   if not self.singleLine and ctx.resources.ready:
     let (contentWidth, contentHeight) = self.editorContentSize(ctx.resources)
     self.state.contentWidth = contentWidth
@@ -678,11 +682,13 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
       self.state.targetY = (
         self.state.targetY - ctx.mouseWheelY * editorScrollWheelStep()
       ).clamp(-overscrollY, self.state.maxY + overscrollY)
+      manualScroll = true
       ctx.setActive(widget.id)
     if ctx.mouseWheelX != 0 and self.state.maxX > 0:
       self.state.targetX = (
         self.state.targetX - ctx.mouseWheelX * editorScrollWheelStep()
       ).clamp(-overscrollX, self.state.maxX + overscrollX)
+      manualScroll = true
       ctx.setActive(widget.id)
   if not self.singleLine and self.scrollbars:
     let
@@ -715,6 +721,7 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
         self.state.dragStartScroll +
         (ctx.mouseY.toFloat - self.state.dragStartMouse) * self.state.maxY / travel
       ).clamp(-overscrollY, self.state.maxY + overscrollY)
+      manualScroll = true
       ctx.setActive(widget.id)
     of EditorScrollX:
       let
@@ -725,6 +732,7 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
         self.state.dragStartScroll +
         (ctx.mouseX.toFloat - self.state.dragStartMouse) * self.state.maxX / travel
       ).clamp(-overscrollX, self.state.maxX + overscrollX)
+      manualScroll = true
       ctx.setActive(widget.id)
     of NoEditorScroll:
       discard
@@ -748,6 +756,12 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
         self.state.ensureCursorVisible = true
     elif ctx.focused(widget.id):
       ctx.clearFocus()
+
+  if manualScroll:
+    self.state.ensureCursorVisible = false
+  if abs(self.state.targetX - previousTargetX) > 0.01 or
+      abs(self.state.targetY - previousTargetY) > 0.01:
+    ctx.markDirty(widget.id)
 
   if not ctx.focused(widget.id):
     return

@@ -148,6 +148,16 @@ var drawCommands*: ptr seq[DrawCommand]
 var commandMeasureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
 var commandMeasureImage*: proc(path: string): TextExtent {.nimcall.}
 
+proc printableText*(text: string): string =
+  for ch in text:
+    case ch
+    of '\t':
+      result.add "    "
+    of '\0' .. '\b', '\l' .. '\r', '\14' .. '\31', '\127':
+      result.add ' '
+    else:
+      result.add ch
+
 proc createWindow*(requestedW, requestedH: int,
     fullScreen = false): ScreenLayout =
   result = ScreenLayout(width: requestedW, height: requestedH,
@@ -194,18 +204,20 @@ proc fontLineSkip*(f: Font): int =
   fontRelays.getFontMetrics(f).lineHeight
 
 proc measureText*(f: Font, text: string): TextExtent =
+  let rendered = printableText(text)
   if drawCommands != nil and commandMeasureText != nil:
-    return commandMeasureText(f, text)
-  fontRelays.measureText(f, text)
+    return commandMeasureText(f, rendered)
+  fontRelays.measureText(f, rendered)
 
 proc drawText*(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent =
+  let rendered = printableText(text)
   if drawCommands != nil:
-    result = fontRelays.measureText(f, text)
+    result = fontRelays.measureText(f, rendered)
     drawCommands[].add DrawCommand(
-      kind: DrawText, font: f, textX: x, textY: y, text: text, fg: fg, bg: bg
+      kind: DrawText, font: f, textX: x, textY: y, text: rendered, fg: fg, bg: bg
     )
     return
-  fontRelays.drawText(f, x, y, text, fg, bg)
+  fontRelays.drawText(f, x, y, rendered, fg, bg)
 
 proc fillRect*(r: Rect, color: Color) =
   if drawCommands != nil:
@@ -263,7 +275,8 @@ proc measureImage*(path: string): TextExtent =
   let image = loadImage(path)
   if image.int == 0:
     return TextExtent()
-  imageSize(image)
+  result = imageSize(image)
+  freeImage(image)
 
 proc drawImage*(path: string, src, dst: Rect) =
   if drawCommands != nil:
@@ -272,8 +285,10 @@ proc drawImage*(path: string, src, dst: Rect) =
     )
     return
   let image = loadImage(path)
-  if image.int != 0:
-    drawRelays.drawImage(image, src, dst)
+  if image.int == 0:
+    return
+  drawRelays.drawImage(image, src, dst)
+  freeImage(image)
 
 proc color*(r, g, b: uint8, a: uint8 = 255): Color =
   Color(r: r, g: g, b: b, a: a)

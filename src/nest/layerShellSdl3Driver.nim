@@ -2,7 +2,7 @@
 
 import sdl3
 import sdl3_ttf
-import std/[hashes, os, tables]
+import std/[atomics, hashes, os, tables]
 import nest/[coords, input, screen]
 
 {.compile: "wayland/wlr-layer-shell-unstable-v1-protocol.c".}
@@ -54,6 +54,10 @@ type
     fontId: int
     text: string
 
+  MeasureCacheEntry = object
+    extent: TextExtent
+    lastUsed: int
+
   TextCacheKey = object
     fontId: int
     fg: screen.Color
@@ -70,6 +74,7 @@ type
 
 var fonts: seq[FontSlot]
 
+const MaxMeasureCacheEntries = 512
 const MaxTextCacheEntries = 64
 
 var layerShellConfig* = LayerShellConfig(
@@ -185,7 +190,8 @@ var
   win: sdl3.Window
   ren: sdl3.Renderer
   images: seq[ImageSlot]
-  measureCache: Table[MeasureCacheKey, TextExtent]
+  measureCache: Table[MeasureCacheKey, MeasureCacheEntry]
+  measureCacheGeneration: int
   textCache: Table[TextCacheKey, TextCacheEntry]
   textCacheGeneration: int
   cursors: array[CursorKind, sdl3.Cursor]
@@ -196,12 +202,14 @@ var
   clipStack: seq[ClipState]
   currentClip: ClipState
   useLayerShell: bool
+  wakeEventQueued: Atomic[bool]
 
 proc currentSdlWindow*(): sdl3.Window =
   win
 
 proc clearMeasureCache() =
   measureCache.clear()
+  measureCacheGeneration = 0
 
 proc clearTextCache() =
   for entry in textCache.values:
@@ -265,6 +273,24 @@ proc applyClipState() =
     discard setRenderClipRect(ren, addr currentClip.rect)
   else:
     discard setRenderClipRect(ren, cast[ptr sdl3.Rect](nil))
+
+proc nextMeasureCacheGeneration(): int =
+  inc measureCacheGeneration
+  measureCacheGeneration
+
+proc evictMeasureCacheIfNeeded() =
+  while measureCache.len > MaxMeasureCacheEntries:
+    var oldestKey: MeasureCacheKey
+    var oldestGen = high(int)
+    var found = false
+    for key, entry in measureCache.pairs:
+      if entry.lastUsed < oldestGen:
+        oldestKey = key
+        oldestGen = entry.lastUsed
+        found = true
+    if not found:
+      break
+    measureCache.del(oldestKey)
 
 proc nextTextCacheGeneration(): int =
   inc textCacheGeneration
@@ -498,11 +524,16 @@ proc getCachedExtent(f: screen.Font; text: string): TextExtent =
     return TextExtent()
   let key = MeasureCacheKey(fontId: f.int, text: text)
   if key in measureCache:
-    return measureCache[key]
+    measureCache[key].lastUsed = nextMeasureCacheGeneration()
+    return measureCache[key].extent
   var w, h: cint
   discard sdl3_ttf.getStringSize(fp, cstring(text), 0, w, h)
   result = TextExtent(w: w, h: h)
-  measureCache[key] = result
+  measureCache[key] = MeasureCacheEntry(
+    extent: result,
+    lastUsed: nextMeasureCacheGeneration(),
+  )
+  evictMeasureCacheIfNeeded()
 
 proc sdlMeasureText(f: screen.Font; text: string): TextExtent =
   getCachedExtent(f, text)
@@ -798,7 +829,9 @@ proc translateMods(m: Keymod): set[Modifier] =
 proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
   e = input.Event(kind: NoEvent)
   let evType = uint32(sdlEvent.common.`type`)
-  if evType == uint32(EVENT_QUIT):
+  if evType == uint32(EVENT_USER):
+    wakeEventQueued.store(false, moRelease)
+  elif evType == uint32(EVENT_QUIT):
     e.kind = QuitEvent
   elif evType == uint32(EVENT_WINDOW_RESIZED):
     e.kind = WindowResizeEvent
@@ -884,9 +917,12 @@ proc sdlWaitEvent(e: var input.Event; timeoutMs: int;
 proc sdlGetTicks(): int = sdl3.getTicks().int
 proc sdlDelay(ms: int) = sdl3.delay(ms.uint32)
 proc wakeEventLoop*() {.gcsafe, raises: [].} =
+  if wakeEventQueued.exchange(true, moAcquireRelease):
+    return
   var event: sdl3.Event
   event.user.`type` = uint32(EVENT_USER)
-  discard pushEvent(event)
+  if not pushEvent(event):
+    wakeEventQueued.store(false, moRelease)
 
 proc sdlQuitRequest() =
   if win != nil:

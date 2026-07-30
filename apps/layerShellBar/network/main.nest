@@ -1,0 +1,315 @@
+import "../variables.nest"
+
+define:
+  closeID = (id "network" "close")
+  wifiOnID = (id "network" "wifi" "on")
+  wifiOffID = (id "network" "wifi" "off")
+  scanID = (id "network" "wifi" "scan")
+  disconnectWifiID = (id "network" "wifi" "disconnect")
+  manualSsidID = (id "network" "manual" "ssid")
+  manualPasswordID = (id "network" "manual" "password")
+  manualConnectID = (id "network" "manual" "connect")
+  editorID = (id "network" "editor")
+  nmAvailable = ""
+  editorAvailable = ""
+  wifiRadio = ""
+  activeSsid = ""
+  status = ""
+  manualSsid = ""
+  wifiRows = list
+  profileRows = list
+  ethernetRows = list
+  rowIndex = 0
+
+fun nmcliMissingMessage:
+  string "NetworkManager tools are unavailable"
+
+fun networkStatusCommand:
+  string "command -v nmcli >/dev/null 2>&1 || { printf '" (nmcliMissingMessage) "'; exit; }; nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: 'BEGIN{wifi=\"Wi-Fi offline\"; eth=\"Ethernet offline\"} $2==\"wifi\" && $3==\"connected\"{wifi=\"Wi-Fi \" $4 \" on \" $1} $2==\"ethernet\" && $3==\"connected\"{eth=\"Ethernet \" $4 \" on \" $1} END{printf \"%s\\n%s\", wifi, eth}'"
+
+fun wifiListCommand:
+  string "command -v nmcli >/dev/null 2>&1 || exit; active=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | awk -F: '$1==\"yes\" {print $2; exit}'); nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list --rescan no 2>/dev/null | ACTIVE_SSID=\"$active\" python3 -c 'import os,sys\nactive=os.environ.get(\"ACTIVE_SSID\",\"\")\nrows=[]; seen=set()\nfor line in sys.stdin:\n    parts=[]; cur=\"\"; esc=False\n    for ch in line.rstrip(\"\\n\"):\n        if esc:\n            cur += ch; esc = False\n        elif ch == \"\\\\\":\n            esc = True\n        elif ch == \":\":\n            parts.append(cur); cur = \"\"\n        else:\n            cur += ch\n    parts.append(cur)\n    ssid=(parts[0] if parts else \"\").strip()\n    if not ssid or ssid in seen: continue\n    seen.add(ssid)\n    signal=(parts[1] if len(parts)>1 else \"\").strip()\n    security=(parts[2] if len(parts)>2 else \"\").strip() or \"open\"\n    selected=\"yes\" if ssid==active else \"no\"\n    rows.append(f\"network\\t{ssid}\\t{selected}\\t{ssid}  {signal}%  {security}\")\nif rows:\n    print(\"\\n\".join(rows))\nelse:\n    print(\"message\\t\\tno\\tNo Wi-Fi networks found\")'"
+
+fun wifiProfilesCommand:
+  string "command -v nmcli >/dev/null 2>&1 || exit; nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2==\"802-11-wireless\" && $1!=\"\" {print \"profile\\t\" $1}' | awk 'NF{found=1; print} END{if (!found) print \"message\\tNo saved Wi-Fi profiles\"}'"
+
+fun ethernetListCommand:
+  string "command -v nmcli >/dev/null 2>&1 || exit; nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null | awk -F: '$2==\"ethernet\" {name=$4; if (name==\"\") name=\"unconfigured\"; printf \"device\\t%s\\t%s\\t%s\\n\", $1, $3, name}' | awk 'NF{found=1; print} END{if (!found) print \"message\\t\\t\\tNo Ethernet devices found\"}'"
+
+fun availableCommand commandName:
+  string "command -v " commandName " >/dev/null 2>&1 && printf yes || printf no"
+
+fun wifiRadioCommand:
+  string "command -v nmcli >/dev/null 2>&1 || exit; nmcli radio wifi 2>/dev/null"
+
+fun activeSsidCommand:
+  string "command -v nmcli >/dev/null 2>&1 || exit; nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | awk -F: '$1==\"yes\" {print $2; exit}'"
+
+fun wifiPowerCommand action:
+  string "nmcli radio wifi " action
+
+fun wifiScanCommand:
+  string "nmcli device wifi rescan"
+
+fun wifiDisconnectCommand:
+  string "dev=$(nmcli -t -f DEVICE,TYPE,STATE device status | awk -F: '$2==\"wifi\" && $3==\"connected\" {print $1; exit}'); [ -n \"$dev\" ] && nmcli device disconnect \"$dev\""
+
+fun wifiConnectCommand row:
+  string "row=" (shellQuote row) "; kind=$(printf '%s' \"$row\" | cut -f1); ssid=$(printf '%s' \"$row\" | cut -f2); selected=$(printf '%s' \"$row\" | cut -f3); [ \"$kind\" = network ] || exit 0; if [ \"$selected\" = yes ]; then dev=$(nmcli -t -f DEVICE,TYPE,STATE device status | awk -F: '$2==\"wifi\" && $3==\"connected\" {print $1; exit}'); [ -n \"$dev\" ] && nmcli device disconnect \"$dev\"; else nmcli device wifi connect \"$ssid\"; fi"
+
+fun wifiProfileConnectCommand profile:
+  string "profile=" (shellQuote profile) "; [ \"$profile\" = \"" (nmcliMissingMessage) "\" ] || nmcli connection up \"$profile\""
+
+fun wifiManualConnectCommand ssid password:
+  if (= password ""):
+    then:
+      string "ssid=" (shellQuote ssid) "; [ -n \"$ssid\" ] && nmcli device wifi connect \"$ssid\""
+    else:
+      string "ssid=" (shellQuote ssid) "; password=" (shellQuote password) "; [ -n \"$ssid\" ] && nmcli device wifi connect \"$ssid\" password \"$password\""
+
+fun ethernetActionCommand row action:
+  string "row=" (shellQuote row) "; dev=$(printf '%s' \"$row\" | cut -f1); [ \"$dev\" = \"" (nmcliMissingMessage) "\" ] || nmcli device " action " \"$dev\""
+
+fun connectionEditorCommand:
+  string "nm-connection-editor >/dev/null 2>&1"
+
+set nmAvailable (shell (availableCommand "nmcli"))
+set editorAvailable (shell (availableCommand "nm-connection-editor"))
+set wifiRadio (shellAsync (id "network" "wifi-radio-query") (wifiRadioCommand) FastPollInterval)
+set activeSsid (shellAsync (id "network" "active-ssid-query") (activeSsidCommand) FastPollInterval)
+set status (shellAsync (id "network" "status-query") (networkStatusCommand) FastPollInterval)
+set manualSsid (editorText manualSsidID)
+set wifiRows (textLines (shellAsync (id "network" "wifi-list-query") (wifiListCommand) StoragePollInterval))
+set profileRows (textLines (shellAsync (id "network" "profiles-query") (wifiProfilesCommand) StoragePollInterval))
+set ethernetRows (textLines (shellAsync (id "network" "ethernet-query") (ethernetListCommand) StoragePollInterval))
+set rowIndex 0
+
+events:
+  when (keyPressed "escape"):
+    closeDialog ""
+  when (clicked closeID):
+    closeDialog ""
+  when (and (= nmAvailable "yes") (clicked wifiOnID)):
+    shellAsync (id "network" "wifi" "on-action") (wifiPowerCommand "on") ImmediateInterval
+  when (and (= nmAvailable "yes") (clicked wifiOffID)):
+    shellAsync (id "network" "wifi" "off-action") (wifiPowerCommand "off") ImmediateInterval
+  when (and (= nmAvailable "yes") (clicked scanID)):
+    shellAsync (id "network" "wifi" "scan-action") (wifiScanCommand) ImmediateInterval
+  when (and (= nmAvailable "yes") (clicked disconnectWifiID)):
+    shellAsync (id "network" "wifi" "disconnect-action") (wifiDisconnectCommand) ImmediateInterval
+  when (and (= nmAvailable "yes") (clicked manualConnectID)):
+    shellAsync (id "network" "manual" "connect-action") (wifiManualConnectCommand (editorText manualSsidID) (editorText manualPasswordID)) ImmediateInterval
+  when (and (= editorAvailable "yes") (clicked editorID)):
+    shellLaunch (connectionEditorCommand)
+  for rowText (iter wifiRows):
+    when (clicked (id "network" "wifi" "row" rowText)):
+      shellAsync (id "network" "wifi" "connect" rowText) (wifiConnectCommand rowText) ImmediateInterval
+  for profile (iter profileRows):
+    when (clicked (id "network" "profile" "row" profile)):
+      shellAsync (id "network" "profile" "connect" profile) (wifiProfileConnectCommand profile) ImmediateInterval
+  for rowText (iter ethernetRows):
+    when (clicked (id "network" "ethernet" "up" rowText)):
+      shellAsync (id "network" "ethernet" "up-action" rowText) (ethernetActionCommand rowText "connect") ImmediateInterval
+    when (clicked (id "network" "ethernet" "down" rowText)):
+      shellAsync (id "network" "ethernet" "down-action" rowText) (ethernetActionCommand rowText "disconnect") ImmediateInterval
+
+card (id "network" "panel"):
+  width = fill
+  height = fill
+  padding = DialogPaddingWide
+  gap = DialogSectionGap
+  alignItems = AlignStretch
+  background = theme-color "panel"
+  opacity = DialogPanelOpacity
+  dialogHeader (id "network" "header"):
+    width = fill
+    height = fixed DialogHeaderHeightTall
+    padding = DialogHeaderPadding
+    alignItems = AlignCenter
+    label (id "network" "title") "Network":
+      width = fill
+      height = fit
+    button closeID "x":
+      width = fixed DialogCloseButtonWidthLarge
+      height = fit
+  column (id "network" "body"):
+    width = fill
+    height = fill
+    gap = DialogSectionGap
+    scrollY = true
+    label (id "network" "status") (pick (= status "") "Loading network status..." status):
+      width = fill
+      height = fit
+      textScroll = true
+    if (= nmAvailable "yes"):
+      then:
+        row (id "network" "wifi-actions"):
+          width = fill
+          height = fit
+          gap = DialogGap
+          if (= wifiRadio "disabled"):
+            then:
+              button wifiOnID "Wi-Fi on":
+                width = fill
+                height = fit
+            else:
+              if (= wifiRadio ""):
+                then:
+                  label (id "network" "wifi-actions-loading") "Loading Wi-Fi controls...":
+                    width = fill
+                    height = fit
+                else:
+                  button wifiOffID "Wi-Fi off":
+                    width = fill
+                    height = fit
+                  button scanID "Scan":
+                    width = fill
+                    height = fit
+                  if (not (= activeSsid "")):
+                    then:
+                      button disconnectWifiID "Disconnect":
+                        width = fill
+                        height = fit
+      else:
+        label (id "network" "unavailable") (nmcliMissingMessage):
+          width = fill
+          height = fit
+    label (id "network" "wifi-heading") "Wi-Fi networks":
+      width = fill
+      height = fit
+    column (id "network" "wifi-list"):
+      width = fill
+      height = fit
+      gap = NetworkRowGap
+      if (= nmAvailable "yes"):
+        then:
+          if (empty? wifiRows):
+            then:
+              label (id "network" "wifi-loading") (pick (= wifiRadio "disabled") "Wi-Fi is off" "Loading Wi-Fi networks..."):
+                width = fill
+                height = fit
+            else:
+              for rowText (iter wifiRows):
+                if (= (tsvCell rowText 0 0) "network"):
+                  then:
+                    button (id "network" "wifi" "row" rowText) (tsvCell rowText 0 3):
+                      width = fill
+                      height = fixed NetworkRowHeight
+                      background = (pick (= (tsvCell rowText 0 2) "yes") (theme-color "primary") (theme-color "background"))
+                      opacity = (pick (= (tsvCell rowText 0 2) "yes") NetworkSelectedOpacity DialogPanelOpacity)
+                      textScroll = true
+                  else:
+                    label (id "network" "wifi" "message" rowText) (tsvCell rowText 0 3):
+                      width = fill
+                      height = fit
+        else:
+          label (id "network" "wifi-disabled") "Install NetworkManager to manage Wi-Fi here":
+            width = fill
+            height = fit
+    if (= nmAvailable "yes"):
+      then:
+        row (id "network" "manual-row"):
+          width = fill
+          height = fit
+          gap = DialogGap
+          alignItems = AlignCenter
+          lineInput manualSsidID "":
+            width = fill
+            height = fixed NetworkInputHeight
+          lineInput manualPasswordID "":
+            width = fill
+            height = fixed NetworkInputHeight
+          if (not (= manualSsid "")):
+            then:
+              button manualConnectID "Connect":
+                width = fixed NetworkConnectButtonWidth
+                height = fit
+            else:
+              label (id "network" "manual-placeholder") "SSID required":
+                width = fixed NetworkConnectButtonWidth
+                height = fit
+    label (id "network" "profiles-heading") "Saved Wi-Fi":
+      width = fill
+      height = fit
+    column (id "network" "profiles-list"):
+      width = fill
+      height = fit
+      gap = NetworkRowGap
+      if (= nmAvailable "yes"):
+        then:
+          if (empty? profileRows):
+            then:
+              label (id "network" "profiles-loading") "Loading saved Wi-Fi...":
+                width = fill
+                height = fit
+            else:
+              for profile (iter profileRows):
+                if (= (tsvCell profile 0 0) "profile"):
+                  then:
+                    button (id "network" "profile" "row" profile) (tsvCell profile 0 1):
+                      width = fill
+                      height = fixed NetworkRowHeight
+                      background = (pick (= (tsvCell profile 0 1) activeSsid) (theme-color "primary") (theme-color "background"))
+                      opacity = (pick (= (tsvCell profile 0 1) activeSsid) NetworkSelectedOpacity DialogPanelOpacity)
+                      textScroll = true
+                  else:
+                    label (id "network" "profile" "message" profile) (tsvCell profile 0 1):
+                      width = fill
+                      height = fit
+        else:
+          label (id "network" "profiles-empty") "Saved profiles unavailable":
+            width = fill
+            height = fit
+    label (id "network" "ethernet-heading") "Ethernet":
+      width = fill
+      height = fit
+    column (id "network" "ethernet-list"):
+      width = fill
+      height = fit
+      gap = NetworkRowGap
+      if (= nmAvailable "yes"):
+        then:
+          if (empty? ethernetRows):
+            then:
+              label (id "network" "ethernet-loading") "Loading Ethernet devices...":
+                width = fill
+                height = fit
+            else:
+              for rowText (iter ethernetRows):
+                if (= (tsvCell rowText 0 0) "device"):
+                  then:
+                    row (id "network" "ethernet" "row" rowText):
+                      width = fill
+                      height = fixed NetworkRowHeight
+                      gap = DialogGap
+                      alignItems = AlignCenter
+                      label (id "network" "ethernet" "label" rowText) (string (tsvCell rowText 0 1) "  " (tsvCell rowText 0 2) "  " (tsvCell rowText 0 3)):
+                        width = fill
+                        height = fit
+                        textScroll = true
+                      if (= (tsvCell rowText 0 2) "connected"):
+                        then:
+                          button (id "network" "ethernet" "down" rowText) "Down":
+                            width = fixed NetworkActionButtonWidth
+                            height = fit
+                        else:
+                          button (id "network" "ethernet" "up" rowText) "Up":
+                            width = fixed NetworkActionButtonWidth
+                            height = fit
+                  else:
+                    label (id "network" "ethernet" "message" rowText) (tsvCell rowText 0 3):
+                      width = fill
+                      height = fit
+        else:
+          label (id "network" "ethernet-empty") "Ethernet unavailable":
+            width = fill
+            height = fit
+    if (= editorAvailable "yes"):
+      then:
+        button editorID "Connection editor":
+          width = fill
+          height = fit
+      else:
+        label (id "network" "editor-unavailable") "Connection editor is not installed":
+          width = fill
+          height = fit

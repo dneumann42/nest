@@ -1,0 +1,6 @@
+title = "Network"
+width = 620
+height = 520
+layerShell = "top-right"
+namespace = "nest-network"
+exclusiveZone = -1

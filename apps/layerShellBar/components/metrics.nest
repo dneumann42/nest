@@ -43,7 +43,16 @@ component storageMeter key:
     textScroll = true
 
 component networkMeter key:
-  button (id (eval key) "network") (string "⇅ " (shellAsync (id (eval key) "network-query") (networkCommand (eval key)) FastPollInterval)):
+  define:
+    keyText = (eval key)
+    buttonID = (id keyText "network")
+    status = (shellAsync (id keyText "network-query") (networkCommand keyText) FastPollInterval)
+
+  events:
+    when (and (clicked buttonID) (not (dialogOpen? "network"))):
+      openDialog "network" "./network" "" buttonID
+
+  button buttonID (string "⇅ " status):
     width = fixed MetricNetworkWidth
     height = fit
     background = tint "sky"

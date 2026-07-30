@@ -15,6 +15,11 @@ type
     images: TableRef[string, Image]
     imageMeasurements: TableRef[string, TextExtent]
     imageTimes: TableRef[string, Time]
+    imageLastUsed: TableRef[string, int]
+    imageGeneration: ref int
+
+const MaxTextMeasurements = 1024
+const MaxImages = 32
 
 proc new*(T: typedesc[Resources]): T =
   T(
@@ -24,6 +29,8 @@ proc new*(T: typedesc[Resources]): T =
     images: newTable[string, Image](),
     imageMeasurements: newTable[string, TextExtent](),
     imageTimes: newTable[string, Time](),
+    imageLastUsed: newTable[string, int](),
+    imageGeneration: new(int),
   )
 
 proc ready*(resources: Resources): bool =
@@ -65,6 +72,8 @@ proc measureText*(resources: Resources, fontName,
         metrics.lineHeight,
     lineHeight: metrics.lineHeight,
   )
+  if resources.textMeasurements.len >= MaxTextMeasurements:
+    resources.textMeasurements.clear()
   resources.textMeasurements[key] = result
 
 proc resolveImagePath(path: string): string =
@@ -80,6 +89,30 @@ proc resolveImagePath(path: string): string =
 
   path.absolutePath.normalizedPath
 
+proc nextImageGeneration(resources: Resources): int =
+  inc resources.imageGeneration[]
+  resources.imageGeneration[]
+
+proc evictImagesIfNeeded(resources: Resources) =
+  while resources.images.len > MaxImages:
+    var oldestPath: string
+    var oldestGen = high(int)
+    var found = false
+    for path, image in resources.images.pairs:
+      discard image
+      let lastUsed = resources.imageLastUsed.getOrDefault(path)
+      if lastUsed < oldestGen:
+        oldestPath = path
+        oldestGen = lastUsed
+        found = true
+    if not found:
+      break
+    screen.freeImage(resources.images[oldestPath])
+    resources.images.del(oldestPath)
+    resources.imageMeasurements.del(oldestPath)
+    resources.imageTimes.del(oldestPath)
+    resources.imageLastUsed.del(oldestPath)
+
 proc loadImage*(resources: Resources, path: string): Image =
   if path.len == 0:
     return Image(0)
@@ -91,6 +124,7 @@ proc loadImage*(resources: Resources, path: string): Image =
       Time()
   if resources.images.hasKey(resolvedPath) and
       resources.imageTimes.getOrDefault(resolvedPath) == modified:
+    resources.imageLastUsed[resolvedPath] = resources.nextImageGeneration()
     return resources.images[resolvedPath]
   if resources.images.hasKey(resolvedPath):
     screen.freeImage(resources.images[resolvedPath])
@@ -99,14 +133,18 @@ proc loadImage*(resources: Resources, path: string): Image =
     resources.images.del(resolvedPath)
     resources.imageMeasurements.del(resolvedPath)
     resources.imageTimes.del(resolvedPath)
+    resources.imageLastUsed.del(resolvedPath)
     return
   resources.images[resolvedPath] = result
   resources.imageMeasurements[resolvedPath] = screen.imageSize(result)
   resources.imageTimes[resolvedPath] = modified
+  resources.imageLastUsed[resolvedPath] = resources.nextImageGeneration()
+  resources.evictImagesIfNeeded()
 
 proc measureImage*(resources: Resources, path: string): TextExtent =
   let resolvedPath = resolveImagePath(path)
   if resources.imageMeasurements.hasKey(resolvedPath):
+    resources.imageLastUsed[resolvedPath] = resources.nextImageGeneration()
     return resources.imageMeasurements[resolvedPath]
   let size = screen.measureImage(resolvedPath)
   if size.w > 0 and size.h > 0:

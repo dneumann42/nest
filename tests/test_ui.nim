@@ -195,6 +195,8 @@ suite "ui layout nesting":
       check measured.width == 45
       check measured.height == 18
       check measured.lineHeight == 22
+      check printableText("A\tB\nC") == "A    B C"
+      check resources.measureText("body", "A\tB").width == 54
 
       let label = Label.new("Paths", "body")
       let intrinsic = Component(label).measure(resources)

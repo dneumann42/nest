@@ -371,6 +371,7 @@ proc beginInputFrame*(self: var UI) =
   self.context.update.mouseWheelX = 0
   self.context.update.mouseWheelY = 0
   self.context.update.submittedWidgets.clear()
+  self.context.update.dirtyWidgets.clear()
   self.context.update.sliderValues.clear()
 
 proc finishInputFrame*(self: var UI) =
@@ -380,6 +381,7 @@ proc finishInputFrame*(self: var UI) =
   self.context.update.mouseWheelX = 0
   self.context.update.mouseWheelY = 0
   self.context.update.submittedWidgets.clear()
+  self.context.update.dirtyWidgets.clear()
   self.context.update.sliderValues.clear()
 
 proc mouseMove*(self: var UI, x, y: int) =
@@ -1302,10 +1304,13 @@ template layout*(
     let beforeFocused {.gensym.} = drawContext.focusedWidget
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
+    updateContext.dirtyWidgets.clear()
     updateContext.resources = drawContext.resources
     updateContext.sliderDragging =
       if updateContext.mouseLeftDown: drawContext.sliderDragging else: InvalidWidgetID
     ui.update(updateContext)
+    for id {.gensym.} in updateContext.dirtyWidgets.items:
+      ui.markDirty(id)
     ui.markStateChanges(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext
     )
@@ -1352,6 +1357,7 @@ template layout*(ui: var UI, blk: untyped): auto =
     let beforeFocused {.gensym.} = ui.context.draw.focusedWidget
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
+    ui.context.update.dirtyWidgets.clear()
     ui.context.update.resources = ui.context.draw.resources
     ui.context.update.sliderDragging =
       if ui.context.update.mouseLeftDown:
@@ -1359,6 +1365,8 @@ template layout*(ui: var UI, blk: untyped): auto =
       else:
         InvalidWidgetID
     ui.update(ui.context.update)
+    for id {.gensym.} in ui.context.update.dirtyWidgets.items:
+      ui.markDirty(id)
     ui.markStateChanges(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, ui.context.update
     )

@@ -204,6 +204,16 @@ label (id "value") value:
     check not componentSource.contains("rows[:5]")
     check componentSource.contains("for item in rows:")
 
+  test "network dialog exposes only actionable controls":
+    let dialogSource = readFile("apps/layerShellBar/network/main.nest")
+
+    check dialogSource.contains("Loading network status...")
+    check dialogSource.contains("Loading Wi-Fi networks...")
+    check dialogSource.contains("background = (pick (= (tsvCell rowText 0 2) \"yes\")")
+    check dialogSource.contains("when (and (= editorAvailable \"yes\") (clicked editorID)):")
+    check dialogSource.contains("shellLaunch (connectionEditorCommand)")
+    check not dialogSource.contains("editor-action")
+
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -472,6 +482,7 @@ tabs (id "tabs") labels selected:
         ("apps/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu", "panel")),
         ("apps/layerShellBar/volume/main.nest", 260, 170, ui.id("volume", "panel")),
         ("apps/layerShellBar/notifications/main.nest", 420, 260, ui.id("notifications", "panel")),
+        ("apps/layerShellBar/network/main.nest", 620, 520, ui.id("network", "panel")),
       ]:
         let (path, width, height, rootID) = spec
         let dialogApp = NestCrowApp.init(path)

@@ -101,6 +101,7 @@ type
     activeWidgets*: HashSet[WidgetID]
     focusedWidget*: WidgetID
     submittedWidgets*: HashSet[WidgetID]
+    dirtyWidgets*: HashSet[WidgetID]
     sliderValues*: Table[WidgetID, float64]
     sliderDragging*: WidgetID
     keyInputs*: seq[KeyInput]
@@ -151,6 +152,10 @@ proc clippedRect*(ctx: DrawContext, r: Rect): Rect =
 
 proc submit*(ctx: var UpdateContext, id: WidgetID) =
   ctx.submittedWidgets.incl(id)
+
+proc markDirty*(ctx: var UpdateContext, id: WidgetID) =
+  if id != InvalidWidgetID:
+    ctx.dirtyWidgets.incl(id)
 
 proc requestRedrawAfter*(ctx: var DrawContext, ms: int) =
   let delay = max(ms, 0)
