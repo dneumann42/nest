@@ -1,7 +1,8 @@
 import std/[sets, strutils, unittest]
 
 import nest as nestApp
-import nest/[appConfig, coords, dialogAnchors, layerShellSdl3Driver, palette, resources, ui]
+import nest/[appConfig, coords, dialogAnchors, layerShellSdl3Driver, palette,
+    perf, resources, ui]
 import nest/screen
 
 const
@@ -51,6 +52,19 @@ proc checkFrame(box: Widget, x, y, width, height: float64) =
   check frame.height == height
 
 suite "ui layout nesting":
+  test "perf stats track bounded rolling fps":
+    var stats = PerfStats.init(historySize = 3)
+    stats.recordFrame(1000)
+    stats.recordFrame(1016)
+    stats.recordFrame(1032)
+    stats.recordFrame(1064)
+    stats.recordFrame(1080)
+
+    check stats.frameCount == 4
+    check abs(stats.latestFps - 62.5) < 0.01
+    check abs(stats.averageFps(3) - 46.875) < 0.01
+    check stats.summary.contains("frames=4")
+
   test "lerp interpolates toward a target":
     check lerp(0.0, 10.0, 0.25) == 2.5
 
@@ -89,7 +103,8 @@ suite "ui layout nesting":
 
     check dark.panelBackground != light.panelBackground
     check dark.textColor != light.textColor
-    check dark.colorByName("panel-background", color(0, 0, 0)) == dark.panelBackground
+    check dark.colorByName("panel-background", color(0, 0, 0)) ==
+        dark.panelBackground
     check light.colorByName("card-accent", color(0, 0, 0)) == light.cardAccent
 
   test "fit button remains visible after a fill label in a row":
@@ -320,19 +335,19 @@ suite "ui layout nesting":
       textDraws: seq[TextDraw]
     windowRelays = WindowRelays(
       createWindow: proc(layout: var ScreenLayout) =
-        discard,
+      discard,
       refresh: proc() =
-        discard,
+      discard,
       saveState: proc() =
-        discard,
+      discard,
       restoreState: proc() =
-        discard,
+      discard,
       setClipRect: proc(r: Rect) =
-        currentClip = r,
+      currentClip = r,
       setCursor: proc(c: CursorKind) =
-        discard,
+      discard,
       setWindowTitle: proc(title: string) =
-        discard,
+      discard,
     )
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =

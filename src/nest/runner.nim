@@ -6,6 +6,7 @@ import nest/[
   dialogAnchors,
   errorDialogs,
   externalSignals,
+  perf,
   projectConfig,
   runtime,
   singleInstance,
@@ -15,12 +16,19 @@ import nest/[
 proc needsSingleInstance(config: ProjectConfig; dialogMode: bool): bool =
   not dialogMode and config.layerShell.normalize in ["top", "bottom", "left", "right"]
 
+proc envBenchmarkFrames(): int =
+  try:
+    parseInt(getEnv("NEST_BENCHMARK_FRAMES", "0"))
+  except ValueError:
+    0
+
 proc runProject*(
-    projectDir: string,
-    dialogData = "",
-    dialogMode = false,
-    dialogResultPath = "",
-    dialogAnchor = "",
+    projectDir: string;
+    dialogData = "";
+    dialogMode = false;
+    dialogResultPath = "";
+    dialogAnchor = "";
+    perfOptions = PerfOptions();
 ): string =
   discard dialogResultPath
   let dir = projectDir.normalizedPath
@@ -42,18 +50,43 @@ proc runProject*(
   let app = NestCrowApp.init(mainPath)
   app.runtime.dialogData = dialogData
   installExternalSignalHandlers()
+  var
+    options = perfOptions
+    stats = PerfStats.init()
+  if options.benchmarkFrames <= 0:
+    options.benchmarkFrames = envBenchmarkFrames()
+  options.overlay =
+    options.overlay or getEnv("NEST_PERF_OVERLAY").normalize in ["1", "true", "yes"]
+  if options.overlay:
+    setPerfOverlay(true)
+  var cfg = appConfig(config).applyDialogAnchor(parseDialogAnchor(dialogAnchor))
+  cfg.perfOptions = options
+  if options.benchmarkFrames > 0:
+    cfg.alwaysRun60Fps = true
   try:
-    application appConfig(config).applyDialogAnchor(parseDialogAnchor(
-        dialogAnchor)), ui:
+    application cfg, ui:
       enableExternalSignalWake()
       app.runtime.queuePendingExternalSignals()
+      let wasShowingPerf = perfOverlayEnabled()
+      if options.benchmarkFrames > 0 or wasShowingPerf:
+        ui.markAllDirty()
       app.render(ui)
+      let showPerf = perfOverlayEnabled()
+      if options.benchmarkFrames > 0 or showPerf:
+        stats.recordFrame()
+        if showPerf:
+          stats.drawOverlay(ui.windowWidth, ui.windowHeight, ui.font())
+          ui.requestRedrawAfter(16)
       if app.lastError.len > 0:
         app.launchCrowErrorDialog(app.lastError)
       else:
         app.pollCrowErrorDialog()
         app.closeCrowErrorDialog()
       if app.runtime.requestQuit:
+        running = false
+      if options.benchmarkFrames > 0 and stats.frameCount >=
+          options.benchmarkFrames:
+        echo stats.summary()
         running = false
   finally:
     result = app.runtime.dialogCloseValue

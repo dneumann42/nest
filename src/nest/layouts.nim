@@ -239,8 +239,7 @@ proc overlay*(
 
 proc alignRowChild(
     ui: Layout,
-    parent,
-    child: Widget,
+    parent, child: Widget,
     alignment: Alignment,
     padding: float64,
     allowOverflowY = false,
@@ -268,8 +267,7 @@ proc alignRowChild(
 
 proc alignColumnChild(
     ui: Layout,
-    parent,
-    child: Widget,
+    parent, child: Widget,
     alignment: Alignment,
     padding: float64,
     allowOverflowX = false,
@@ -309,7 +307,9 @@ proc row*(
     return
 
   for child in children:
-    ui.alignRowChild(parent, child, child.effectiveAlignment(alignItems), padding, scrollY)
+    ui.alignRowChild(
+      parent, child, child.effectiveAlignment(alignItems), padding, scrollY
+    )
 
   if parent.fitWidth:
     discard ui.constrain(children[0].left == parent.left + padding)
@@ -353,9 +353,8 @@ proc row*(
         (children[^1].right == parent.right - padding) | FillRemainingStrength
       )
   of JustifyCenter:
-    discard ui.constrain(
-      (children[0].left + children[^1].right) / 2.0 == parent.centerX
-    )
+    discard
+      ui.constrain((children[0].left + children[^1].right) / 2.0 == parent.centerX)
   of JustifyEnd:
     discard ui.constrain(children[^1].right == parent.right - padding)
 
@@ -374,7 +373,9 @@ proc column*(
     return
 
   for child in children:
-    ui.alignColumnChild(parent, child, child.effectiveAlignment(alignItems), padding, scrollX)
+    ui.alignColumnChild(
+      parent, child, child.effectiveAlignment(alignItems), padding, scrollX
+    )
 
   if parent.fitHeight:
     discard ui.constrain(children[0].top == parent.top + padding)
@@ -418,9 +419,8 @@ proc column*(
         (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
       )
   of JustifyCenter:
-    discard ui.constrain(
-      (children[0].top + children[^1].bottom) / 2.0 == parent.centerY
-    )
+    discard
+      ui.constrain((children[0].top + children[^1].bottom) / 2.0 == parent.centerY)
   of JustifyEnd:
     discard ui.constrain(children[^1].bottom == parent.bottom - padding)
 

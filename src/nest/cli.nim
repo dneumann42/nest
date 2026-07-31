@@ -1,11 +1,11 @@
-import std/[cmdline, os]
+import std/[cmdline, os, strutils]
 
-import nest/[errorDialogs, generator, runner]
+import nest/[errorDialogs, generator, perf, runner]
 
 proc usage*(): string =
   """Usage:
   nest --project DIR
-  nest run DIR
+  nest run DIR [--perf-overlay] [--benchmark [FRAMES]]
   nest dialog DIR [DATA] [RESULT_PATH] [ANCHOR_JSON]
   nest error-dialog MESSAGE
   nest generate [DIR]
@@ -15,6 +15,24 @@ Project files:
   DIR/main.nest     default UI entrypoint
 """
 
+proc parseRunPerfOptions(args: seq[string]; start: int): PerfOptions =
+  var i = start
+  while i < args.len:
+    case args[i]
+    of "--perf-overlay":
+      result.overlay = true
+    of "--benchmark":
+      result.benchmarkFrames = 600
+      if i + 1 < args.len and not args[i + 1].startsWith("-"):
+        try:
+          result.benchmarkFrames = max(parseInt(args[i + 1]), 1)
+          inc i
+        except ValueError:
+          quit("invalid benchmark frame count: " & args[i + 1], 1)
+    else:
+      quit("unknown run option: " & args[i], 1)
+    inc i
+
 proc main*() =
   let args = commandLineParams()
   if args.len == 0:
@@ -23,11 +41,11 @@ proc main*() =
   of "--project", "-p":
     if args.len < 2:
       quit(usage(), 1)
-    discard runProject(args[1])
+    discard runProject(args[1], perfOptions = parseRunPerfOptions(args, 2))
   of "run":
     if args.len < 2:
       quit(usage(), 1)
-    discard runProject(args[1])
+    discard runProject(args[1], perfOptions = parseRunPerfOptions(args, 2))
   of "dialog":
     if args.len < 2:
       quit(usage(), 1)

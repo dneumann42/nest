@@ -93,7 +93,7 @@ proc light*(T: typedesc[Palette]): T =
 proc fallback*(T: typedesc[Palette]): T =
   Palette.dark()
 
-proc theme*(T: typedesc[Palette]; name: string): T =
+proc theme*(T: typedesc[Palette], name: string): T =
   case name.normalize
   of "light":
     Palette.light()
@@ -102,7 +102,7 @@ proc theme*(T: typedesc[Palette]; name: string): T =
   else:
     Palette.fallback()
 
-proc parseHexColor(value: string; fallback: Color): Color =
+proc parseHexColor(value: string, fallback: Color): Color =
   var text = value.strip
   if text.startsWith("#"):
     text = text[1 .. ^1]
@@ -126,7 +126,7 @@ proc parseHexColor(value: string; fallback: Color): Color =
   except ValueError:
     fallback
 
-proc jsonColor(node: JsonNode; name: string; fallback: Color): Color =
+proc jsonColor(node: JsonNode, name: string, fallback: Color): Color =
   try:
     if node.kind == JObject and node.hasKey(name) and node[name].kind == JString:
       return parseHexColor(node[name].getStr, fallback)
@@ -170,20 +170,28 @@ proc loadWallustTheme*(fallback: Palette): Palette =
     result.butter = palette.jsonColor("butter", result.butter)
     result.background = palette.jsonColor("background", result.background)
     result.backgroundHot = palette.jsonColor("background_hot", result.backgroundHot)
-    result.backgroundActive = palette.jsonColor("background_active", result.backgroundActive)
+    result.backgroundActive =
+      palette.jsonColor("background_active", result.backgroundActive)
     result.buttonBorder = palette.jsonColor("button_border", result.buttonBorder)
-    result.buttonBorderHot = palette.jsonColor("button_border_hot", result.buttonBorderHot)
-    result.buttonBorderActive = palette.jsonColor("button_border_active", result.buttonBorderActive)
-    result.buttonHighlight = palette.jsonColor("button_highlight", result.buttonHighlight)
-    result.panelBackground = palette.jsonColor("panel_background", result.panelBackground)
+    result.buttonBorderHot =
+      palette.jsonColor("button_border_hot", result.buttonBorderHot)
+    result.buttonBorderActive =
+      palette.jsonColor("button_border_active", result.buttonBorderActive)
+    result.buttonHighlight =
+      palette.jsonColor("button_highlight", result.buttonHighlight)
+    result.panelBackground =
+      palette.jsonColor("panel_background", result.panelBackground)
     result.panelBorder = palette.jsonColor("panel_border", result.panelBorder)
     result.panelMuted = palette.jsonColor("panel_muted", result.panelMuted)
     result.cardBackground = palette.jsonColor("card_background", result.cardBackground)
-    result.cardBackgroundHot = palette.jsonColor("card_background_hot", result.cardBackgroundHot)
+    result.cardBackgroundHot =
+      palette.jsonColor("card_background_hot", result.cardBackgroundHot)
     result.cardBorder = palette.jsonColor("card_border", result.cardBorder)
     result.cardAccent = palette.jsonColor("card_accent", result.cardAccent)
-    result.dialogHeaderBackground = palette.jsonColor("dialog_header_background", result.dialogHeaderBackground)
-    result.dialogHeaderBorder = palette.jsonColor("dialog_header_border", result.dialogHeaderBorder)
+    result.dialogHeaderBackground =
+      palette.jsonColor("dialog_header_background", result.dialogHeaderBackground)
+    result.dialogHeaderBorder =
+      palette.jsonColor("dialog_header_border", result.dialogHeaderBorder)
     result.foreground = colors.jsonColor("foreground", result.foreground)
     result.textColor = colors.jsonColor("foreground", result.textColor)
   except CatchableError:
@@ -192,14 +200,14 @@ proc loadWallustTheme*(fallback: Palette): Palette =
 proc init*(T: typedesc[Palette]): T =
   Palette.fallback().loadWallustTheme()
 
-proc init*(T: typedesc[Palette]; themeName: string): T =
+proc init*(T: typedesc[Palette], themeName: string): T =
   case themeName.normalize
   of "", "wallust", "alatar":
     Palette.fallback().loadWallustTheme()
   else:
     Palette.theme(themeName)
 
-proc colorByName*(self: Palette; name: string; fallback: Color): Color =
+proc colorByName*(self: Palette, name: string, fallback: Color): Color =
   case name.normalize
   of "primary":
     self.primary

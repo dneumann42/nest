@@ -1,5 +1,6 @@
 import nest/[crowdsl, dialogs, layerShellSdl3Driver]
 import nest/[backend, screen]
+import nest/perf
 
 type AppConfig* = object
   title*: string
@@ -8,6 +9,7 @@ type AppConfig* = object
   layerShellConfig*: LayerShellConfig
   alwaysRun60Fps*: bool
   themeName*: string
+  perfOptions*: PerfOptions
 
 proc init*(
     T: typedesc[AppConfig],
@@ -88,7 +90,8 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
       dialogs.browse(callback, window = layerShellSdl3Driver.currentSdlWindow())
     except CatchableError:
       discard
-  crowdsl.pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+  crowdsl.pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure,
+      raises: [].} =
     try:
       dialogs.browseFolder(callback, window = layerShellSdl3Driver.currentSdlWindow())
     except CatchableError:

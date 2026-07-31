@@ -1,8 +1,9 @@
 import
-  std/[json, locks, math, os, osproc, sets, streams, strformat, strutils, tables, times]
+  std/[json, locks, math, os, osproc, sets, streams, strformat, strutils,
+      tables, times]
 
 import crow, palette, ui, dialogs
-import nest/[input, screen]
+import nest/[input, perf, screen]
 
 type
   WidgetIDValue* = ref object of NativeValue
@@ -108,13 +109,15 @@ type PathPickerProc* = proc(callback: PathSelectedProc) {.closure, raises: [].}
 var runtimeWake*: RuntimeWakeProc = proc() {.gcsafe, raises: [].} =
   discard
 
-var pickFileDialog*: PathPickerProc = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+var pickFileDialog*: PathPickerProc = proc(
+    callback: PathSelectedProc) {.closure, raises: [].} =
   try:
     dialogs.browse(callback)
   except CatchableError:
     discard
 
-var pickDirectoryDialog*: PathPickerProc = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+var pickDirectoryDialog*: PathPickerProc = proc(
+    callback: PathSelectedProc) {.closure, raises: [].} =
   try:
     dialogs.browseFolder(callback)
   except CatchableError:
@@ -258,7 +261,8 @@ proc menuPathJoin(parent, child: string): string =
     parent & "." & child
 
 proc commandSymbol(node: SyntaxNode): string =
-  if node.kind == Command and node.callee.kind == Symbol: node.callee.symbol else: ""
+  if node.kind == Command and node.callee.kind ==
+      Symbol: node.callee.symbol else: ""
 
 proc idKey(
     env: Environment, node: SyntaxNode, fallback: string
@@ -296,7 +300,8 @@ proc mixColor(a, b: Color, amount: float64): Color =
     mixChannel(a.a, b.a, t),
   )
 
-proc evalArg(env: Environment, node: SyntaxNode): Value {.raises: [EvaluatorError].} =
+proc evalArg(env: Environment, node: SyntaxNode): Value {.raises: [
+    EvaluatorError].} =
   env.eval(node)
 
 proc evalArgs(
@@ -511,7 +516,8 @@ proc pollPathCallbacks(runtime: NestCrowRuntime) =
   runtime.pendingPathCallbacks.setLen(0)
   for callback in callbacks:
     try:
-      discard callback.env.call(callback.command, @[stringLiteral(callback.path)])
+      discard callback.env.call(callback.command, @[stringLiteral(
+          callback.path)])
     except EvaluatorError as error:
       runtime.hasError = true
       runtime.lastError = report(error)
@@ -523,7 +529,8 @@ proc pollPathCallbacks(runtime: NestCrowRuntime) =
 
 proc pathPickerCallback(
     env: Environment, arguments: seq[SyntaxNode], commandName: string
-): tuple[hasCallback: bool, command: CommandValue] {.raises: [EvaluatorError].} =
+): tuple[hasCallback: bool, command: CommandValue] {.raises: [
+    EvaluatorError].} =
   if arguments.len > 1:
     raise newException(EvaluatorError, commandName & " expects optional callback")
   if arguments.len == 0:
@@ -545,7 +552,8 @@ proc processOutput(
   var process: Process
   try:
     process =
-      startProcess(command, args = @args, options = {poUsePath, poStdErrToStdOut})
+      startProcess(command, args = @args, options = {poUsePath,
+          poStdErrToStdOut})
     let deadline = epochTime() + timeoutMs.float / 1000.0
     while process.running and epochTime() < deadline:
       os.sleep(10)
@@ -1005,7 +1013,8 @@ proc dialogAnchorJson(runtime: NestCrowRuntime, anchorID: WidgetID): string =
   )
 
 proc launchDialogProcess(
-    runtime: NestCrowRuntime, key, projectDir, data: string, anchorID = InvalidWidgetID
+    runtime: NestCrowRuntime, key, projectDir, data: string,
+        anchorID = InvalidWidgetID
 ) {.raises: [EvaluatorError].} =
   if key in runtime.dialogProcesses:
     return
@@ -1032,7 +1041,8 @@ proc launchDialogProcess(
       raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
     except IOError as error:
       raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
-  runtime.dialogProcesses[key] = DialogProcess(process: process, resultPath: resultPath)
+  runtime.dialogProcesses[key] = DialogProcess(process: process,
+      resultPath: resultPath)
 
 proc pollDialogProcesses*(runtime: NestCrowRuntime) =
   var finished: seq[string]
@@ -1164,7 +1174,8 @@ proc renderCrowErrorLine*(
       else:
         ui.palette.textColor
   if ui.diagnosticLabel(
-    ui.id("_nest_error_line", $index), line, fg, width, height, clickable = location.ok
+    ui.id("_nest_error_line", $index), line, fg, width, height,
+        clickable = location.ok
   ):
     openDiagnosticLocation(line)
 
@@ -1199,7 +1210,8 @@ proc renderErrorDialog*(runtime: NestCrowRuntime, ui: var UI, message: string) =
       ui.dialogHeader(
         ui.id("_nest_error_header"),
         cfg(
-          width = fill(), height = fit(), padding = 8, gap = 8, alignItems = AlignCenter
+          width = fill(), height = fit(), padding = 8, gap = 8,
+              alignItems = AlignCenter
         ),
       ):
         ui.label(ui.id("_nest_error_title"), "Crow error", fill(), fit())
@@ -1218,7 +1230,8 @@ proc renderErrorDialog*(runtime: NestCrowRuntime, ui: var UI, message: string) =
           renderCrowErrorLine(ui, index, line, fill(), fit())
       ui.row(
         ui.id("_nest_error_actions"),
-        cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd),
+        cfg(width = fill(), height = fit(), gap = 8,
+            justifyContent = JustifyEnd),
       ):
         discard ui.button(copyID, "Copy", fit(), fit())
 
@@ -1282,6 +1295,14 @@ proc renderNodes(
 
 proc renderNodes(runtime: NestCrowRuntime, nodes: seq[SyntaxNode]): Value =
   runtime.renderNodes(runtime.evaluator.env, nodes)
+
+proc refreshPerfOverlay(runtime: NestCrowRuntime) {.raises: [].} =
+  if not runtime.currentUi.isNil:
+    runtime.currentUi[].markAllDirty()
+    try:
+      runtime.currentUi[].requestRedrawAfter(0)
+    except Exception:
+      discard
 
 proc registerNestCommands(runtime: NestCrowRuntime) =
   runtime.evaluator.native "define":
@@ -1359,6 +1380,32 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       runtime.requireUi().markAllDirty()
     boolean(matched)
 
+  runtime.evaluator.native "perfOverlay":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    boolean(perfOverlayEnabled())
+
+  runtime.evaluator.native "togglePerfOverlay":
+    discard env
+    discard arguments
+    discard layout
+    discard bodyNodes
+    let enabled = togglePerfOverlay()
+    runtime.refreshPerfOverlay()
+    boolean(enabled)
+
+  runtime.evaluator.native "setPerfOverlay":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "setPerfOverlay expects one boolean")
+    setPerfOverlay(values[0].isTruthy)
+    runtime.refreshPerfOverlay()
+    boolean(perfOverlayEnabled())
+
   runtime.evaluator.native "fill":
     discard env
     discard arguments
@@ -1431,7 +1478,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       launchPathPicker(
         pickFileDialog,
         proc(path: string) =
-          runtime.queuePathCallback(env, callback.command, path),
+        runtime.queuePathCallback(env, callback.command, path),
         "pickFile",
       )
     else:
@@ -1446,7 +1493,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       launchPathPicker(
         pickDirectoryDialog,
         proc(path: string) =
-          runtime.queuePathCallback(env, callback.command, path),
+        runtime.queuePathCallback(env, callback.command, path),
         "pickDirectory",
       )
     else:
@@ -1463,7 +1510,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     launchPathPicker(
       pickFileDialog,
       proc(path: string) =
-        runtime.queuePathEvent(eventName, path),
+      runtime.queuePathEvent(eventName, path),
       "pickFileEvent",
     )
     boolean(true)
@@ -1478,7 +1525,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     launchPathPicker(
       pickDirectoryDialog,
       proc(path: string) =
-        runtime.queuePathEvent(eventName, path),
+      runtime.queuePathEvent(eventName, path),
       "pickDirectoryEvent",
     )
     boolean(true)
@@ -1586,7 +1633,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     let values = env.evalArgs(arguments)
     if values.len != 3:
       raise newException(EvaluatorError, "tsvCell expects text, row, and column")
-    text(tsvCellValue(values[0].asString, values[1].asNumber.int, values[2].asNumber.int))
+    text(tsvCellValue(values[0].asString, values[1].asNumber.int, values[
+        2].asNumber.int))
 
   runtime.evaluator.native "swayWorkspaces":
     discard layout
@@ -1766,7 +1814,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     let replacement = values[1].asString
     if runtime.editorStates[key].text != replacement:
       runtime.editorStates[key].text = replacement
-      runtime.editorStates[key].cursor = min(runtime.editorStates[key].cursor, replacement.len)
+      runtime.editorStates[key].cursor = min(runtime.editorStates[key].cursor,
+          replacement.len)
       runtime.editorStates[key].selectionAnchor = -1
       runtime.editorStates[key].preferredColumn = -1
     nothing()
@@ -1940,7 +1989,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if values.len != 3:
       raise newException(EvaluatorError, "date expects year, month, and day")
     text(
-      dateText(values[0].asNumber.int, values[1].asNumber.int, values[2].asNumber.int)
+      dateText(values[0].asNumber.int, values[1].asNumber.int, values[
+          2].asNumber.int)
     )
 
   runtime.evaluator.native "date-year":
@@ -2260,13 +2310,15 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
           ):
             runtime.currentUi[].column(
               runtime.requireUi().id(key, "items", menu.path),
-              cfg(width = fill(), height = fit(), gap = 0, alignItems = AlignStretch),
+              cfg(width = fill(), height = fit(), gap = 0,
+                  alignItems = AlignStretch),
             ):
               for index, entry in entries:
                 case entry.kind
                 of MenuEntryDivider:
                   runtime.currentUi[].menuDivider(
-                    runtime.requireUi().id(key, "divider", $index), fill(), fixed(9)
+                    runtime.requireUi().id(key, "divider", $index), fill(),
+                        fixed(9)
                   )
                 of MenuEntryItem:
                   runtime.currentUi[].menuItem(
@@ -2318,7 +2370,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         nextWidgetID()
     let config = env.evalConfig(bodyNodes)
-    runtime.currentUi[].menuDivider(id, config.width, config.height, config.alignSelf)
+    runtime.currentUi[].menuDivider(id, config.width, config.height,
+        config.alignSelf)
     nothing()
 
   runtime.evaluator.native "menuResult":
@@ -2482,7 +2535,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         nextWidgetID()
     let config = env.evalConfig(bodyNodes)
     discard
-      runtime.currentUi[].spacer(id, config.width, config.height, config.alignSelf)
+      runtime.currentUi[].spacer(id, config.width, config.height,
+          config.alignSelf)
     nothing()
 
   runtime.evaluator.native "label":
@@ -2684,7 +2738,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         ""
     let config = env.evalConfig(bodyNodes)
-    runtime.currentUi[].image(id, path, config.width, config.height, config.alignSelf)
+    runtime.currentUi[].image(id, path, config.width, config.height,
+        config.alignSelf)
     nothing()
 
   runtime.evaluator.native "imageButton":
@@ -2721,7 +2776,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       maximum = values[3].asNumber
       config = env.evalConfig(bodyNodes)
       changed = runtime.currentUi[].slider(
-        id, current, minimum, maximum, config.width, config.height, SliderHorizontal,
+        id, current, minimum, maximum, config.width, config.height,
+        SliderHorizontal,
         config.alignSelf,
       )
     if changed.active:
@@ -2743,7 +2799,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       maximum = values[3].asNumber
       config = env.evalConfig(bodyNodes)
       changed = runtime.currentUi[].slider(
-        id, current, minimum, maximum, config.width, config.height, SliderVertical,
+        id, current, minimum, maximum, config.width, config.height,
+        SliderVertical,
         config.alignSelf,
       )
     if changed.active:
@@ -2776,7 +2833,8 @@ proc init*(T: typedesc[NestCrowRuntime]): T =
   )
   result.registerNestCommands()
 
-proc get*(runtime: NestCrowRuntime, name: string): Value {.raises: [EvaluatorError].} =
+proc get*(runtime: NestCrowRuntime, name: string): Value {.raises: [
+    EvaluatorError].} =
   runtime.evaluator.env.get(name)
 
 proc widgetID*(

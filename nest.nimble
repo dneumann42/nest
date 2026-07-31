@@ -14,6 +14,9 @@ task test, "Run the Nest test suite":
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_ui.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_crowdsl.nim"
 
+task bench, "Run Nest benchmarks":
+  exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/bench_network_dialog.nim"
+
 requires "nim >= 2.2.10"
 requires "crow"
 requires "chroma"

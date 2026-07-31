@@ -43,6 +43,11 @@ define:
       cmd = "wish ~/.projects/maindo_tcl/main.tcl"
       place = "right"
     {}:
+      label = "Performance Overlay"
+      name = (id "menu" "perf-overlay")
+      cmd = "toggle-perf-overlay"
+      place = "right"
+    {}:
       label = "Logout"
       name = (id "menu" "logout")
       cmd = "loginctl terminate-session"
@@ -63,8 +68,12 @@ events:
     closeDialog ""
   for command (iter commands):
     when (clicked command.name):
-      shellLaunch command.cmd
-      closeDialog command.name
+      if (= command.cmd "toggle-perf-overlay"):
+        then:
+          closeDialog command.cmd
+        else:
+          shellLaunch command.cmd
+          closeDialog command.name
 
 card (id "menu" "panel"):
   width = fill

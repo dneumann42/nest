@@ -39,6 +39,9 @@ events:
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"
+  when (= lastAction "toggle-perf-overlay"):
+    togglePerfOverlay
+    set lastAction ""
   when (= lastAction "logout"):
     closeDialog "logout"
 

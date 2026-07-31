@@ -1,7 +1,7 @@
 import std/[os, strutils, tables, unittest]
 
 import crow
-import nest/[crowdsl, input, projectConfig, resources, ui]
+import nest/[crowdsl, input, perf, projectConfig, resources, ui]
 import nest/[coords, screen]
 
 proc widget(ui: UI, id: WidgetID): Widget =
@@ -60,6 +60,23 @@ importedLabel
 
     check afterFirst == before + 2
     check registeredSourceCount() == afterFirst
+
+  test "perf overlay can be toggled from crow":
+    setPerfOverlay(false)
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+    ui.loadFont("font", "", 18)
+
+    runtime.render(ui, parse("""
+events:
+  togglePerfOverlay
+"""))
+
+    check perfOverlayEnabled()
+    check runtime.evaluator.exec(parse("perfOverlay\n")).boolean
+    discard runtime.evaluator.exec(parse("setPerfOverlay false\n"))
+    check not perfOverlayEnabled()
 
   test "async shell output can refresh state after first render":
     let runtime = NestCrowRuntime.init()
@@ -153,7 +170,7 @@ label (id "value") value:
     clipboardRelays = ClipboardRelays(
       getText: proc (): string = copied,
       putText: proc (text: string) =
-        copied = text,
+      copied = text,
     )
     defer:
       clipboardRelays = originalClipboard
@@ -209,25 +226,40 @@ label (id "value") value:
 
     check dialogSource.contains("Loading network status...")
     check dialogSource.contains("Loading Wi-Fi networks...")
-    check dialogSource.contains("background = (pick (= (tsvCell rowText 0 2) \"yes\")")
+    check dialogSource.contains("rowKind = \"\"")
+    check dialogSource.contains("set rowSelected (tsvCell rowText 0 2)")
+    check dialogSource.contains("button (id \"network\" \"wifi\" \"row\" rowName) rowLabel")
+    check dialogSource.contains("background = (pick (= rowSelected \"yes\")")
     check dialogSource.contains("when (and (= editorAvailable \"yes\") (clicked editorID)):")
     check dialogSource.contains("shellLaunch (connectionEditorCommand)")
     check not dialogSource.contains("editor-action")
+
+  test "start popover can request perf overlay toggle":
+    let
+      menuSource = readFile("apps/layerShellBar/startPopover/main.nest")
+      barSource = readFile("apps/layerShellBar/main.nest")
+
+    check menuSource.contains("label = \"Performance Overlay\"")
+    check menuSource.contains("cmd = \"toggle-perf-overlay\"")
+    check menuSource.contains("closeDialog command.cmd")
+    check barSource.contains("when (= lastAction \"toggle-perf-overlay\"):")
+    check barSource.contains("togglePerfOverlay")
 
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let runtime = NestCrowRuntime.init()
@@ -235,7 +267,8 @@ label (id "value") value:
       ui.initContext(300, 120)
       ui.loadFont("font", "", 18)
 
-      runtime.renderLayoutOnly(ui, parse("""
+      runtime.renderLayoutOnly(ui, parse(
+          """
 panel (id "root"):
   width = (fixed 200)
   height = (fixed 80)
@@ -262,16 +295,17 @@ panel (id "root"):
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let runtime = NestCrowRuntime.init()
@@ -279,7 +313,8 @@ panel (id "root"):
       ui.initContext(300, 120)
       ui.loadFont("font", "", 18)
 
-      runtime.renderLayoutOnly(ui, parse("""
+      runtime.renderLayoutOnly(ui, parse(
+          """
 define:
   selected = 9
   labels = []:
@@ -302,16 +337,17 @@ tabs (id "tabs") labels selected:
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let app = NestCrowApp.init("apps/duck/main.nest")
@@ -366,7 +402,8 @@ tabs (id "tabs") labels selected:
       if r.w > 0 and r.h > 0:
         inc rects
 
-    proc countText(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
+    proc countText(f: Font; x, y: int; text: string; fg,
+        bg: Color): TextExtent =
       discard f
       discard x
       discard y
@@ -379,28 +416,28 @@ tabs (id "tabs") labels selected:
     drawRelays = DrawRelays(
       fillRect: countRect,
       drawLine: proc(x1, y1, x2, y2: int; color: Color) =
-        discard,
+      discard,
       drawPoint: proc(x, y: int; color: Color) =
-        discard,
+      discard,
       loadImage: proc(path: string): Image =
-        Image(0),
+      Image(0),
       freeImage: proc(img: Image) =
-        discard,
+      discard,
       drawImage: proc(img: Image; src, dst: Rect) =
-        discard,
+      discard,
       imageSize: proc(img: Image): TextExtent =
-        TextExtent(),
+      TextExtent(),
     )
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
       drawText: countText,
     )
     try:
@@ -422,16 +459,17 @@ tabs (id "tabs") labels selected:
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     var app: NestCrowApp = nil
     try:
@@ -471,7 +509,8 @@ tabs (id "tabs") labels selected:
       check mediaApp.runtime.lastError == ""
       if mediaApp.runtime.lastError == "":
         let artworkFrame = mediaUi.widget(mediaUi.id("media", "artwork")).frame
-        let tableFrame = mediaUi.widget(mediaUi.id("media", "metadata-table")).frame
+        let tableFrame = mediaUi.widget(mediaUi.id("media",
+            "metadata-table")).frame
         let detailsFrame = mediaUi.widget(mediaUi.id("media", "details")).frame
         check artworkFrame.height == 240
         check tableFrame.width > 0
@@ -479,10 +518,14 @@ tabs (id "tabs") labels selected:
         check tableFrame.x >= detailsFrame.x
 
       for spec in [
-        ("apps/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu", "panel")),
-        ("apps/layerShellBar/volume/main.nest", 260, 170, ui.id("volume", "panel")),
-        ("apps/layerShellBar/notifications/main.nest", 420, 260, ui.id("notifications", "panel")),
-        ("apps/layerShellBar/network/main.nest", 620, 520, ui.id("network", "panel")),
+        ("apps/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu",
+            "panel")),
+        ("apps/layerShellBar/volume/main.nest", 260, 170, ui.id("volume",
+            "panel")),
+        ("apps/layerShellBar/notifications/main.nest", 420, 260, ui.id(
+            "notifications", "panel")),
+        ("apps/layerShellBar/network/main.nest", 620, 520, ui.id("network",
+            "panel")),
       ]:
         let (path, width, height, rootID) = spec
         let dialogApp = NestCrowApp.init(path)
@@ -501,7 +544,8 @@ tabs (id "tabs") labels selected:
             check leftFrame.width > 0
             check rightFrame.width > 0
             check rightFrame.x > leftFrame.x
-            check rightFrame.x + rightFrame.width <= panelFrame.x + panelFrame.width
+            check rightFrame.x + rightFrame.width <= panelFrame.x +
+                panelFrame.width
     finally:
       if app != nil:
         app.runtime.closeDialogProcesses()
@@ -765,16 +809,17 @@ panel (id "root"):
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let runtime = NestCrowRuntime.init()
@@ -782,7 +827,8 @@ panel (id "root"):
       ui.initContext(360, 160)
       ui.loadFont("font", "", 18)
 
-      runtime.renderLayoutOnly(ui, parse("""
+      runtime.renderLayoutOnly(ui, parse(
+          """
 menuBar (id "main"):
   width = fill
   height = fixed 28
@@ -803,7 +849,8 @@ menuBar (id "main"):
       check not runtime.hasError
       check ui.widget(ui.id("main")).frame.width == 360
       check ui.widget(ui.id("main", "file")).frame.width > 0
-      check ui.widget(ui.id("main", "edit")).frame.x > ui.widget(ui.id("main", "file")).frame.x
+      check ui.widget(ui.id("main", "edit")).frame.x > ui.widget(ui.id("main",
+          "file")).frame.x
     finally:
       fontRelays = originalFontRelays
 
@@ -811,16 +858,17 @@ menuBar (id "main"):
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let source = parse("""
@@ -857,7 +905,8 @@ column (id "root"):
       runtime.renderLayoutOnly(ui, source, 420, 180)
 
       check ui.widget(ui.id("main", "build")).frame.x == closedBuild.x
-      check ui.widget(ui.id("main", "breakpoints")).frame.x == closedBreakpoints.x
+      check ui.widget(ui.id("main", "breakpoints")).frame.x ==
+          closedBreakpoints.x
       check ui.widget(ui.id("below")).frame.y == closedBelow.y
       check ui.widgetFrame(ui.id("main", "item", "0")).ok
     finally:
@@ -867,16 +916,17 @@ column (id "root"):
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       var runtime = NestCrowRuntime.init()
@@ -913,16 +963,17 @@ menuBar menuID:
     let originalPickFileDialog = pickFileDialog
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     let duckFile = getTempDir() / "duck-open-editor.txt"
     let duckContent = "alpha\nbeta"
@@ -1084,16 +1135,17 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let runtime = NestCrowRuntime.init()
@@ -1101,7 +1153,8 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
       ui.initContext(320, 320)
       ui.loadFont("font", "", 18)
 
-      runtime.renderLayoutOnly(ui, parse("""
+      runtime.renderLayoutOnly(ui, parse(
+          """
 define:
   selectedDate = "2026-07-18"
 import "apps/layerShellBar/components/calendar.nest"
@@ -1141,16 +1194,17 @@ dateSelector "cal" selectedDate
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let runtime = NestCrowRuntime.init()
@@ -1185,16 +1239,17 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
-        metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
-        Font(size),
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
       closeFont: proc(f: Font) =
-        discard,
+      discard,
       getFontMetrics: proc(f: Font): FontMetrics =
-        FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
       measureText: proc(f: Font; text: string): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
-      drawText: proc(f: Font; x, y: int; text: string; fg, bg: Color): TextExtent =
-        TextExtent(w: max(text.len, 1) * 9, h: 18),
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
       let runtime = NestCrowRuntime.init()

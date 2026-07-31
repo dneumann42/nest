@@ -10,9 +10,9 @@ import nest/[coords, input, screen]
 {.compile: "wayland/layer_shell_shim.c".}
 {.passL: "-lwayland-client".}
 
-proc imgLoad(file: cstring): ptr Surface {.
-  importc: "IMG_Load", cdecl, dynlib: "libSDL3_image.so"
-.}
+proc imgLoad(
+  file: cstring
+): ptr Surface {.importc: "IMG_Load", cdecl, dynlib: "libSDL3_image.so".}
 
 # --- Font handle management ---
 
@@ -132,10 +132,7 @@ proc anchorMask(config: LayerShellConfig): uint32 =
     result = result or 8'u32
 
 proc layerSurfaceWidth(config: LayerShellConfig, width: int): uint32 =
-  if EdgeLeft in config.anchors and EdgeRight in config.anchors:
-    0'u32
-  else:
-    width.uint32
+  if EdgeLeft in config.anchors and EdgeRight in config.anchors: 0'u32 else: width.uint32
 
 proc layerSurfaceHeight(config: LayerShellConfig, height: int): uint32 =
   if EdgeTop in config.anchors and EdgeBottom in config.anchors:
@@ -144,12 +141,12 @@ proc layerSurfaceHeight(config: LayerShellConfig, height: int): uint32 =
     height.uint32
 
 proc nestLayerShellConfigure(
-    display, surface: pointer,
-    width, height, layer, anchor: uint32,
-    exclusiveZone, marginTop, marginRight, marginBottom, marginLeft: int32,
-    keyboard: uint32,
-    namespace: cstring,
-    configuredWidth, configuredHeight: ptr uint32,
+  display, surface: pointer,
+  width, height, layer, anchor: uint32,
+  exclusiveZone, marginTop, marginRight, marginBottom, marginLeft: int32,
+  keyboard: uint32,
+  namespace: cstring,
+  configuredWidth, configuredHeight: ptr uint32,
 ): cint {.importc: "nest_wayland_layer_shell_configure".}
 
 proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
@@ -181,8 +178,10 @@ proc toColor(c: screen.Color): sdl3.Color {.inline.} =
 
 proc getFontPtr(f: screen.Font): sdl3_ttf.Font {.inline.} =
   let idx = f.int - 1
-  if idx >= 0 and idx < fonts.len: fonts[idx].ttfFont
-  else: nil
+  if idx >= 0 and idx < fonts.len:
+    fonts[idx].ttfFont
+  else:
+    nil
 
 # --- SDL driver state ---
 
@@ -327,49 +326,55 @@ proc resolveFontPath(path: string): string =
 
   if path == "nerd-monospace":
     when defined(windows):
-      return firstExisting([
-        r"C:\Windows\Fonts\CaskaydiaCoveNerdFont-Regular.ttf",
-        r"C:\Windows\Fonts\DejaVuSansMono.ttf",
-        r"C:\Windows\Fonts\consola.ttf"
-      ])
+      return firstExisting(
+        [
+          r"C:\Windows\Fonts\CaskaydiaCoveNerdFont-Regular.ttf",
+          r"C:\Windows\Fonts\DejaVuSansMono.ttf", r"C:\Windows\Fonts\consola.ttf",
+        ]
+      )
     elif defined(macosx):
-      return firstExisting([
-        "/Library/Fonts/MesloLGS NF Regular.ttf",
-        "/Library/Fonts/SauceCodeProNerdFont-Regular.ttf",
-        "/System/Library/Fonts/Menlo.ttc",
-        "/System/Library/Fonts/Monaco.ttf"
-      ])
+      return firstExisting(
+        [
+          "/Library/Fonts/MesloLGS NF Regular.ttf",
+          "/Library/Fonts/SauceCodeProNerdFont-Regular.ttf",
+          "/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf",
+        ]
+      )
     else:
-      return firstExisting([
-        "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
-        "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Regular.ttf",
-        "/usr/share/fonts/TTF/CaskaydiaCoveNerdFont-Regular.ttf",
-        "/usr/share/fonts/TTF/MesloLGS NF Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
-        "/usr/share/fonts/liberation-fonts/LiberationMono-Regular.ttf"
-      ])
+      return firstExisting(
+        [
+          "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
+          "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Regular.ttf",
+          "/usr/share/fonts/TTF/CaskaydiaCoveNerdFont-Regular.ttf",
+          "/usr/share/fonts/TTF/MesloLGS NF Regular.ttf",
+          "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+          "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+          "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
+          "/usr/share/fonts/liberation-fonts/LiberationMono-Regular.ttf",
+        ]
+      )
   elif defined(windows):
-    return firstExisting([
-      r"C:\Windows\Fonts\segoeui.ttf",
-      r"C:\Windows\Fonts\arial.ttf"
-    ])
+    return
+      firstExisting([r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf"])
   elif defined(macosx):
-    return firstExisting([
-      "/System/Library/Fonts/SFNS.ttf",
-      "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-      "/System/Library/Fonts/Supplemental/Arial.ttf"
-    ])
+    return firstExisting(
+      [
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+      ]
+    )
   else:
-    return firstExisting([
-      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-      "/usr/share/fonts/TTF/DejaVuSans.ttf",
-      "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-      "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf",
-      "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
-      "/usr/share/fonts/abattis-cantarell-vf-fonts/Cantarell-VF.otf"
-    ])
+    return firstExisting(
+      [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf",
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/abattis-cantarell-vf-fonts/Cantarell-VF.otf",
+      ]
+    )
 
 proc createNormalWindow(layout: var ScreenLayout) =
   let flags = WINDOW_RESIZABLE
@@ -390,20 +395,24 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
     quit("Could not create SDL window properties for layer-shell window")
 
   let winFlags = WINDOW_BORDERLESS or WINDOW_TRANSPARENT
-  discard setStringProperty(
-    props, cstring(PROP_WINDOW_CREATE_TITLE_STRING), cstring"NimEdit")
+  discard
+    setStringProperty(props, cstring(PROP_WINDOW_CREATE_TITLE_STRING), cstring"NimEdit")
   discard setNumberProperty(
-    props, cstring(PROP_WINDOW_CREATE_WIDTH_NUMBER), layout.width.int64)
+    props, cstring(PROP_WINDOW_CREATE_WIDTH_NUMBER), layout.width.int64
+  )
   discard setNumberProperty(
-    props, cstring(PROP_WINDOW_CREATE_HEIGHT_NUMBER), layout.height.int64)
-  discard setNumberProperty(
-    props, cstring(PROP_WINDOW_CREATE_FLAGS_NUMBER), winFlags.int64)
+    props, cstring(PROP_WINDOW_CREATE_HEIGHT_NUMBER), layout.height.int64
+  )
+  discard
+    setNumberProperty(props, cstring(PROP_WINDOW_CREATE_FLAGS_NUMBER), winFlags.int64)
+  discard
+    setBooleanProperty(props, cstring(PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN), true)
   discard setBooleanProperty(
-    props, cstring(PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN), true)
+    props, cstring(PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN), true
+  )
   discard setBooleanProperty(
-    props, cstring(PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN), true)
-  discard setBooleanProperty(
-    props, cstring(PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN), true)
+    props, cstring(PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN), true
+  )
 
   win = createWindowWithProperties(props)
   destroyProperties(props)
@@ -411,10 +420,10 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
     quit("Could not create SDL layer-shell window")
 
   let windowProps = getWindowProperties(win)
-  let display = getPointerProperty(
-    windowProps, cstring(PROP_WINDOW_WAYLAND_DISPLAY_POINTER), nil)
-  let surface = getPointerProperty(
-    windowProps, cstring(PROP_WINDOW_WAYLAND_SURFACE_POINTER), nil)
+  let display =
+    getPointerProperty(windowProps, cstring(PROP_WINDOW_WAYLAND_DISPLAY_POINTER), nil)
+  let surface =
+    getPointerProperty(windowProps, cstring(PROP_WINDOW_WAYLAND_SURFACE_POINTER), nil)
   var configuredWidth, configuredHeight: uint32
   let layerResult = nestLayerShellConfigure(
     display,
@@ -490,17 +499,17 @@ proc sdlRestoreState() =
 
 proc sdlSetClipRect(r: coords.Rect) =
   currentClip = ClipState(
-    enabled: true,
-    rect: sdl3.Rect(x: r.x.cint, y: r.y.cint, w: r.w.cint, h: r.h.cint))
+    enabled: true, rect: sdl3.Rect(x: r.x.cint, y: r.y.cint, w: r.w.cint, h: r.h.cint)
+  )
   applyClipState()
 
-proc sdlOpenFont(path: string; size: int;
-                 metrics: var FontMetrics): screen.Font =
+proc sdlOpenFont(path: string, size: int, metrics: var FontMetrics): screen.Font =
   let resolvedPath = resolveFontPath(path)
   if resolvedPath.len == 0:
     return screen.Font(0)
   let f = sdl3_ttf.openFont(cstring(resolvedPath), size.cfloat)
-  if f == nil: return screen.Font(0)
+  if f == nil:
+    return screen.Font(0)
   sdl3_ttf.setFontHinting(f, sdl3_ttf.hintingLightSubpixel)
   metrics.ascent = sdl3_ttf.getFontAscent(f)
   metrics.descent = sdl3_ttf.getFontDescent(f)
@@ -518,7 +527,7 @@ proc sdlCloseFont(f: screen.Font) =
     clearMeasureCache()
     clearTextCache()
 
-proc getCachedExtent(f: screen.Font; text: string): TextExtent =
+proc getCachedExtent(f: screen.Font, text: string): TextExtent =
   let fp = getFontPtr(f)
   if fp == nil or text.len == 0:
     return TextExtent()
@@ -529,17 +538,16 @@ proc getCachedExtent(f: screen.Font; text: string): TextExtent =
   var w, h: cint
   discard sdl3_ttf.getStringSize(fp, cstring(text), 0, w, h)
   result = TextExtent(w: w, h: h)
-  measureCache[key] = MeasureCacheEntry(
-    extent: result,
-    lastUsed: nextMeasureCacheGeneration(),
-  )
+  measureCache[key] =
+    MeasureCacheEntry(extent: result, lastUsed: nextMeasureCacheGeneration())
   evictMeasureCacheIfNeeded()
 
-proc sdlMeasureText(f: screen.Font; text: string): TextExtent =
+proc sdlMeasureText(f: screen.Font, text: string): TextExtent =
   getCachedExtent(f, text)
 
-proc getCachedTextEntry(f: screen.Font; text: string;
-                        fg: screen.Color): TextCacheEntry =
+proc getCachedTextEntry(
+    f: screen.Font, text: string, fg: screen.Color
+): TextCacheEntry =
   let fp = getFontPtr(f)
   if fp == nil or text.len == 0 or ren == nil:
     return TextCacheEntry()
@@ -556,37 +564,39 @@ proc getCachedTextEntry(f: screen.Font; text: string;
     return TextCacheEntry()
   discard setTextureBlendMode(tex, BLENDMODE_BLEND)
   let entry = TextCacheEntry(
-    texture: tex,
-    extent: getCachedExtent(f, text),
-    lastUsed: nextTextCacheGeneration())
+    texture: tex, extent: getCachedExtent(f, text), lastUsed: nextTextCacheGeneration()
+  )
   destroySurface(surf)
   textCache[key] = entry
   evictTextCacheIfNeeded()
   entry
 
-proc sdlDrawText(f: screen.Font; x, y: int; text: string;
-                 fg, bg: screen.Color): TextExtent =
+proc sdlDrawText(
+    f: screen.Font, x, y: int, text: string, fg, bg: screen.Color
+): TextExtent =
   let entry = getCachedTextEntry(f, text, fg)
   if entry.texture == nil:
     return
   if bg.a != 0 and entry.extent.w > 0 and entry.extent.h > 0:
-    var bgRect = FRect(x: x.cfloat, y: y.cfloat,
-                       w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
+    var bgRect = FRect(
+      x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat
+    )
     ensureDrawColor(bg)
     discard renderFillRect(ren, addr bgRect)
-  var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat,
-      h: entry.extent.h.cfloat)
-  var dst = FRect(x: x.cfloat, y: y.cfloat,
-                  w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
+  var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
+  var dst =
+    FRect(x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
   discard renderTexture(ren, entry.texture, addr src, addr dst)
   result = entry.extent
 
 proc sdlGetFontMetrics(f: screen.Font): FontMetrics =
   let idx = f.int - 1
-  if idx >= 0 and idx < fonts.len: fonts[idx].metrics
-  else: screen.FontMetrics()
+  if idx >= 0 and idx < fonts.len:
+    fonts[idx].metrics
+  else:
+    screen.FontMetrics()
 
-proc sdlFillRect(r: coords.Rect; color: screen.Color) =
+proc sdlFillRect(r: coords.Rect, color: screen.Color) =
   if color.a == 0 and r.x == 0 and r.y == 0 and r.w >= rendererWidth and
       r.h >= rendererHeight:
     discard setRenderDrawColor(ren, color.r, color.g, color.b, color.a)
@@ -594,27 +604,21 @@ proc sdlFillRect(r: coords.Rect; color: screen.Color) =
     drawColorValid = false
     return
   ensureDrawColor(color)
-  var fr = FRect(x: r.x.cfloat, y: r.y.cfloat,
-                 w: r.w.cfloat, h: r.h.cfloat)
+  var fr = FRect(x: r.x.cfloat, y: r.y.cfloat, w: r.w.cfloat, h: r.h.cfloat)
   discard renderFillRect(ren, addr fr)
 
-proc sdlLineRect(r: coords.Rect; color: screen.Color) =
+proc sdlLineRect(r: coords.Rect, color: screen.Color) =
   if r.w <= 0 or r.h <= 0:
     return
   ensureDrawColor(color)
-  var fr = FRect(
-    x: r.x.cfloat,
-    y: r.y.cfloat,
-    w: r.w.cfloat,
-    h: r.h.cfloat,
-  )
+  var fr = FRect(x: r.x.cfloat, y: r.y.cfloat, w: r.w.cfloat, h: r.h.cfloat)
   discard renderRect(ren, addr fr)
 
-proc sdlDrawLine(x1, y1, x2, y2: int; color: screen.Color) =
+proc sdlDrawLine(x1, y1, x2, y2: int, color: screen.Color) =
   ensureDrawColor(color)
   discard renderLine(ren, x1.cfloat, y1.cfloat, x2.cfloat, y2.cfloat)
 
-proc sdlDrawPoint(x, y: int; color: screen.Color) =
+proc sdlDrawPoint(x, y: int, color: screen.Color) =
   ensureDrawColor(color)
   discard renderPoint(ren, x.cfloat, y.cfloat)
 
@@ -640,8 +644,9 @@ proc sdlLoadImage(path: string): screen.Image =
   destroySurface(surf)
   result = screen.Image(images.len)
 
-proc updatePixelImage*(img: screen.Image; width, height: int; pixels: openArray[
-    uint8]): screen.Image =
+proc updatePixelImage*(
+    img: screen.Image, width, height: int, pixels: openArray[uint8]
+): screen.Image =
   ## Create or update an RGBA32 texture backed by the SDL renderer.
   ## The pixel buffer is tightly packed, four bytes per pixel.
   if ren == nil or width <= 0 or height <= 0 or pixels.len < width * height * 4:
@@ -658,8 +663,9 @@ proc updatePixelImage*(img: screen.Image; width, height: int; pixels: openArray[
     slot[].w = 0
     slot[].h = 0
 
-  let tex = createTexture(ren, PIXELFORMAT_RGBA32, TEXTUREACCESS_STATIC,
-      width.cint, height.cint)
+  let tex = createTexture(
+    ren, PIXELFORMAT_RGBA32, TEXTUREACCESS_STATIC, width.cint, height.cint
+  )
   if tex == nil:
     return screen.Image(0)
   discard setTextureBlendMode(tex, BLENDMODE_BLEND)
@@ -683,16 +689,14 @@ proc sdlFreeImage(img: screen.Image) =
   slot[].w = 0
   slot[].h = 0
 
-proc sdlDrawImage(img: screen.Image; src, dst: coords.Rect) =
+proc sdlDrawImage(img: screen.Image, src, dst: coords.Rect) =
   let slot = getImageSlot(img)
   if slot == nil or slot[].texture == nil:
     return
-  var srcRect = FRect(
-    x: src.x.cfloat, y: src.y.cfloat,
-    w: src.w.cfloat, h: src.h.cfloat)
-  var dstRect = FRect(
-    x: dst.x.cfloat, y: dst.y.cfloat,
-    w: dst.w.cfloat, h: dst.h.cfloat)
+  var srcRect =
+    FRect(x: src.x.cfloat, y: src.y.cfloat, w: src.w.cfloat, h: src.h.cfloat)
+  var dstRect =
+    FRect(x: dst.x.cfloat, y: dst.y.cfloat, w: dst.w.cfloat, h: dst.h.cfloat)
   discard renderTexture(ren, slot[].texture, addr srcRect, addr dstRect)
 
 proc sdlImageSize(img: screen.Image): TextExtent =
@@ -703,7 +707,8 @@ proc sdlImageSize(img: screen.Image): TextExtent =
 
 proc sdlSetCursor(c: CursorKind) =
   if cursors[c] == nil:
-    let sc = case c
+    let sc =
+      case c
       of curDefault, curArrow: SYSTEM_CURSOR_DEFAULT
       of curIbeam: SYSTEM_CURSOR_TEXT
       of curWait: SYSTEM_CURSOR_WAIT
@@ -821,12 +826,16 @@ proc translateKeycode(k: sdl3.Keycode): input.KeyCode =
 
 proc translateMods(m: Keymod): set[Modifier] =
   let m = m.uint32
-  if (m and KMOD_SHIFT) != 0: result.incl ShiftPressed
-  if (m and KMOD_CTRL) != 0: result.incl CtrlPressed
-  if (m and KMOD_ALT) != 0: result.incl AltPressed
-  if (m and KMOD_GUI) != 0: result.incl GuiPressed
+  if (m and KMOD_SHIFT) != 0:
+    result.incl ShiftPressed
+  if (m and KMOD_CTRL) != 0:
+    result.incl CtrlPressed
+  if (m and KMOD_ALT) != 0:
+    result.incl AltPressed
+  if (m and KMOD_GUI) != 0:
+    result.incl GuiPressed
 
-proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
+proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
   e = input.Event(kind: NoEvent)
   let evType = uint32(sdlEvent.common.`type`)
   if evType == uint32(EVENT_USER):
@@ -860,7 +869,7 @@ proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
   elif evType == uint32(EVENT_TEXT_INPUT):
     e.kind = TextInputEvent
     if sdlEvent.text.text != nil:
-      for i in 0..3:
+      for i in 0 .. 3:
         if sdlEvent.text.text[i] == '\0':
           e.text[i] = '\0'
           break
@@ -871,19 +880,27 @@ proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
     e.y = sdlEvent.button.y.int
     e.clicks = sdlEvent.button.clicks.int
     case sdlEvent.button.button
-    of BUTTON_LEFT: e.button = LeftButton
-    of BUTTON_RIGHT: e.button = RightButton
-    of BUTTON_MIDDLE: e.button = MiddleButton
-    else: e.button = LeftButton
+    of BUTTON_LEFT:
+      e.button = LeftButton
+    of BUTTON_RIGHT:
+      e.button = RightButton
+    of BUTTON_MIDDLE:
+      e.button = MiddleButton
+    else:
+      e.button = LeftButton
   elif evType == uint32(EVENT_MOUSE_BUTTON_UP):
     e.kind = MouseUpEvent
     e.x = sdlEvent.button.x.int
     e.y = sdlEvent.button.y.int
     case sdlEvent.button.button
-    of BUTTON_LEFT: e.button = LeftButton
-    of BUTTON_RIGHT: e.button = RightButton
-    of BUTTON_MIDDLE: e.button = MiddleButton
-    else: e.button = LeftButton
+    of BUTTON_LEFT:
+      e.button = LeftButton
+    of BUTTON_RIGHT:
+      e.button = RightButton
+    of BUTTON_MIDDLE:
+      e.button = MiddleButton
+    else:
+      e.button = LeftButton
   elif evType == uint32(EVENT_MOUSE_MOTION):
     e.kind = MouseMoveEvent
     e.x = sdlEvent.motion.x.int
@@ -898,24 +915,31 @@ proc translateEvent(sdlEvent: sdl3.Event; e: var input.Event) =
     e.mouseX = sdlEvent.wheel.mouse_x.int
     e.mouseY = sdlEvent.wheel.mouse_y.int
 
-proc sdlPollEvent(e: var input.Event; flags: set[InputFlag]): bool =
+proc sdlPollEvent(e: var input.Event, flags: set[InputFlag]): bool =
   var sdlEvent: sdl3.Event
   if not pollEvent(sdlEvent):
     return false
   translateEvent(sdlEvent, e)
   result = true
 
-proc sdlWaitEvent(e: var input.Event; timeoutMs: int;
-                  flags: set[InputFlag]): bool =
+proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[InputFlag]): bool =
   var sdlEvent: sdl3.Event
-  let ok = if timeoutMs < 0: waitEvent(sdlEvent)
-           else: waitEventTimeout(sdlEvent, timeoutMs.int32)
-  if not ok: return false
+  let ok =
+    if timeoutMs < 0:
+      waitEvent(sdlEvent)
+    else:
+      waitEventTimeout(sdlEvent, timeoutMs.int32)
+  if not ok:
+    return false
   translateEvent(sdlEvent, e)
   result = true
 
-proc sdlGetTicks(): int = sdl3.getTicks().int
-proc sdlDelay(ms: int) = sdl3.delay(ms.uint32)
+proc sdlGetTicks(): int =
+  sdl3.getTicks().int
+
+proc sdlDelay(ms: int) =
+  sdl3.delay(ms.uint32)
+
 proc wakeEventLoop*() {.gcsafe, raises: [].} =
   if wakeEventQueued.exchange(true, moAcquireRelease):
     return
@@ -938,9 +962,8 @@ proc selectWaylandVideoDriver() =
   putEnv("SDL_VIDEODRIVER", "wayland")
   discard setenvUnsafe(cstring"SDL_VIDEO_DRIVER", cstring"wayland", 1)
   discard setenvUnsafe(cstring"SDL_VIDEODRIVER", cstring"wayland", 1)
-  discard setHintWithPriority(
-    cstring(HINT_VIDEO_DRIVER), cstring"wayland", HINT_OVERRIDE
-  )
+  discard
+    setHintWithPriority(cstring(HINT_VIDEO_DRIVER), cstring"wayland", HINT_OVERRIDE)
 
 proc installSdl3Relays() =
   if not sdl3.init(INIT_VIDEO or INIT_EVENTS):
@@ -948,30 +971,44 @@ proc installSdl3Relays() =
   if not sdl3_ttf.init():
     quit("TTF3 init failed")
   windowRelays = WindowRelays(
-    createWindow: sdlCreateWindow, refresh: sdlRefresh,
-    saveState: sdlSaveState, restoreState: sdlRestoreState,
-    setClipRect: sdlSetClipRect, setCursor: sdlSetCursor,
-    setWindowTitle: sdlSetWindowTitle)
+    createWindow: sdlCreateWindow,
+    refresh: sdlRefresh,
+    saveState: sdlSaveState,
+    restoreState: sdlRestoreState,
+    setClipRect: sdlSetClipRect,
+    setCursor: sdlSetCursor,
+    setWindowTitle: sdlSetWindowTitle,
+  )
   fontRelays = FontRelays(
-    openFont: sdlOpenFont, closeFont: sdlCloseFont,
-    getFontMetrics: sdlGetFontMetrics, measureText: sdlMeasureText,
-    drawText: sdlDrawText)
+    openFont: sdlOpenFont,
+    closeFont: sdlCloseFont,
+    getFontMetrics: sdlGetFontMetrics,
+    measureText: sdlMeasureText,
+    drawText: sdlDrawText,
+  )
   drawRelays = DrawRelays(
-    fillRect: sdlFillRect, lineRect: sdlLineRect,
-    drawLine: sdlDrawLine, drawPoint: sdlDrawPoint,
-    loadImage: sdlLoadImage, freeImage: sdlFreeImage, drawImage: sdlDrawImage,
-    imageSize: sdlImageSize)
+    fillRect: sdlFillRect,
+    lineRect: sdlLineRect,
+    drawLine: sdlDrawLine,
+    drawPoint: sdlDrawPoint,
+    loadImage: sdlLoadImage,
+    freeImage: sdlFreeImage,
+    drawImage: sdlDrawImage,
+    imageSize: sdlImageSize,
+  )
   inputRelays = InputRelays(
-    pollEvent: sdlPollEvent, waitEvent: sdlWaitEvent,
-    getTicks: sdlGetTicks, sleep: sdlDelay,
-    shutdown: sdlQuitRequest)
-  clipboardRelays = ClipboardRelays(
-    getText: sdlGetClipboardText, putText: sdlPutClipboardText)
+    pollEvent: sdlPollEvent,
+    waitEvent: sdlWaitEvent,
+    getTicks: sdlGetTicks,
+    sleep: sdlDelay,
+    shutdown: sdlQuitRequest,
+  )
+  clipboardRelays =
+    ClipboardRelays(getText: sdlGetClipboardText, putText: sdlPutClipboardText)
 
 proc initSdl3Driver*() =
   useLayerShell = false
-  if getEnv("WAYLAND_DISPLAY").len > 0 and
-      getEnv("SDL_VIDEODRIVER").len == 0 and
+  if getEnv("WAYLAND_DISPLAY").len > 0 and getEnv("SDL_VIDEODRIVER").len == 0 and
       getEnv("SDL_VIDEO_DRIVER").len == 0:
     selectWaylandVideoDriver()
   installSdl3Relays()
