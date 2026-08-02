@@ -2476,6 +2476,71 @@ proc slider*(
   ui.attach(box, Component(view))
   ui.addChild(box)
 
+proc colorSwatch*(
+    ui: var UI,
+    id: WidgetID,
+    value: Color,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.setRenderKey(id, renderKey("colorSwatch:" & $value, width, height, alignSelf))
+  ui.attach(box, Component(ColorSwatch.new(value)))
+  ui.addChild(box)
+
+proc colorInput*(
+    ui: var UI,
+    id: WidgetID,
+    label: string,
+    value: var Color,
+    width = fill(),
+    height = fit(),
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  let previous = value
+  if ui.phase == EventPhase:
+    let red = ui.slider(ui.id(id, "red"), value.r.float64, 0, 255, fill(),
+        fixed(28))
+    if red.active:
+      value.r = red.value.round.int.clamp(0, 255).uint8
+    let green = ui.slider(ui.id(id, "green"), value.g.float64, 0, 255, fill(),
+        fixed(28))
+    if green.active:
+      value.g = green.value.round.int.clamp(0, 255).uint8
+    let blue = ui.slider(ui.id(id, "blue"), value.b.float64, 0, 255, fill(),
+        fixed(28))
+    if blue.active:
+      value.b = blue.value.round.int.clamp(0, 255).uint8
+    return value != previous
+
+  ui.column(
+    id,
+    cfg(width = width, height = height, gap = 6, padding = 0,
+        alignSelf = alignSelf),
+  ):
+    ui.row(
+      ui.id(id, "summary"),
+      cfg(width = fill(), height = fixed(34), gap = 8, padding = 0,
+          alignItems = AlignCenter),
+    ):
+      ui.colorSwatch(ui.id(id, "swatch"), value, fixed(44), fixed(30))
+      ui.label(ui.id(id, "label"), label, fill(), fit())
+      ui.label(ui.id(id, "hex"), "#" & value.r.toHex(2) & value.g.toHex(2) &
+          value.b.toHex(2), fit(), fit())
+    template channel(key, name: string, channelValue: uint8) =
+      ui.row(
+        ui.id(id, key, "row"),
+        cfg(width = fill(), height = fixed(28), gap = 8, padding = 0,
+            alignItems = AlignCenter),
+      ):
+        ui.label(ui.id(id, key, "label"), name, fixed(16), fit())
+        discard ui.slider(ui.id(id, key), channelValue.float64, 0, 255, fill(),
+            fixed(28))
+        ui.label(ui.id(id, key, "value"), $channelValue.int, fixed(32), fit())
+    channel("red", "R", value.r)
+    channel("green", "G", value.g)
+    channel("blue", "B", value.b)
+
 proc comboboxPopupIndex(
     field: Frame,
     optionCount: int,
@@ -2790,6 +2855,24 @@ proc slider*(
   ui.slider(
     ui.nextAutoID(), value, minimum, maximum, width, height, orientation, alignSelf
   )
+
+proc colorSwatch*(
+    ui: var UI,
+    value: Color,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  ui.colorSwatch(ui.nextAutoID(), value, width, height, alignSelf)
+
+proc colorInput*(
+    ui: var UI,
+    label: string,
+    value: var Color,
+    width = fill(),
+    height = fit(),
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  ui.colorInput(ui.nextAutoID(), label, value, width, height, alignSelf)
 
 proc combobox*(
     ui: var UI,

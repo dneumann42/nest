@@ -1,9 +1,9 @@
 import
   components/[
     component, containers, buttons, labels, editors, lineinputs, images, tables,
-    sliders, comboboxes, menus, checkboxes, tabs, mesh2d,
+    sliders, comboboxes, menus, checkboxes, tabs, mesh2d, colors,
   ]
 
 export
   component, containers, buttons, labels, editors, lineinputs, images, tables, sliders,
-  comboboxes, menus, checkboxes, tabs, mesh2d
+  comboboxes, menus, checkboxes, tabs, mesh2d, colors
