@@ -2039,9 +2039,15 @@ proc component*(
     component: Component,
     width, height: SizePolicy,
     alignSelf = AlignAuto,
+    renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
-  self.setRenderKey(id, renderKey("component", width, height, alignSelf))
+  let key =
+    if renderKeyOverride.len > 0:
+      renderKeyOverride
+    else:
+      renderKey("component", width, height, alignSelf)
+  self.setRenderKey(id, key)
   self.attach(result, component)
   self.addChild(result)
 
@@ -2513,15 +2519,15 @@ proc lineInput*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) =
-  if ui.phase == EventPhase:
-    return
-  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(
-    id, renderKey("lineInput:" & state.text & ":" & fontName, width, height, alignSelf)
+  discard ui.component(
+    id,
+    Component(LineInput.new(state, fontName)),
+    width,
+    height,
+    alignSelf,
+    renderKey("lineInput:" & state.text & ":" & fontName, width, height,
+        alignSelf),
   )
-  let input = LineInput.new(state, fontName)
-  ui.attach(box, Component(input))
-  ui.addChild(box)
 
 proc textEditor*(
     ui: var UI,
@@ -2536,9 +2542,21 @@ proc textEditor*(
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
 ) {.layoutOnly.} =
-  let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
-  ui.setRenderKey(
+  discard ui.component(
     id,
+    Component(Editor.new(
+      state,
+      fontName,
+      singleLine = false,
+      lineNumbers = lineNumbers,
+      scrollbars = scrollbars,
+      syntax = syntax,
+      gutterMarkers = gutterMarkers,
+      activeLine = activeLine,
+    )),
+    width,
+    height,
+    alignSelf,
     renderKey(
       "textEditor:" & state.text & ":" & $state.cursor & ":" & fontName & ":" &
         $lineNumbers & ":" & $scrollbars & ":" & syntax & ":" & $gutterMarkers &
@@ -2548,19 +2566,3 @@ proc textEditor*(
       alignSelf,
     ),
   )
-  ui.attach(
-    box,
-    Component(
-      Editor.new(
-        state,
-        fontName,
-        singleLine = false,
-        lineNumbers = lineNumbers,
-        scrollbars = scrollbars,
-        syntax = syntax,
-        gutterMarkers = gutterMarkers,
-        activeLine = activeLine,
-    )
-  ),
-  )
-  ui.addChild(box)
