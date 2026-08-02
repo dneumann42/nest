@@ -73,6 +73,7 @@ type
     floatingWidgets: seq[Widget]
     floatingBelowAnchors: Table[WidgetID, WidgetID]
     componentByID: Table[WidgetID, Component]
+    retainedRealtimeWidgets: Table[WidgetID, ComponentWidget]
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
     layoutChildren: Table[WidgetID, seq[Widget]]
@@ -82,7 +83,9 @@ type
     dialogResults: Table[string, string]
     liveWidgetIDs: HashSet[WidgetID]
     previousWidgetIDs: HashSet[WidgetID]
+    liveRealtimeWidgetIDs: HashSet[WidgetID]
     pointerBlockFrames: seq[Frame]
+    pointerInteractiveFrames: seq[Frame]
     renderKeys: Table[WidgetID, string]
     idScopes: seq[string]
     eventActiveWidgets: HashSet[WidgetID]
@@ -220,14 +223,14 @@ proc windowHeight*(self: UI): int =
 proc widgetFrame*(
     self: UI, id: WidgetID
 ): tuple[ok: bool, frame: Frame] {.raises: [].} =
-  for box in self.layout.boxes:
-    if box.id == id:
-      return (true, box.frame)
   try:
     if self.frameByID.hasKey(id):
       return (true, self.frameByID[id])
   except KeyError:
     discard
+  for box in self.layout.boxes:
+    if box.id == id:
+      return (true, box.frame)
   (false, Frame())
 
 proc pointerInputBlocked*(self: UI, x, y: int): bool {.raises: [].} =
@@ -236,11 +239,25 @@ proc pointerInputBlocked*(self: UI, x, y: int): bool {.raises: [].} =
         y.toFloat >= frame.y and y.toFloat < frame.y + frame.height:
       return true
 
+proc pointerOverUi*(self: UI, x, y: int): bool {.raises: [].} =
+  self.pointerInputBlocked(x, y)
+
+proc pointerOverInteractive*(self: UI, x, y: int): bool {.raises: [].} =
+  for frame in self.pointerInteractiveFrames:
+    if x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
+        y.toFloat >= frame.y and y.toFloat < frame.y + frame.height:
+      return true
+
 proc wantsTextInput*(self: UI): bool =
   self.context.draw.focusedWidget != InvalidWidgetID
 
 proc requestRedrawAfter*(self: var UI, ms: int) =
-  let ticks = input.getTicks() + max(ms, 0)
+  let now =
+    if self.context.draw.ticks > 0:
+      self.context.draw.ticks
+    else:
+      input.getTicks()
+  let ticks = now + max(ms, 0)
   if not self.hasScheduledRedraw or ticks < self.scheduledRedrawTicks:
     self.scheduledRedrawTicks = ticks
     self.hasScheduledRedraw = true
@@ -266,8 +283,18 @@ proc markDirty*(self: var UI, id: WidgetID) {.raises: [].} =
   if id != InvalidWidgetID:
     self.context.draw.dirtyWidgets.incl id
 
+proc markRealtime*(self: var UI, id: WidgetID) {.raises: [].} =
+  if id != InvalidWidgetID:
+    self.liveRealtimeWidgetIDs.incl id
+
+proc hasRealtimeWidgets*(self: UI): bool {.raises: [].} =
+  self.retainedRealtimeWidgets.len > 0
+
 proc redrewFrame*(self: UI): bool {.raises: [].} =
   self.frameRedrawn
+
+proc hasPendingWidgetEvents*(self: UI): bool {.raises: [].} =
+  self.context.draw.activeWidgets.len > 0 or self.context.draw.submittedWidgets.len > 0
 
 proc setDrawTicks*(self: var UI, ticks: int) =
   self.context.draw.ticks = ticks
@@ -397,7 +424,6 @@ proc mouseDown*(self: var UI) =
 
 proc mouseUp*(self: var UI) =
   self.context.update.mouseLeftDown = false
-  self.context.update.mouseLeftPressed = false
   self.context.update.sliderDragging = InvalidWidgetID
 
 proc resizeWindow*(self: var UI, width, height: int) =
@@ -584,6 +610,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.scrollContainers.clear()
   self.liveWidgetIDs.clear()
   self.liveWidgetIDs.incl self.root.id
+  self.liveRealtimeWidgetIDs.clear()
   self.idScopes.setLen(0)
   self.layout.resize(windowWidth.toFloat, windowHeight.toFloat)
 
@@ -602,6 +629,9 @@ proc scrollWheelStep(): float64 =
 
 proc scrollLerpFactor(): float64 =
   0.35
+
+proc scrollSettleDistance(): float64 =
+  0.25
 
 proc snapBackLerpFactor(): float64 =
   0.22
@@ -725,10 +755,14 @@ proc updateScrollState(self: var UI, parent: Widget) =
   state.scrollY = state.scrollY.clamp(-overscrollY, state.maxY +
       overscrollY).lerp(state.targetY, scrollLerpFactor()
     )
+  if abs(state.scrollX - state.targetX) <= scrollSettleDistance():
+    state.scrollX = state.targetX
+  if abs(state.scrollY - state.targetY) <= scrollSettleDistance():
+    state.scrollY = state.targetY
   if abs(state.scrollX - previousScrollX) > 0.01 or
       abs(state.scrollY - previousScrollY) > 0.01:
     self.markDirty(parent.id)
-    self.requestRedrawAfterSafe(0)
+    self.requestRedrawAfterSafe(16)
   if state.maxX <= 0 and state.dragging == ScrollX:
     state.dragging = NoScroll
   if state.maxY <= 0 and state.dragging == ScrollY:
@@ -1102,6 +1136,12 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       for id in staleKeys:
         self.renderKeys.del id
     self.previousWidgetIDs = self.liveWidgetIDs
+    var staleRealtimeKeys: seq[WidgetID]
+    for id in self.retainedRealtimeWidgets.keys:
+      if id notin self.liveRealtimeWidgetIDs:
+        staleRealtimeKeys.add id
+    for id in staleRealtimeKeys:
+      self.retainedRealtimeWidgets.del id
     for parentID in directParents:
       if pendingByParent.hasKey(parentID):
         if self.floatingBelowAnchors.hasKey(parentID):
@@ -1135,9 +1175,14 @@ proc endLayout*(self: var UI): bool {.discardable.} =
     for box in self.layout.boxes:
       self.frameByID[box.id] = box.frame
     self.pointerBlockFrames.setLen(0)
+    self.pointerInteractiveFrames.setLen(0)
     for (component, widget) in self.components:
+      if component of Interactive:
+        self.pointerInteractiveFrames.add widget.frame
       if component of Interactive or component.style.hasBackground:
         self.pointerBlockFrames.add widget.frame
+      if widget.id in self.liveRealtimeWidgetIDs:
+        self.retainedRealtimeWidgets[widget.id] = (component, widget)
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:
@@ -1448,7 +1493,7 @@ proc updateScrollbarDrag(self: var UI, parent: Widget,
   if abs(state.targetX - previousTargetX) > 0.01 or
       abs(state.targetY - previousTargetY) > 0.01:
     self.markDirty(parent.id)
-    self.requestRedrawAfterSafe(0)
+    self.requestRedrawAfterSafe(16)
 
 proc updateWidgetTree(
     self: var UI,
@@ -1530,7 +1575,8 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
     let dirty =
       drawContext.dirtyAll or inheritedDirty or widget.id in
           drawContext.dirtyWidgets
-    if dirty and self.componentByID.hasKey(widget.id):
+    if dirty and self.componentByID.hasKey(widget.id) and
+        not self.retainedRealtimeWidgets.hasKey(widget.id):
       self.componentByID[widget.id].draw(widget, drawContext)
 
     if widget.id in self.scrollContainers:
@@ -1560,11 +1606,41 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
   for widget in self.floatingWidgets:
     drawWidgetTree(widget, true)
   for (component, widget) in self.components:
-    component.drawOverlay(widget, drawContext)
+    if not self.retainedRealtimeWidgets.hasKey(widget.id):
+      component.drawOverlay(widget, drawContext)
   context.hasRedrawRequest = drawContext.hasRedrawRequest
   context.redrawDelayMs = drawContext.redrawDelayMs
   context.dirtyWidgets.clear()
   context.dirtyAll = false
+  true
+
+proc drawRealtime*(self: var UI): bool {.discardable.} =
+  if self.retainedRealtimeWidgets.len == 0:
+    return false
+
+  var
+    updateContext = self.context.update
+    drawContext = self.context.draw
+  updateContext.resources = drawContext.resources
+  updateContext.sliderDragging =
+    if updateContext.mouseLeftDown: drawContext.sliderDragging else: InvalidWidgetID
+
+  let previousDrawCommands = screen.drawCommands
+  let previousCommandMeasureImage = screen.commandMeasureImage
+  screen.drawCommands = drawContext.drawCommands
+  screen.commandMeasureImage = drawContext.commandMeasureImage
+  defer:
+    screen.drawCommands = previousDrawCommands
+    screen.commandMeasureImage = previousCommandMeasureImage
+
+  for (component, widget) in self.retainedRealtimeWidgets.values:
+    component.update(widget, updateContext)
+    component.draw(widget, drawContext)
+    component.drawOverlay(widget, drawContext)
+
+  self.context.update = updateContext
+  self.context.draw.hasRedrawRequest = drawContext.hasRedrawRequest
+  self.context.draw.redrawDelayMs = drawContext.redrawDelayMs
   true
 
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
@@ -1995,9 +2071,6 @@ proc button*(
           "|" &
       $style.opacity,
   )
-  if textScroll:
-    ui.markDirty(id)
-    ui.requestRedrawAfterSafe(33)
   let btn = Button.new(label, textScroll)
   btn.style = style
   ui.attach(box, Component(btn))
@@ -2118,9 +2191,6 @@ proc label*(
       "label:" & text & ":" & fontName & ":" & $textScroll, width, height, alignSelf
     ),
   )
-  if textScroll:
-    ui.markDirty(id)
-    ui.requestRedrawAfterSafe(33)
   let lbl = Label.new(text, fontName, textScroll = textScroll)
   ui.attach(box, Component(lbl))
   ui.addChild(box)

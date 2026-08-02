@@ -49,6 +49,7 @@ column (id "root"):
   width = fill
   height = fill
   alignItems = AlignStretch
+  
   panel (id "bar"):
     width = fill
     height = fixed BarHeight
@@ -56,10 +57,12 @@ column (id "root"):
     alignItems = AlignStretch
     background = theme-color "panel"
     opacity = BarOpacity
+    
     overlay (id "content"):
       width = fill
       height = fill
       alignItems = AlignCenter
+    
       row (id "left"):
         width = fill
         height = fill
@@ -67,9 +70,11 @@ column (id "root"):
         alignItems = AlignCenter
         alignSelf = AlignStretch
         justifyContent = JustifyStart
+	
         startMenu (dict-get cfg "start-label")
         workspaces "bar"
         activeWindow "bar"
+      
       row (id "right"):
         width = fill
         height = fill
@@ -77,6 +82,7 @@ column (id "root"):
         alignItems = AlignCenter
         justifyContent = JustifyEnd
         alignSelf = AlignStretch
+	
         volumeWidget "bar"
         mediaWidget "bar-media"
         notificationWidget "bar"
@@ -84,10 +90,12 @@ column (id "root"):
         memoryMeter "bar"
         storageMeter "bar"
         networkMeter "bar"
+	
       row (id "clock-center"):
         width = fill
         height = fill
         alignItems = AlignCenter
         justifyContent = JustifyCenter
         alignSelf = AlignStretch
+	
         dateTime

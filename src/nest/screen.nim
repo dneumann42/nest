@@ -73,14 +73,12 @@ type
     setWindowTitle*: proc(title: string) {.nimcall.}
 
   FontRelays* = object
-    openFont*: proc(path: string, size: int,
-        metrics: var FontMetrics): Font {.nimcall.}
+    openFont*: proc(path: string, size: int, metrics: var FontMetrics): Font {.nimcall.}
     closeFont*: proc(f: Font) {.nimcall.}
     getFontMetrics*: proc(f: Font): FontMetrics {.nimcall.}
     measureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
     drawText*:
-      proc(f: Font, x, y: int, text: string, fg,
-          bg: Color): TextExtent {.nimcall.}
+      proc(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent {.nimcall.}
 
   DrawRelays* = object
     fillRect*: proc(r: Rect, color: Color) {.nimcall.}
@@ -114,34 +112,34 @@ var windowRelays* = WindowRelays(
 
 var fontRelays* = FontRelays(
   openFont: proc(path: string, size: int, metrics: var FontMetrics): Font =
-  Font(0),
+    Font(0),
   closeFont: proc(f: Font) =
-  discard,
+    discard,
   getFontMetrics: proc(f: Font): FontMetrics =
-  FontMetrics(),
+    FontMetrics(),
   measureText: proc(f: Font, text: string): TextExtent =
-  TextExtent(),
+    TextExtent(),
   drawText: proc(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent =
-  TextExtent(),
+    TextExtent(),
 )
 
 var drawRelays* = DrawRelays(
   fillRect: proc(r: Rect, color: Color) =
-  discard,
+    discard,
   lineRect: proc(r: Rect, color: Color) =
-  discard,
+    discard,
   drawLine: proc(x1, y1, x2, y2: int, color: Color) =
-  discard,
+    discard,
   drawPoint: proc(x, y: int, color: Color) =
-  discard,
+    discard,
   loadImage: proc(path: string): Image =
-  Image(0),
+    Image(0),
   freeImage: proc(img: Image) =
-  discard,
+    discard,
   drawImage: proc(img: Image, src, dst: Rect) =
-  discard,
+    discard,
   imageSize: proc(img: Image): TextExtent =
-  TextExtent(),
+    TextExtent(),
 )
 
 var drawCommands*: ptr seq[DrawCommand]
@@ -158,10 +156,8 @@ proc printableText*(text: string): string =
     else:
       result.add ch
 
-proc createWindow*(requestedW, requestedH: int,
-    fullScreen = false): ScreenLayout =
-  result = ScreenLayout(width: requestedW, height: requestedH,
-      fullScreen: fullScreen)
+proc createWindow*(requestedW, requestedH: int, fullScreen = false): ScreenLayout =
+  result = ScreenLayout(width: requestedW, height: requestedH, fullScreen: fullScreen)
   windowRelays.createWindow(result)
 
 proc refresh*() =
@@ -249,8 +245,7 @@ proc drawLine*(x1, y1, x2, y2: int, color: Color) =
 
 proc drawPoint*(x, y: int, color: Color) =
   if drawCommands != nil:
-    drawCommands[].add DrawCommand(kind: DrawPoint, x: x, y: y,
-        pointColor: color)
+    drawCommands[].add DrawCommand(kind: DrawPoint, x: x, y: y, pointColor: color)
     return
   drawRelays.drawPoint(x, y, color)
 

@@ -51,6 +51,16 @@ proc checkFrame(box: Widget, x, y, width, height: float64) =
   check frame.width == width
   check frame.height == height
 
+var realtimeProbeDraws = 0
+
+type RealtimeProbe = ref object of Component
+
+method draw*(self: RealtimeProbe, widget: Widget, ctx: var DrawContext) =
+  discard self
+  discard widget
+  discard ctx
+  inc realtimeProbeDraws
+
 suite "ui layout nesting":
   test "perf stats track bounded rolling fps":
     var stats = PerfStats.init(historySize = 3)
@@ -564,6 +574,85 @@ suite "ui layout nesting":
       check state.targetY > 0
     finally:
       fontRelays = originalFontRelays
+
+  test "unchanged layout reuses previous draw until marked dirty":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(220, 80)
+      ui.loadFont("font", "", 18)
+
+      ui.layout:
+        ui.label(Label1, "Stable", width = fit(), height = fit())
+      check ui.redrewFrame()
+
+      ui.layout:
+        ui.label(Label1, "Stable", width = fit(), height = fit())
+      check not ui.redrewFrame()
+
+      ui.markAllDirty()
+      ui.layout:
+        ui.label(Label1, "Stable", width = fit(), height = fit())
+      check ui.redrewFrame()
+    finally:
+      fontRelays = originalFontRelays
+
+  test "realtime widgets can redraw without a full layout redraw":
+    realtimeProbeDraws = 0
+    var ui = UI.init()
+    ui.initContext(220, 80)
+
+    ui.layout:
+      discard ui.component(Label1, Component(RealtimeProbe()), fixed(40), fixed(20))
+      ui.markRealtime(Label1)
+    check ui.redrewFrame()
+    check realtimeProbeDraws == 0
+    check ui.hasRealtimeWidgets()
+
+    discard ui.drawRealtime()
+    check realtimeProbeDraws == 1
+
+    ui.layout:
+      discard ui.component(Label1, Component(RealtimeProbe()), fixed(40), fixed(20))
+      ui.markRealtime(Label1)
+    check not ui.redrewFrame()
+    check realtimeProbeDraws == 1
+
+    discard ui.drawRealtime()
+    check realtimeProbeDraws == 2
+
+    ui.layout:
+      discard ui.component(Label1, Component(RealtimeProbe()), fixed(40), fixed(20))
+    check not ui.hasRealtimeWidgets()
+    discard ui.drawRealtime()
+    check realtimeProbeDraws == 2
+
+  test "passive backgrounds block input without acting interactive":
+    var ui = UI.init()
+    ui.initContext(220, 80)
+
+    ui.layout:
+      ui.panel(Panel1, cfg(width = fixed(80), height = fixed(40),
+          style = ComponentStyle(hasBackground: true))):
+        discard
+      discard ui.component(Button1, Component(RealtimeProbe()), fixed(20), fixed(20))
+
+    check ui.pointerOverUi(10, 10)
+    check not ui.pointerOverInteractive(10, 10)
 
   test "editor wheel uses measured bounds before first draw":
     let originalFontRelays = fontRelays

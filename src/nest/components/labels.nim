@@ -54,6 +54,7 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
     textExtent = ctx.resources.measureText(self.fontName, self.text)
     textWidth = max(f.width.toInt, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
+    ctx.requestRedrawAfter(33)
     let
       gap = 32
       cycle = textExtent.width + gap

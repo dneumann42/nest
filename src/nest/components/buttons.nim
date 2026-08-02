@@ -75,6 +75,7 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, ButtonPaddingY)
     textWidth = max(f.width.toInt - ButtonPaddingX * 2, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
+    ctx.requestRedrawAfter(33)
     let
       gap = 32
       cycle = textExtent.width + gap

@@ -1,7 +1,22 @@
 import std/sets
 
-import nest/[appConfig, framePacer, palette, resources, ui]
+import nest/[appConfig, palette, resources, ui]
 import nest/[input, screen]
+
+const
+  FixedFrameNumerator = 1000
+  FixedFrameDenominator = 60
+
+proc scheduleNextFrame(nextFrameTicks: var int; frameRemainder: var int; now: int) =
+  frameRemainder += FixedFrameNumerator
+  let frameTicks = max(frameRemainder div FixedFrameDenominator, 1)
+  frameRemainder = frameRemainder mod FixedFrameDenominator
+  if nextFrameTicks == 0:
+    nextFrameTicks = now + frameTicks
+  else:
+    nextFrameTicks += frameTicks
+    if now > nextFrameTicks + frameTicks:
+      nextFrameTicks = now + frameTicks
 
 proc textFromEvent(chars: array[4, char]): string =
   for ch in chars:
@@ -22,10 +37,10 @@ proc wheelDeltaY(e: Event): float64 =
     e.y.toFloat
 
 proc handleEvent(
-    e: Event,
-    running: var bool,
-    updateContext: var UpdateContext,
-    drawContext: var DrawContext,
+    e: Event;
+    running: var bool;
+    updateContext: var UpdateContext;
+    drawContext: var DrawContext;
 ) =
   case e.kind
   of QuitEvent, WindowCloseEvent:
@@ -77,7 +92,7 @@ proc handleEvent(
   else:
     discard
 
-proc handleEvent(e: Event, running: var bool, ui: var UI) =
+proc handleEvent(e: Event; running: var bool; ui: var UI) =
   case e.kind
   of QuitEvent, WindowCloseEvent:
     running = false
@@ -113,11 +128,8 @@ proc handleEvent(e: Event, running: var bool, ui: var UI) =
   else:
     discard
 
-template application*(cfg: AppConfig, blk: untyped) =
+template application*(cfg: AppConfig; blk: untyped) =
   let window {.inject.} = cfg.initWindow()
-  const
-    FixedFrameNumerator = 1000
-    FixedFrameDenominator = 60
   var
     running {.inject.} = true
     updateContext {.inject.} =
@@ -131,7 +143,10 @@ template application*(cfg: AppConfig, blk: untyped) =
     )
   drawContext.resources.loadFont("font", "", 18)
   drawContext.resources.loadFont("editor", "nerd-monospace", 18)
-  var framePacer = FramePacer.init()
+  var
+    firstFrame = true
+    nextFrameTicks = input.getTicks()
+    frameRemainder = 0
   while running:
     var e = Event()
     let inputFlags =
@@ -148,9 +163,8 @@ template application*(cfg: AppConfig, blk: untyped) =
       updateContext.submittedWidgets.clear()
       updateContext.sliderValues.clear()
       var now = input.getTicks()
-      framePacer.beginFixedFrame(17, now)
-      while running and now < framePacer.nextFrameTicks:
-        if input.waitEvent(e, framePacer.nextFrameTicks - now, inputFlags):
+      while running and now < nextFrameTicks:
+        if input.waitEvent(e, nextFrameTicks - now, inputFlags):
           handleEvent(e, running, updateContext, drawContext)
           while pollEvent(e, inputFlags):
             handleEvent(e, running, updateContext, drawContext)
@@ -161,12 +175,11 @@ template application*(cfg: AppConfig, blk: untyped) =
       blk
       updateContext.mouseLeftPressed = false
       refresh()
-      framePacer.finishFixedFrame(
-        FixedFrameNumerator, FixedFrameDenominator, input.getTicks()
-      )
+      scheduleNextFrame(nextFrameTicks, frameRemainder, input.getTicks())
       continue
 
-    var shouldRender = framePacer.takeFirstFrame()
+    var shouldRender = firstFrame
+    firstFrame = false
     let frameEvent =
       if shouldRender:
         false
@@ -192,17 +205,17 @@ template application*(cfg: AppConfig, blk: untyped) =
     refresh()
   shutdown()
 
-template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
+template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
   let window {.inject.} = cfg.initWindow()
-  const
-    FixedFrameNumerator = 1000
-    FixedFrameDenominator = 60
   var running {.inject.} = true
   ui.setTheme(cfg.themeName)
   ui.initContext(window.width, window.height)
   ui.loadFont("font", "", 18)
   ui.loadFont("editor", "nerd-monospace", 18)
-  var framePacer = FramePacer.init()
+  var
+    firstFrame = true
+    nextFrameTicks = input.getTicks()
+    frameRemainder = 0
   while running:
     var e = Event()
     let inputFlags =
@@ -214,9 +227,8 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
     if cfg.alwaysRun60Fps:
       ui.beginInputFrame()
       var now = input.getTicks()
-      framePacer.beginFixedFrame(17, now)
-      while running and now < framePacer.nextFrameTicks:
-        if input.waitEvent(e, framePacer.nextFrameTicks - now, inputFlags):
+      while running and now < nextFrameTicks:
+        if input.waitEvent(e, nextFrameTicks - now, inputFlags):
           handleEvent(e, running, ui)
           while pollEvent(e, inputFlags):
             handleEvent(e, running, ui)
@@ -224,17 +236,15 @@ template application*(cfg: AppConfig, ui: var UI, blk: untyped) =
       while pollEvent(e, inputFlags):
         handleEvent(e, running, ui)
       ui.setDrawTicks(input.getTicks())
-      ui.markAllDirty()
       blk
       ui.finishInputFrame()
       if ui.redrewFrame():
         refresh()
-      framePacer.finishFixedFrame(
-        FixedFrameNumerator, FixedFrameDenominator, input.getTicks()
-      )
+      scheduleNextFrame(nextFrameTicks, frameRemainder, input.getTicks())
       continue
 
-    var shouldRender = framePacer.takeFirstFrame()
+    var shouldRender = firstFrame
+    firstFrame = false
     let redrawWaitMs = ui.redrawDelayMs()
     let frameEvent =
       if shouldRender:

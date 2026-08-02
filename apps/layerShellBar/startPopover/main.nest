@@ -43,10 +43,20 @@ define:
       cmd = "wish ~/.projects/maindo_tcl/main.tcl"
       place = "right"
     {}:
-      label = "Performance Overlay"
+      label = "Library"
+      name = (id "menu" "library")
+      cmd = "pcmanfm $HOME/Documents/Library"
+      place = "left"
+    {}:
+      label = "Perf Overlay"
       name = (id "menu" "perf-overlay")
       cmd = "toggle-perf-overlay"
       place = "right"
+    {}:
+      label = "Btop"
+      name = (id "menu" "btop")
+      cmd = "foot btop"
+      place = "middle"
     {}:
       label = "Logout"
       name = (id "menu" "logout")
@@ -116,7 +126,18 @@ card (id "menu" "panel"):
           button cmd.name cmd.label:
             width = fill
             height = fit
-  row (id "menu" "power"):
+  column (id "menu" "middle"):
+    width = fill
+    height = fit
+    gap = DialogGap
+    alignItems = AlignCenter
+    justifyContent = JustifyCenter
+    for cmd (iter commands):
+      when (= cmd.place "middle"):
+        button cmd.name cmd.label:
+          width = fill
+          height = fit
+  row (id "menu" "bottom"):
     width = fill
     height = fit
     gap = DialogGap
