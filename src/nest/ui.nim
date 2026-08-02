@@ -294,7 +294,8 @@ proc redrewFrame*(self: UI): bool {.raises: [].} =
   self.frameRedrawn
 
 proc hasPendingWidgetEvents*(self: UI): bool {.raises: [].} =
-  self.context.draw.activeWidgets.len > 0 or self.context.draw.submittedWidgets.len > 0
+  self.context.draw.activeWidgets.len > 0 or
+      self.context.draw.submittedWidgets.len > 0
 
 proc setDrawTicks*(self: var UI, ticks: int) =
   self.context.draw.ticks = ticks
@@ -467,6 +468,14 @@ proc id*(self: UI, parts: varargs[string, `$`]): WidgetID =
       scoped.add part
   keyedWidgetID(scoped)
 
+proc scopedID*(self: var UI, parent: WidgetID,
+    parts: varargs[string, `$`]): WidgetID =
+  self.idScopes.add($parent)
+  try:
+    self.id(parts)
+  finally:
+    self.idScopes.setLen(self.idScopes.len - 1)
+
 proc nextAutoID*(self: var UI): WidgetID =
   let key = "_nest_auto_id:" & $self.autoIDCounter
   inc self.autoIDCounter
@@ -480,6 +489,12 @@ template scope*(self: var UI, key: untyped, body: untyped) =
       discard
     finally:
       self.idScopes.setLen(self.idScopes.len - 1)
+
+template autoScoped*(self: var UI, body: untyped) =
+  block:
+    let autoID {.inject.} = self.nextAutoID()
+    self.scope(autoID):
+      body
 
 proc beginEvents(self: var UI, context: DrawContext) =
   self.phase = EventPhase
@@ -1685,36 +1700,6 @@ proc overlay*(self: var UI, config: BoxConfig) {.layoutOnly.} =
     scrollY: config.scrollY,
   )
 
-template row*(self: var UI, config: BoxConfig, body: untyped) =
-  block:
-    if self.phase == EventPhase:
-      body
-      discard
-    else:
-      body
-      discard
-      self.row(config)
-
-template column*(self: var UI, config: BoxConfig, body: untyped) =
-  block:
-    if self.phase == EventPhase:
-      body
-      discard
-    else:
-      body
-      discard
-      self.column(config)
-
-template overlay*(self: var UI, config: BoxConfig, body: untyped) =
-  block:
-    if self.phase == EventPhase:
-      body
-      discard
-    else:
-      body
-      discard
-      self.overlay(config)
-
 template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
@@ -1731,6 +1716,16 @@ template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
       self.row(config)
       discard self.popLayout()
+
+template row*(self: var UI, config: BoxConfig, body: untyped) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      body
+      discard
+      self.row(config)
 
 template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
@@ -1749,6 +1744,16 @@ template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       self.column(config)
       discard self.popLayout()
 
+template column*(self: var UI, config: BoxConfig, body: untyped) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      body
+      discard
+      self.column(config)
+
 template overlay*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
   block:
@@ -1766,6 +1771,16 @@ template overlay*(self: var UI, id: WidgetID, config: BoxConfig,
       discard
       self.overlay(config)
       discard self.popLayout()
+
+template overlay*(self: var UI, config: BoxConfig, body: untyped) =
+  block:
+    if self.phase == EventPhase:
+      body
+      discard
+    else:
+      body
+      discard
+      self.overlay(config)
 
 template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
     body: untyped) =
@@ -1793,6 +1808,11 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
       self.layout.alignCenterY(child, layoutParent)
       discard self.popLayout()
 
+template center*(self: var UI, w = fill(), h = fill(), body: untyped) =
+  self.autoScoped:
+    self.center(autoID, w, h):
+      body
+
 template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
@@ -1813,6 +1833,11 @@ template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       self.column(config)
       discard self.popLayout()
 
+template panel*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.panel(autoID, config):
+      body
+
 template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
@@ -1832,6 +1857,11 @@ template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
       self.column(config)
       discard self.popLayout()
+
+template card*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.card(autoID, config):
+      body
 
 template floatingCardBelow*(
     self: var UI, id: WidgetID, anchorID: WidgetID, config: BoxConfig, body: untyped
@@ -1880,6 +1910,11 @@ template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig,
       discard
       self.row(config)
       discard self.popLayout()
+
+template dialogHeader*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.dialogHeader(autoID, config):
+      body
 
 template modalDialog*(
     self: var UI, id: WidgetID, open: bool, config: BoxConfig, body: untyped
@@ -1932,6 +1967,11 @@ template menuBar*(self: var UI, id: WidgetID, config: BoxConfig,
       self.row(config)
       discard self.popLayout()
 
+template menuBar*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.menuBar(autoID, config):
+      body
+
 template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   block:
     if self.phase == EventPhase:
@@ -1951,6 +1991,11 @@ template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard
       self.column(config)
       discard self.popLayout()
+
+template table*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.table(autoID, config):
+      body
 
 template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
@@ -1973,6 +2018,11 @@ template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig,
       self.row(config)
       discard self.popLayout()
 
+template tableHeader*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.tableHeader(autoID, config):
+      body
+
 template tableRow*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
   block:
@@ -1994,6 +2044,11 @@ template tableRow*(self: var UI, id: WidgetID, config: BoxConfig,
       self.row(config)
       discard self.popLayout()
 
+template tableRow*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.tableRow(autoID, config):
+      body
+
 template tableCell*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
   block:
@@ -2014,6 +2069,11 @@ template tableCell*(self: var UI, id: WidgetID, config: BoxConfig,
       discard
       self.column(config)
       discard self.popLayout()
+
+template tableCell*(self: var UI, config: BoxConfig, body: untyped) =
+  self.autoScoped:
+    self.tableCell(autoID, config):
+      body
 
 proc box*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
@@ -2163,7 +2223,8 @@ proc tabs*(
       alignSelf = alignSelf)
   ui.setRenderKey(
     id,
-    renderKey("tabs:" & labels.join("|") & ":" & $selected, width, height, alignSelf) &
+    renderKey("tabs:" & labels.join("|") & ":" & $selected, width, height,
+        alignSelf) &
       "|" & $gap & "|" & $padding & "|" & $style.hasBackground & "|" &
           $style.background & "|" & $style.hasOpacity & "|" & $style.opacity,
   )
@@ -2565,4 +2626,202 @@ proc textEditor*(
       height,
       alignSelf,
     ),
+  )
+
+proc container*(
+    self: var UI,
+    component: Container,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): Widget {.discardable, layoutOnly.} =
+  self.container(self.nextAutoID(), component, width, height, alignSelf)
+
+proc component*(
+    self: var UI,
+    component: Component,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+    renderKeyOverride = "",
+): Widget {.discardable, layoutOnly.} =
+  self.component(
+    self.nextAutoID(), component, width, height, alignSelf, renderKeyOverride
+  )
+
+proc spacer*(
+    self: var UI, width, height: SizePolicy, alignSelf = AlignAuto
+): Widget {.discardable, layoutOnly.} =
+  self.spacer(self.nextAutoID(), width, height, alignSelf)
+
+proc button*(
+    ui: var UI,
+    label: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+    textScroll = false,
+    style = ComponentStyle(),
+): bool {.discardable.} =
+  ui.button(ui.nextAutoID(), label, width, height, alignSelf, textScroll, style)
+
+proc menu*(
+    ui: var UI,
+    label: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  ui.menu(ui.nextAutoID(), label, width, height, alignSelf)
+
+proc menuDivider*(
+    ui: var UI, width, height: SizePolicy, alignSelf = AlignAuto
+) {.layoutOnly.} =
+  ui.menuDivider(ui.nextAutoID(), width, height, alignSelf)
+
+proc tabs*(
+    ui: var UI,
+    labels: openArray[string],
+    selected: var int,
+    width = fill(),
+    height = fit(),
+    alignSelf = AlignAuto,
+    gap = 0.0,
+    padding = 0.0,
+    style = ComponentStyle(),
+    tabStyle = TabStyle(),
+) =
+  ui.tabs(
+    ui.nextAutoID(), labels, selected, width, height, alignSelf, gap, padding,
+    style, tabStyle
+  )
+
+proc label*(
+    ui: var UI,
+    text: string,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+    textScroll = false,
+) {.layoutOnly.} =
+  ui.label(ui.nextAutoID(), text, width, height, fontName, alignSelf, textScroll)
+
+proc checkbox*(
+    ui: var UI,
+    label: string,
+    checked: bool,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  ui.checkbox(ui.nextAutoID(), label, checked, width, height, fontName, alignSelf)
+
+proc coloredLabel*(
+    ui: var UI,
+    text: string,
+    color: Color,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  ui.coloredLabel(ui.nextAutoID(), text, color, width, height, fontName, alignSelf)
+
+proc diagnosticLabel*(
+    ui: var UI,
+    text: string,
+    color: Color,
+    width, height: SizePolicy,
+    clickable = false,
+    fontName = "font",
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  ui.diagnosticLabel(
+    ui.nextAutoID(), text, color, width, height, clickable, fontName, alignSelf
+  )
+
+proc image*(
+    ui: var UI,
+    path: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  ui.image(ui.nextAutoID(), path, width, height, alignSelf)
+
+proc image*(
+    ui: var UI,
+    path: string,
+    source: Rect,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+) {.layoutOnly.} =
+  ui.image(ui.nextAutoID(), path, source, width, height, alignSelf)
+
+proc imageButton*(
+    ui: var UI,
+    path: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+    style = ComponentStyle(),
+): bool {.discardable.} =
+  ui.imageButton(ui.nextAutoID(), path, width, height, alignSelf, style)
+
+proc imageButton*(
+    ui: var UI,
+    path: string,
+    source: Rect,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+    style = ComponentStyle(),
+): bool {.discardable.} =
+  ui.imageButton(ui.nextAutoID(), path, source, width, height, alignSelf, style)
+
+proc mesh2d*(
+    ui: var UI,
+    state: var Mesh2DState,
+    imagePath: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): bool {.discardable.} =
+  ui.mesh2d(ui.nextAutoID(), state, imagePath, width, height, alignSelf)
+
+proc slider*(
+    ui: var UI,
+    value, minimum, maximum: float64,
+    width, height: SizePolicy,
+    orientation = SliderHorizontal,
+    alignSelf = AlignAuto,
+): tuple[active: bool, value: float64] {.discardable.} =
+  ui.slider(
+    ui.nextAutoID(), value, minimum, maximum, width, height, orientation, alignSelf
+  )
+
+proc combobox*(
+    ui: var UI,
+    selected: int,
+    options: openArray[string],
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+): tuple[changed: bool, index: int] {.discardable.} =
+  ui.combobox(ui.nextAutoID(), selected, options, width, height, alignSelf)
+
+proc lineInput*(
+    ui: var UI,
+    state: LineInputState,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+) =
+  ui.lineInput(ui.nextAutoID(), state, width, height, fontName, alignSelf)
+
+proc textEditor*(
+    ui: var UI,
+    state: EditorState,
+    width, height: SizePolicy,
+    fontName = "font",
+    alignSelf = AlignAuto,
+    lineNumbers = false,
+    scrollbars = true,
+    syntax = "",
+    gutterMarkers: HashSet[int] = initHashSet[int](),
+    activeLine = 0,
+) {.layoutOnly.} =
+  ui.textEditor(
+    ui.nextAutoID(), state, width, height, fontName, alignSelf, lineNumbers,
+    scrollbars, syntax, gutterMarkers, activeLine
   )
