@@ -521,6 +521,9 @@ proc sliderValue*(self: UI, id: WidgetID): tuple[active: bool, value: float64] =
 proc focused*(self: UI, id: WidgetID): bool =
   self.eventFocusedWidget == id
 
+proc liveWidget*(self: UI, id: WidgetID): bool =
+  id in self.liveWidgetIDs
+
 proc inEventPhase*(self: UI): bool =
   self.phase == EventPhase
 
@@ -1358,6 +1361,12 @@ template layout*(
     layoutOk = false
 
   if layoutOk:
+    if drawContext.focusedWidget != InvalidWidgetID and
+        not ui.liveWidget(drawContext.focusedWidget):
+      drawContext.focusedWidget = InvalidWidgetID
+      updateContext.focusedWidget = InvalidWidgetID
+      ui.eventFocusedWidget = InvalidWidgetID
+      ui.markAllDirty()
     let beforeHot {.gensym.} = drawContext.hotWidgets
     let beforeActive {.gensym.} = drawContext.activeWidgets
     let beforeSubmitted {.gensym.} = drawContext.submittedWidgets
@@ -1411,6 +1420,12 @@ template layout*(ui: var UI, blk: untyped): auto =
     layoutOk = false
 
   if layoutOk:
+    if ui.context.draw.focusedWidget != InvalidWidgetID and
+        not ui.liveWidget(ui.context.draw.focusedWidget):
+      ui.context.draw.focusedWidget = InvalidWidgetID
+      ui.context.update.focusedWidget = InvalidWidgetID
+      ui.eventFocusedWidget = InvalidWidgetID
+      ui.markAllDirty()
     let beforeHot {.gensym.} = ui.context.draw.hotWidgets
     let beforeActive {.gensym.} = ui.context.draw.activeWidgets
     let beforeSubmitted {.gensym.} = ui.context.draw.submittedWidgets
