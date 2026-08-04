@@ -65,12 +65,13 @@ method draw*(self: Card, widget: Widget, ctx: var DrawContext) =
     h = f.height.toInt
   if w <= 0 or h <= 0:
     return
+  fillRect(rect(x + 2, y + 2, w, h), color(0, 0, 0))
   fillRect(rect(x, y, w, h), self.styledBackground(ctx.palette.cardBackground))
   drawBorder(f, ctx.palette.cardBorder)
   if w <= 2 or h <= 2:
     return
   fillRect(rect(x + 1, y + 1, max(w - 2, 0), 1), ctx.palette.buttonHighlight)
-  fillRect(rect(x + 1, y + 1, 4, max(h - 2, 0)), ctx.palette.cardAccent)
+  fillRect(rect(x + 1, y + 1, 2, max(h - 2, 0)), ctx.palette.cardAccent)
   fillRect(rect(x + 1, y + h - 2, max(w - 2, 0), 1), ctx.palette.panelBorder)
   fillRect(rect(x + w - 2, y + 1, 1, max(h - 2, 0)), ctx.palette.panelBorder)
 

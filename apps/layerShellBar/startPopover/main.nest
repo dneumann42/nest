@@ -24,8 +24,8 @@ define:
       place = "left"
     {}:
       label = "Editor"
-      name = (id "menu" "emacs")
-      cmd = "emacsclient -c -a emacs"
+      name = (id "menu" "editor")
+      cmd = "$HOME/.nimble/bin/nest run $HOME/.workspace/nest/apps/duck"
       place = "right"
     {}:
       label = "Office"

@@ -31,6 +31,7 @@ type Palette* = object
   textColor*: Color
 
 proc dark*(T: typedesc[Palette]): T =
+  let t: uint8 = 8
   T(
     primary: color(79, 185, 154),
     primaryStrong: color(110, 219, 188),
@@ -50,8 +51,11 @@ proc dark*(T: typedesc[Palette]): T =
     panelBackground: color(20, 23, 26),
     panelBorder: color(68, 79, 86),
     panelMuted: color(35, 40, 44),
-    cardBackground: color(31, 36, 40),
-    cardBackgroundHot: color(43, 50, 55),
+    # cardBackground: color(31, 36, 40),
+    # cardBackgroundHot: color(43, 50, 55),
+
+    cardBackground: color(31 + t, 36 + t, 40 + t),
+    cardBackgroundHot: color(43 + t, 50 + t, 55 + t),
     cardBorder: color(84, 100, 108),
     cardAccent: color(79, 185, 154),
     dialogHeaderBackground: color(37, 43, 48),

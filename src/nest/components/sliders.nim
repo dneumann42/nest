@@ -92,6 +92,7 @@ method draw*(self: Slider, widget: Widget, ctx: var DrawContext) =
         ctx.palette.buttonBorderHot
       else:
         ctx.palette.buttonBorder
+  fillRect(rect(f.x.toInt + 2, f.y.toInt + 2, f.width.toInt, f.height.toInt), color(0, 0, 0))
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), ctx.palette.cardBackground)
   drawBorder(f, border)
 
@@ -106,6 +107,8 @@ method draw*(self: Slider, widget: Widget, ctx: var DrawContext) =
       thumbY = (f.y + f.height / 2.0).toInt - ThumbSize div 2
     fillRect(rect(trackX, trackY, trackW, TrackThickness), ctx.palette.panelMuted)
     fillRect(rect(trackX, trackY, fillW, TrackThickness), ctx.palette.cardAccent)
+
+    fillRect(rect(thumbX + 2, thumbY + 2, ThumbSize, ThumbSize), color(0, 0, 0))
     fillRect(rect(thumbX, thumbY, ThumbSize, ThumbSize), ctx.palette.backgroundActive)
     drawBorder(Frame(x: thumbX.toFloat, y: thumbY.toFloat, width: ThumbSize.toFloat, height: ThumbSize.toFloat), border)
   of SliderVertical:
@@ -117,7 +120,10 @@ method draw*(self: Slider, widget: Widget, ctx: var DrawContext) =
       fillY = trackY + trackH - fillH
       thumbX = (f.x + f.width / 2.0).toInt - ThumbSize div 2
       thumbY = trackY + trackH - (trackH.toFloat * n).toInt - ThumbSize div 2
+    fillRect(rect(trackX + 2, trackY + 2, TrackThickness, trackH), color(0, 0, 0))
     fillRect(rect(trackX, trackY, TrackThickness, trackH), ctx.palette.panelMuted)
     fillRect(rect(trackX, fillY, TrackThickness, fillH), ctx.palette.cardAccent)
+
+    fillRect(rect(thumbX + 2, thumbY + 2, ThumbSize, ThumbSize), color(0, 0, 0))
     fillRect(rect(thumbX, thumbY, ThumbSize, ThumbSize), ctx.palette.backgroundActive)
     drawBorder(Frame(x: thumbX.toFloat, y: thumbY.toFloat, width: ThumbSize.toFloat, height: ThumbSize.toFloat), border)

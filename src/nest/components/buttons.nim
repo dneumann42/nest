@@ -42,6 +42,9 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     hot = ctx.hot(widget.id)
     active = ctx.active(widget.id)
   fillRect(
+    rect(f.x.toInt + 2, f.y.toInt + 2, f.width.toInt, f.height.toInt),
+    color(0, 0, 0))
+  fillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
     if self.style.hasBackground:
       self.styledBackground(ctx.palette.background)
