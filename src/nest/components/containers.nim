@@ -1,3 +1,5 @@
+import std/sets
+
 import ../widgets2
 import component
 import nest/[coords, screen]
@@ -43,6 +45,19 @@ proc new*(T: typedesc[Card]): T =
 
 proc new*(T: typedesc[DialogHeader]): T =
   T()
+
+method update*(self: Card, widget: Widget, ctx: var UpdateContext) =
+  discard self
+  let frame = widget.frame
+  let containsPointer =
+    ctx.mouseX.toFloat >= frame.x and
+    ctx.mouseX.toFloat < frame.x + frame.width and
+    ctx.mouseY.toFloat >= frame.y and
+    ctx.mouseY.toFloat < frame.y + frame.height
+  if containsPointer and ctx.mouseLeftPressed:
+    # Floating cards, including menu popovers, are opaque input surfaces.
+    # Their children are updated after the card and may claim the press.
+    ctx.activeWidgets.clear()
 
 proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)

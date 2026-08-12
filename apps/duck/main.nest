@@ -11,6 +11,9 @@ use dialogs:
 use editorWorkspace:
   include leafPane splitPane firstPaneID paneCount paneEditorID splitLeaf unsplitLeaf editorTree editorWorkspace
 
+use appShell:
+  include duckStatusBar duckAppShell
+
 define:
   rootID = id
   menuID = (id "duck" "menubar")
@@ -158,7 +161,7 @@ clampActiveBuffer
 events:
   when (external "duck:filePicked"):
     set pickedFile (pickResult "duck:filePicked")
-    openFileInEditor pickedFile
+    send "duck.editor.open" pickedFile
     set menuAction pickedFile
     clearPickResult "duck:filePicked"
 
@@ -208,37 +211,4 @@ events:
     handleMenuAction menuAction
     clearMenuResult "duck:menubar"
 
-panel rootID:
-  width = fill
-  height = fill
-  gap = 0.0
-  padding = 0.0
-  alignItems = AlignStretch
-  duckMenuBar
-  tabs tabBarID (bufferLabels buffers) activeBuffer:
-    width = fill
-    height = fixed 36
-    padding = 4
-    gap = 2
-    background = color 35 40 44
-  editorWorkspace "duck:workspace"
-  when showStatusBar:
-    row (id "duck" "status"):
-      width = fill
-      height = fixed 24
-      padding = 4
-      gap = 12
-      background = color 70 70 70
-      label (id "duck" "status" "message") statusText:
-        width = fill
-        height = fit
-      label (id "duck" "status" "position") (string "Ln " (editorLine (activeEditorID)) ", Col " (editorColumn (activeEditorID))):
-        width = fit
-        height = fit
-      label (id "duck" "status" "count") (string (lineCount (activeText)) " lines"):
-        width = fit
-        height = fit
-  findDialog
-  replaceDialog
-  gotoDialog
-  aboutDialog
+duckAppShell

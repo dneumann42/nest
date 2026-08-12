@@ -61,7 +61,7 @@ fun unsplitLeaf tree target:
         "second"
         (unsplitLeaf rightTree target)
 
-fun editorTree tree workspace:
+fun editorTree tree workspace focusedPane:
   define:
     kind = (dict-get tree "kind")
   cond:
@@ -70,16 +70,19 @@ fun editorTree tree workspace:
         paneID = (dict-get tree "id")
         selectID = (id workspace "pane" paneID "select")
         editorID = (paneEditorID workspace paneID)
+        active = (= paneID focusedPane)
       events:
         when (clicked selectID):
           send "duck.editor.focused" paneID
-        when (focused editorID):
+        when (clicked editorID):
           send "duck.editor.focused" paneID
-      column (id workspace "pane" paneID):
+      panel (id workspace "pane" paneID):
         width = fill
         height = fill
-        gap = 0
-        button selectID (string "Editor " paneID):
+        padding = 3
+        gap = 2
+        background = (pick active (color 35 75 115) (color 35 40 44))
+        button selectID (string (pick active "● " "") "Editor " paneID):
           width = fill
           height = fixed 22
         editor editorID:
@@ -100,15 +103,15 @@ fun editorTree tree workspace:
             width = fill
             height = fill
             gap = 4
-            editorTree leftTree workspace
-            editorTree rightTree workspace
+            editorTree leftTree workspace focusedPane
+            editorTree rightTree workspace focusedPane
         else:
           column (id workspace "split" splitID):
             width = fill
             height = fill
             gap = 4
-            editorTree leftTree workspace
-            editorTree rightTree workspace
+            editorTree leftTree workspace focusedPane
+            editorTree rightTree workspace focusedPane
 
 component editorWorkspace key:
   define:
@@ -123,9 +126,20 @@ component editorWorkspace key:
     panes = 1
     maxPanes = 8
 
+  editorTree tree keyText focusedPane
+
   events:
     when (received "duck.editor.focused"):
       set focusedPane (receive "duck.editor.focused")
+    when (received "duck.editor.open"):
+      define:
+        path = (receive "duck.editor.open")
+        editorID = (paneEditorID keyText focusedPane)
+        content = ""
+      with (open-file path "rb") stream:
+        set content (read-all stream)
+      setEditorText editorID content
+      set statusText (string "Opened " path)
     when (received "duck.editor.split"):
       receive "duck.editor.split"
       when (< panes maxPanes):
@@ -151,5 +165,3 @@ component editorWorkspace key:
       set tree updatedTree
       set focusedPane (firstPaneID updatedTree)
       set panes (paneCount updatedTree)
-
-  editorTree tree keyText

@@ -440,6 +440,24 @@ tabs (id "tabs") labels selected:
         app.runtime.render(splitUi, app.program)
         check app.runtime.lastError == ""
 
+      let opened = getTempDir() / "duck-focused-pane.txt"
+      writeFile(opened, "focused pane content")
+      discard app.runtime.evaluator.exec(parse(
+        "send \"duck.editor.focused\" \"pane-2\"\nsend \"duck.editor.open\" \"" &
+          opened.replace("\\", "\\\\") & "\"\n"
+      ))
+      var focusedPaneUi = UI.init()
+      focusedPaneUi.initContext(800, 600)
+      focusedPaneUi.loadFont("font", "", 18)
+      focusedPaneUi.loadFont("editor", "", 18)
+      app.runtime.render(focusedPaneUi, app.program)
+      check app.runtime.lastError == ""
+      let focusedText = app.runtime.evaluator.exec(parse(
+        "editorText \"duck:workspace:pane:pane-2:editor\"\n"
+      ))
+      check focusedText.kind == Text
+      check focusedText.text == "focused pane content"
+
       check app.runtime.lastError == ""
       check app.runtime.get("activeBuffer").number == 0
       check app.runtime.get("buffers").items.len >= 1
@@ -1062,6 +1080,46 @@ menuBar menuID:
     finally:
       fontRelays = originalFontRelays
 
+  test "menu popovers consume clicks before widgets beneath them":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+    ui.initContext(360, 160)
+    ui.loadFont("font", "", 18)
+    let source = parse("""
+define:
+  presses = 0
+  buttonID = (id "behind-menu")
+events:
+  when (clicked buttonID):
+    += presses 1
+column (id "root"):
+  width = fill
+  height = fill
+  menuBar (id "blocking-menu"):
+    width = fill
+    height = fixed 28
+    menu "file" "File":
+      menuItem "open" "Open"
+  button buttonID "Behind menu":
+    width = fill
+    height = fixed 40
+""")
+
+    runtime.openMenus["blocking-menu"] = "file"
+    runtime.render(ui, source)
+    runtime.render(ui, source)
+    let located = ui.widgetFrame(ui.id("blocking-menu", "item", "0"))
+    check located.ok
+    let itemFrame = located.frame
+    ui.mouseMove(itemFrame.x.toInt + 2, itemFrame.y.toInt + 2)
+    ui.mouseDown()
+    runtime.render(ui, source)
+    ui.mouseUp()
+    runtime.render(ui, source)
+
+    check runtime.get("presses").number == 0
+    check runtime.dialogResults.getOrDefault("menu:blocking-menu") == "file.open"
+
   test "duck file open menu action is handled":
     let originalFontRelays = fontRelays
     let originalPickFileDialog = pickFileDialog
@@ -1111,8 +1169,8 @@ menuBar menuID:
       let picked = runtime.get("pickedFile")
       check picked.kind == Text
       check picked.text == duckFile
-      check runtime.get("activeBuffer").number == 1
-      let editorText = runtime.evaluator.exec(parse("editorText \"duck:editor:1\"\n"))
+      check runtime.get("activeBuffer").number == 0
+      let editorText = runtime.evaluator.exec(parse("editorText \"duck:editor:0\"\n"))
       check editorText.kind == Text
       check editorText.text == duckContent
     finally:
