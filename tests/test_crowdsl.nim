@@ -34,6 +34,60 @@ events:
     check runtime.get("count").kind == Number
     check runtime.get("count").number == 2
 
+  test "state persists a component model through ordinary set":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+
+    runtime.render(ui, """
+state "counter":
+  count = 0
+events:
+  += count 1
+""")
+    runtime.render(ui, """
+state "counter":
+  count = 0
+events:
+  += count 1
+""")
+
+    check runtime.get("count").kind == Number
+    check runtime.get("count").number == 2
+
+  test "state initializes structured values":
+    let runtime = NestCrowRuntime.init()
+    var ui = UI.init()
+
+    runtime.render(ui, """
+fun leaf:
+  {}:
+    kind = "leaf"
+state "tree":
+  value = (leaf)
+""")
+
+    check runtime.get("value").kind == Dictionary
+    check runtime.get("value").entries["kind"].text == "leaf"
+
+  test "Crow functions retain dictionary arguments in dictionary fields":
+    let runtime = NestCrowRuntime.init()
+    let value = runtime.evaluator.exec(parse("""
+fun leaf name:
+  {}:
+    kind = "leaf"
+    id = name
+fun split direction left right:
+  {}:
+    kind = "split"
+    direction = direction
+    first = left
+    second = right
+dict-get (split "vertical" (leaf "one") (leaf "two")) "first"
+"""))
+
+    check value.kind == Dictionary
+    check value.entries["kind"].text == "leaf"
+
   test "imports are loaded once per runtime":
     let dir = getTempDir() / "nest-crow-import-once-test"
     createDir(dir)
@@ -356,7 +410,35 @@ tabs (id "tabs") labels selected:
       ui.loadFont("font", "", 18)
       ui.loadFont("editor", "", 18)
 
+      app.runtime.render(ui, app.program)
+      check app.runtime.lastError == ""
+      discard app.runtime.evaluator.exec(parse("send \"duck.editor.split\" true\n"))
+      app.runtime.render(ui, app.program)
+      check app.runtime.lastError == ""
+      discard app.runtime.evaluator.exec(parse("send \"duck.editor.split-horizontal\" true\n"))
+      app.runtime.render(ui, app.program)
+      check app.runtime.lastError == ""
+      discard app.runtime.evaluator.exec(parse("send \"duck.editor.split\" true\n"))
+      app.runtime.render(ui, app.program)
+      check app.runtime.lastError == ""
       app.runtime.renderLayoutOnly(ui, app.program, 800, 600)
+      let
+        leftPane = ui.widget(ui.id("duck:workspace", "pane", "pane-1")).frame
+        upperPane = ui.widget(ui.id("duck:workspace", "pane", "pane-2")).frame
+        lowerPane = ui.widget(ui.id("duck:workspace", "pane", "pane-3")).frame
+        rightPane = ui.widget(ui.id("duck:workspace", "pane", "pane-4")).frame
+      check leftPane.x < upperPane.x
+      check upperPane.y < lowerPane.y
+      check lowerPane.x < rightPane.x
+
+      for _ in 0 ..< 32:
+        discard app.runtime.evaluator.exec(parse("send \"duck.editor.split\" true\n"))
+        var splitUi = UI.init()
+        splitUi.initContext(800, 600)
+        splitUi.loadFont("font", "", 18)
+        splitUi.loadFont("editor", "", 18)
+        app.runtime.render(splitUi, app.program)
+        check app.runtime.lastError == ""
 
       check app.runtime.lastError == ""
       check app.runtime.get("activeBuffer").number == 0
@@ -390,6 +472,28 @@ tabs (id "tabs") labels selected:
 
     check app.lastError == ""
     check app.runtime.get("count").number == 1
+
+  test "reloading an app schedules an immediate redraw":
+    let app = NestCrowApp.init("apps/counter/main.nest")
+    var ui = UI.init()
+    ui.initContext(360, 180)
+    ui.loadFont("font", "", 18)
+    app.program = nil
+
+    app.render(ui)
+
+    check app.program != nil
+    check ui.redrawDelayMs() == 0
+
+  test "apps poll for hot reloads while idle":
+    let app = NestCrowApp.init("apps/counter/main.nest")
+    var ui = UI.init()
+    ui.initContext(360, 180)
+    ui.loadFont("font", "", 18)
+
+    app.render(ui)
+
+    check ui.redrawDelayMs() >= 0
 
   test "counter example emits visible draw commands":
     let originalDrawRelays = drawRelays

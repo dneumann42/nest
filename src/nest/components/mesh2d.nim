@@ -1,4 +1,5 @@
 import std/[hashes, math, sets]
+import sdl3
 
 import ../[coords, resources, widgets2]
 import component
@@ -24,6 +25,13 @@ type
     dragEdge*: Mesh2DEdge
     lastMouseX*, lastMouseY*: int
     changed*: bool
+    ## Optional Alt-drag controls. A zero snap step disables snapping.
+    altDragSensitivity*: float64
+    altDragSnapStep*: float64
+    viewZoom*: float64
+    viewCenterX*, viewCenterY*: float64
+    panning*: bool
+    lastPanMouseX*, lastPanMouseY*: int
 
   Mesh2DEditor* = ref object of Interactive
     state: ptr Mesh2DState
@@ -42,6 +50,10 @@ proc `==`*(a, b: Mesh2DEdge): bool =
 
 proc new*(T: typedesc[Mesh2DEditor], state: var Mesh2DState,
     imagePath = ""): T =
+  if state.viewZoom <= 0:
+    state.viewZoom = 1
+    state.viewCenterX = 0.5
+    state.viewCenterY = 0.5
   T(state: addr state, imagePath: imagePath)
 
 method measure*(self: Mesh2DEditor, resources: Resources): IntrinsicSize =
@@ -63,15 +75,49 @@ proc viewRect(widget: Widget): Frame =
     height: size,
   )
 
-proc toScreen(point: Mesh2DPoint, view: Frame): tuple[x, y: float64] =
-  (view.x + point.x * view.width, view.y + point.y * view.height)
+proc viewScale(state: Mesh2DState, view: Frame): float64 =
+  view.width * max(state.viewZoom, 0.25)
 
-proc fromDelta(dx, dy: float64, view: Frame): Mesh2DPoint =
-  Mesh2DPoint(x: dx / max(view.width, 1), y: dy / max(view.height, 1))
+proc toScreen(point: Mesh2DPoint, state: Mesh2DState,
+    view: Frame): tuple[x, y: float64] =
+  let scale = state.viewScale(view)
+  (
+    view.x + view.width * 0.5 + (point.x - state.viewCenterX) * scale,
+    view.y + view.height * 0.5 + (point.y - state.viewCenterY) * scale,
+  )
+
+proc fromDelta(dx, dy: float64, state: Mesh2DState, view: Frame): Mesh2DPoint =
+  let scale = max(state.viewScale(view), 0.000001)
+  Mesh2DPoint(x: dx / scale, y: dy / scale)
+
+proc pointAt(x, y: int, state: Mesh2DState, view: Frame): Mesh2DPoint =
+  let scale = max(state.viewScale(view), 0.000001)
+  Mesh2DPoint(
+    x: state.viewCenterX + (x.float64 - view.x - view.width * 0.5) / scale,
+    y: state.viewCenterY + (y.float64 - view.y - view.height * 0.5) / scale,
+  )
 
 proc add(point: var Mesh2DPoint, delta: Mesh2DPoint) =
   point.x += delta.x
   point.y += delta.y
+
+proc altModifierDown(): bool =
+  if (getModState().uint32 and KMOD_ALT) != 0:
+    return true
+  var keyCount: cint
+  let keyboard = getKeyboardState(keyCount)
+  not keyboard.isNil and keyCount > SCANCODE_RALT.int and
+    (keyboard[SCANCODE_LALT.int] or keyboard[SCANCODE_RALT.int])
+
+proc snap(point: var Mesh2DPoint, step: float64) =
+  if step <= 0:
+    return
+  point.x = round(point.x / step) * step
+  point.y = round(point.y / step) * step
+
+proc movePoint(point: var Mesh2DPoint, delta: Mesh2DPoint, snapStep: float64) =
+  point.add delta
+  point.snap(snapStep)
 
 proc distancePoint(px, py, ax, ay: float64): float64 =
   hypot(px - ax, py - ay)
@@ -99,7 +145,7 @@ proc pickPoint(state: Mesh2DState, view: Frame, x, y: int): int =
   result = -1
   var best = PointPickRadius
   for i, point in state.points:
-    let screenPoint = point.toScreen(view)
+    let screenPoint = point.toScreen(state, view)
     let distance = distancePoint(x.float64, y.float64, screenPoint.x,
         screenPoint.y)
     if distance < best:
@@ -117,8 +163,8 @@ proc pickEdge(state: Mesh2DState, view: Frame, x, y: int): Mesh2DEdge =
           edge.b >= state.points.len:
         continue
       let
-        a = state.points[edge.a].toScreen(view)
-        b = state.points[edge.b].toScreen(view)
+        a = state.points[edge.a].toScreen(state, view)
+        b = state.points[edge.b].toScreen(state, view)
         distance = distanceSegment(x.float64, y.float64, a.x, a.y, b.x, b.y)
       if distance < best:
         best = distance
@@ -131,9 +177,9 @@ proc pickIsland(state: Mesh2DState, view: Frame, x, y: int): bool =
         triangle[2] >= state.points.len:
       continue
     let
-      a = state.points[triangle[0]].toScreen(view)
-      b = state.points[triangle[1]].toScreen(view)
-      c = state.points[triangle[2]].toScreen(view)
+      a = state.points[triangle[0]].toScreen(state, view)
+      b = state.points[triangle[1]].toScreen(state, view)
+      c = state.points[triangle[2]].toScreen(state, view)
     if pointInTriangle(x.float64, y.float64, a.x, a.y, b.x, b.y, c.x, c.y):
       return true
 
@@ -169,17 +215,23 @@ proc beginDrag(state: var Mesh2DState, view: Frame, x, y: int) =
 proc drag(state: var Mesh2DState, view: Frame, x, y: int) =
   if state.dragKind == Mesh2DNoDrag:
     return
-  let delta = fromDelta((x - state.lastMouseX).float64,
-      (y - state.lastMouseY).float64, view)
+  var delta = fromDelta((x - state.lastMouseX).float64,
+      (y - state.lastMouseY).float64, state, view)
+  let altDown = altModifierDown()
+  if altDown and state.altDragSensitivity > 0:
+    delta.x *= state.altDragSensitivity
+    delta.y *= state.altDragSensitivity
+  let snapStep = if altDown: state.altDragSnapStep else: 0.0
+
   case state.dragKind
   of Mesh2DPointDrag:
     if state.dragPoint >= 0 and state.dragPoint < state.points.len:
-      state.points[state.dragPoint].add delta
+      state.points[state.dragPoint].movePoint(delta, snapStep)
       state.changed = true
   of Mesh2DEdgeDrag, Mesh2DIslandDrag:
     for index in state.selectedPoints:
       if index >= 0 and index < state.points.len:
-        state.points[index].add delta
+        state.points[index].movePoint(delta, snapStep)
         state.changed = true
   of Mesh2DNoDrag:
     discard
@@ -195,6 +247,34 @@ method update*(self: Mesh2DEditor, widget: Widget, ctx: var UpdateContext) =
     hot = f.contains(ctx.mouseX, ctx.mouseY)
   if hot:
     ctx.setHot(widget.id)
+  if hot and ctx.mouseWheelY != 0:
+    let anchor = pointAt(ctx.mouseX, ctx.mouseY, self.state[], view)
+    self.state[].viewZoom = clamp(
+      self.state[].viewZoom * pow(1.2, ctx.mouseWheelY), 0.25, 32.0
+    )
+    let scale = self.state[].viewScale(view)
+    self.state[].viewCenterX = anchor.x -
+      (ctx.mouseX.float64 - view.x - view.width * 0.5) / scale
+    self.state[].viewCenterY = anchor.y -
+      (ctx.mouseY.float64 - view.y - view.height * 0.5) / scale
+    ctx.markDirty(widget.id)
+  if hot and ctx.mouseMiddlePressed:
+    self.state[].panning = true
+    self.state[].lastPanMouseX = ctx.mouseX
+    self.state[].lastPanMouseY = ctx.mouseY
+    ctx.setActive(widget.id)
+  if self.state[].panning and ctx.mouseMiddleDown:
+    let scale = max(self.state[].viewScale(view), 0.000001)
+    self.state[].viewCenterX -=
+      (ctx.mouseX - self.state[].lastPanMouseX).float64 / scale
+    self.state[].viewCenterY -=
+      (ctx.mouseY - self.state[].lastPanMouseY).float64 / scale
+    self.state[].lastPanMouseX = ctx.mouseX
+    self.state[].lastPanMouseY = ctx.mouseY
+    ctx.setActive(widget.id)
+    ctx.markDirty(widget.id)
+  if not ctx.mouseMiddleDown:
+    self.state[].panning = false
   if hot and ctx.mouseLeftPressed:
     ctx.setActive(widget.id)
     self.state[].beginDrag(view, ctx.mouseX, ctx.mouseY)
@@ -219,13 +299,18 @@ method draw*(self: Mesh2DEditor, widget: Widget, ctx: var DrawContext) =
     view = widget.viewRect()
   fillRect(rect(f.x.int, f.y.int, f.width.int, f.height.int),
       ctx.palette.panelMuted)
+  let zoom = max(self.state[].viewZoom, 0.25)
+  let scaledWidth = view.width * zoom
+  let scaledHeight = view.height * zoom
+  let imageX = view.x + view.width * 0.5 - self.state[].viewCenterX * scaledWidth
+  let imageY = view.y + view.height * 0.5 - self.state[].viewCenterY * scaledHeight
+  saveState()
+  setClipRect(rect(view.x.int, view.y.int, view.width.int, view.height.int))
   if self.imagePath.len > 0:
     let size = ctx.resources.measureImage(self.imagePath)
     if size.w > 0 and size.h > 0:
-      drawImage(self.imagePath, rect(0, 0, size.w, size.h), rect(view.x.int,
-          view.y.int, view.width.int, view.height.int))
-  lineRect(rect(view.x.int, view.y.int, view.width.int, view.height.int),
-      color(88, 102, 105))
+      drawImage(self.imagePath, rect(0, 0, size.w, size.h), rect(imageX.int,
+          imageY.int, scaledWidth.int, scaledHeight.int))
 
   for triangle in self.state[].triangles:
     if triangle[0] < 0 or triangle[1] < 0 or triangle[2] < 0 or
@@ -234,14 +319,17 @@ method draw*(self: Mesh2DEditor, widget: Widget, ctx: var DrawContext) =
         triangle[2] >= self.state[].points.len:
       continue
     let
-      a = self.state[].points[triangle[0]].toScreen(view)
-      b = self.state[].points[triangle[1]].toScreen(view)
-      c = self.state[].points[triangle[2]].toScreen(view)
+      a = self.state[].points[triangle[0]].toScreen(self.state[], view)
+      b = self.state[].points[triangle[1]].toScreen(self.state[], view)
+      c = self.state[].points[triangle[2]].toScreen(self.state[], view)
       lineColor = color(71, 226, 184)
     drawLine(a.x.int, a.y.int, b.x.int, b.y.int, lineColor)
     drawLine(b.x.int, b.y.int, c.x.int, c.y.int, lineColor)
     drawLine(c.x.int, c.y.int, a.x.int, a.y.int, lineColor)
 
   for i, point in self.state[].points:
-    let screenPoint = point.toScreen(view)
+    let screenPoint = point.toScreen(self.state[], view)
     drawHandle(screenPoint.x, screenPoint.y, i in self.state[].selectedPoints)
+  restoreState()
+  lineRect(rect(view.x.int, view.y.int, view.width.int, view.height.int),
+      color(88, 102, 105))

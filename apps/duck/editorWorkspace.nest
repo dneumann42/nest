@@ -1,0 +1,155 @@
+fun leafPane paneID:
+  {}:
+    kind = "leaf"
+    id = paneID
+
+fun splitPane splitID direction leftTree rightTree:
+  {}:
+    kind = "split"
+    id = splitID
+    direction = direction
+    first = leftTree
+    second = rightTree
+
+fun firstPaneID tree:
+  cond:
+    when (= (dict-get tree "kind") "leaf"):
+      dict-get tree "id"
+    when true:
+      firstPaneID (dict-get tree "first")
+
+fun paneCount tree:
+  cond:
+    when (= (dict-get tree "kind") "leaf"):
+      1
+    when true:
+      + (paneCount (dict-get tree "first")) (paneCount (dict-get tree "second"))
+
+fun paneEditorID workspace pane:
+  cond:
+    when (= pane "pane-1"):
+      id "duck" "editor" activeBuffer
+    when true:
+      id workspace "pane" pane "editor"
+
+fun splitLeaf tree target direction newPaneID:
+  cond:
+    when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "id") target)):
+      splitPane (string "split-" newPaneID) direction tree (leafPane newPaneID)
+    when (= (dict-get tree "kind") "leaf"):
+      tree
+    when true:
+      dict-put
+        (dict-put tree "first" (splitLeaf (dict-get tree "first") target direction newPaneID))
+        "second"
+        (splitLeaf (dict-get tree "second") target direction newPaneID)
+
+fun unsplitLeaf tree target:
+  cond:
+    when (= (dict-get tree "kind") "leaf"):
+      tree
+    when (and (= (dict-get (dict-get tree "first") "kind") "leaf") (= (dict-get (dict-get tree "first") "id") target)):
+      dict-get tree "second"
+    when (and (= (dict-get (dict-get tree "second") "kind") "leaf") (= (dict-get (dict-get tree "second") "id") target)):
+      dict-get tree "first"
+    when true:
+      define:
+        leftTree = (dict-get tree "first")
+        rightTree = (dict-get tree "second")
+      dict-put
+        (dict-put tree "first" (unsplitLeaf leftTree target))
+        "second"
+        (unsplitLeaf rightTree target)
+
+fun editorTree tree workspace:
+  define:
+    kind = (dict-get tree "kind")
+  cond:
+    when (= kind "leaf"):
+      define:
+        paneID = (dict-get tree "id")
+        selectID = (id workspace "pane" paneID "select")
+        editorID = (paneEditorID workspace paneID)
+      events:
+        when (clicked selectID):
+          send "duck.editor.focused" paneID
+        when (focused editorID):
+          send "duck.editor.focused" paneID
+      column (id workspace "pane" paneID):
+        width = fill
+        height = fill
+        gap = 0
+        button selectID (string "Editor " paneID):
+          width = fill
+          height = fixed 22
+        editor editorID:
+          width = fill
+          height = fill
+          fontName = "editor"
+          lineNumbers = showLineNumbers
+          scrollbars = (not wordWrap)
+    when true:
+      define:
+        direction = (dict-get tree "direction")
+        splitID = (dict-get tree "id")
+        leftTree = (dict-get tree "first")
+        rightTree = (dict-get tree "second")
+      if (= direction "vertical"):
+        then:
+          row (id workspace "split" splitID):
+            width = fill
+            height = fill
+            gap = 4
+            editorTree leftTree workspace
+            editorTree rightTree workspace
+        else:
+          column (id workspace "split" splitID):
+            width = fill
+            height = fill
+            gap = 4
+            editorTree leftTree workspace
+            editorTree rightTree workspace
+
+component editorWorkspace key:
+  define:
+    keyText = (eval key)
+
+  state keyText:
+    tree = {}:
+      kind = "leaf"
+      id = "pane-1"
+    focusedPane = "pane-1"
+    nextPane = 2
+    panes = 1
+    maxPanes = 8
+
+  events:
+    when (received "duck.editor.focused"):
+      set focusedPane (receive "duck.editor.focused")
+    when (received "duck.editor.split"):
+      receive "duck.editor.split"
+      when (< panes maxPanes):
+        define:
+          newPane = (string "pane-" nextPane)
+        set tree (splitLeaf tree focusedPane "vertical" newPane)
+        set focusedPane newPane
+        += nextPane 1
+        += panes 1
+    when (received "duck.editor.split-horizontal"):
+      receive "duck.editor.split-horizontal"
+      when (< panes maxPanes):
+        define:
+          newPane = (string "pane-" nextPane)
+        set tree (splitLeaf tree focusedPane "horizontal" newPane)
+        set focusedPane newPane
+        += nextPane 1
+        += panes 1
+    when (received "duck.editor.unsplit"):
+      receive "duck.editor.unsplit"
+      define:
+        updatedTree = (unsplitLeaf tree focusedPane)
+      set tree updatedTree
+      set focusedPane (firstPaneID updatedTree)
+      set panes (paneCount updatedTree)
+
+  editorTree tree keyText

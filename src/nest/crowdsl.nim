@@ -5,6 +5,8 @@ import
 import crow, palette, ui, dialogs
 import nest/[input, perf, screen]
 
+const HotReloadPollMs = 100
+
 type
   WidgetIDValue* = ref object of NativeValue
     value*: WidgetID
@@ -34,6 +36,11 @@ type
     output: string
     ticks: int
 
+  StateBinding = object
+    env: Environment
+    symbol: string
+    key: string
+
   WorkspaceSubscription = ref object
     lock: Lock
     thread: Thread[WorkspaceSubscription]
@@ -47,6 +54,9 @@ type
   NestCrowRuntime* = ref object
     evaluator*: Evaluator
     externalEvents: CountTable[string]
+    componentState: Table[string, Value]
+    stateBindings: seq[StateBinding]
+    messages: Table[string, seq[Value]]
     loadedFiles*: Table[string, Time]
     loadedModules*: HashSet[string]
     dialogProcesses*: Table[string, DialogProcess]
@@ -136,6 +146,25 @@ proc consumeExternal(runtime: NestCrowRuntime, name: string): bool =
   else:
     runtime.externalEvents[name] = count - 1
   true
+
+proc stateKey(scope, field: string): string {.raises: [].} =
+  scope & "\x1f" & field
+
+proc receiveMessage(runtime: NestCrowRuntime, topic: string): Value {.raises: [].} =
+  var queue = runtime.messages.getOrDefault(topic)
+  if queue.len == 0:
+    return nothing()
+  result = queue[0]
+  queue.delete(0)
+  if queue.len == 0:
+    runtime.messages.del(topic)
+  else:
+    runtime.messages[topic] = queue
+
+proc commitState(runtime: NestCrowRuntime) {.raises: [].} =
+  for binding in runtime.stateBindings:
+    let value = binding.env.bindings.getOrDefault(binding.symbol)
+    runtime.componentState[binding.key] = value
 
 proc widgetValue(id: WidgetID, key = ""): Value =
   nativeValue(WidgetIDValue(value: id, key: key))
@@ -1346,6 +1375,13 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       runtime.requireUi().markAllDirty()
     boolean(clicked)
 
+  runtime.evaluator.native "focused":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "focused expects one widget ID")
+    boolean(runtime.requireUi().focused(runtime.asWidgetID(env.eval(arguments[0]))))
+
   runtime.evaluator.native "submitted":
     discard layout
     discard bodyNodes
@@ -1379,6 +1415,54 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if matched:
       runtime.requireUi().markAllDirty()
     boolean(matched)
+
+  runtime.evaluator.native "state":
+    discard layout
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "state expects one component key")
+    if bodyNodes.len == 0:
+      raise newException(EvaluatorError, "state expects field bindings")
+    let scope = env.eval(arguments[0]).asString
+    for binding in bodyNodes:
+      if binding.kind != Binding:
+        raise newException(EvaluatorError, "state entries must be bindings")
+      let key = stateKey(scope, binding.bindingSymbol)
+      let value =
+        if key in runtime.componentState:
+          runtime.componentState[key]
+        else:
+          env.eval(binding.value)
+      if key notin runtime.componentState:
+        runtime.componentState[key] = value
+      env.define(binding.bindingSymbol, value)
+      runtime.stateBindings.add StateBinding(env: env, symbol: binding.bindingSymbol, key: key)
+    nothing()
+
+  runtime.evaluator.native "send":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 2:
+      raise newException(EvaluatorError, "send expects a topic and payload")
+    let topic = env.eval(arguments[0]).asString
+    let payload = env.eval(arguments[1])
+    runtime.messages.mgetOrPut(topic, @[]).add(payload)
+    runtime.refreshPerfOverlay()
+    payload
+
+  runtime.evaluator.native "received":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "received expects a topic")
+    let topic = env.eval(arguments[0]).asString
+    boolean(runtime.messages.getOrDefault(topic).len > 0)
+
+  runtime.evaluator.native "receive":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "receive expects a topic")
+    runtime.receiveMessage(env.eval(arguments[0]).asString)
 
   runtime.evaluator.native "perfOverlay":
     discard env
@@ -2239,13 +2323,13 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     text(runtime.dialogCloseValue)
 
   runtime.evaluator.native "events":
-    discard env
     discard arguments
     discard layout
     if runtime.requireUi().inEventPhase():
-      runtime.renderNodes(env, bodyNodes)
+      result = runtime.renderNodes(env, bodyNodes)
+      runtime.commitState()
     else:
-      nothing()
+      result = nothing()
 
   runtime.evaluator.native "scope":
     discard layout
@@ -2821,6 +2905,8 @@ proc init*(T: typedesc[NestCrowRuntime]): T =
   result = T(
     evaluator: Evaluator.init(),
     externalEvents: initCountTable[string](),
+    componentState: initTable[string, Value](),
+    messages: initTable[string, seq[Value]](),
     loadedModules: initHashSet[string](),
     dialogProcesses: initTable[string, DialogProcess](),
     dialogResults: initTable[string, string](),
@@ -2881,10 +2967,12 @@ proc render*(runtime: NestCrowRuntime, ui: var UI, program: SyntaxNode) =
   if runtime.hasError:
     return
   runtime.currentUi = addr ui
+  runtime.stateBindings.setLen(0)
   try:
     ui.layout:
       discard runtime.renderNodes(program.statements)
   finally:
+    runtime.commitState()
     runtime.currentUi = nil
 
 proc loadComponentLibrary*(runtime: NestCrowRuntime, path: string) =
@@ -2899,6 +2987,7 @@ proc renderComponent*(
   if runtime.hasError:
     return
   runtime.currentUi = addr ui
+  runtime.stateBindings.setLen(0)
   try:
     if libraryPath.len > 0:
       runtime.loadComponentLibrary(libraryPath)
@@ -2907,6 +2996,7 @@ proc renderComponent*(
       nodes.add argument
     discard runtime.renderNodes(@[command(symbol(componentName), nodes)])
   finally:
+    runtime.commitState()
     runtime.currentUi = nil
 
 proc renderComponent*(
@@ -2930,19 +3020,23 @@ proc renderLayoutOnly*(
   runtime.hasError = false
   runtime.lastError = ""
   runtime.currentUi = addr ui
+  runtime.stateBindings.setLen(0)
   try:
     ui.beginLayout(width, height)
     discard runtime.renderNodes(program.statements)
     ui.applyIntrinsicSizes(ui.resources)
     discard ui.endLayout()
   finally:
+    runtime.commitState()
     runtime.currentUi = nil
 
 proc render*(app: NestCrowApp, ui: var UI) =
   if app.isNil:
     return
+  ui.requestRedrawAfter(HotReloadPollMs)
   if app.program.isNil or app.runtime.dependenciesChanged():
     discard app.reload()
+    ui.requestRedrawAfter(0)
   if app.program.isNil:
     return
   app.runtime.moduleStack.add app.rootPath

@@ -78,6 +78,8 @@ type
     submittedWidgets*: HashSet[WidgetID]
     sliderValues*: Table[WidgetID, float64]
     sliderDragging*: WidgetID
+    middleDragging*: WidgetID
+    middleDragStartX*: int
     dirtyWidgets*: HashSet[WidgetID]
     dirtyAll*: bool
     ticks*: int
@@ -96,6 +98,8 @@ type
     mouseX*, mouseY*: int
     windowWidth*, windowHeight*: int
     mouseLeftPressed*, mouseLeftDown*: bool
+    mouseMiddlePressed*, mouseMiddleDown*: bool
+    mouseRightPressed*: bool
     mouseWheelX*, mouseWheelY*: float64
     hotWidgets*: HashSet[WidgetID]
     activeWidgets*: HashSet[WidgetID]
@@ -104,6 +108,8 @@ type
     dirtyWidgets*: HashSet[WidgetID]
     sliderValues*: Table[WidgetID, float64]
     sliderDragging*: WidgetID
+    middleDragging*: WidgetID
+    middleDragStartX*: int
     keyInputs*: seq[KeyInput]
     textInputs*: seq[string]
 

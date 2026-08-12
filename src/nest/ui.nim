@@ -295,7 +295,8 @@ proc redrewFrame*(self: UI): bool {.raises: [].} =
 
 proc hasPendingWidgetEvents*(self: UI): bool {.raises: [].} =
   self.context.draw.activeWidgets.len > 0 or
-      self.context.draw.submittedWidgets.len > 0
+      self.context.draw.submittedWidgets.len > 0 or
+      self.context.draw.middleDragging != InvalidWidgetID
 
 proc setDrawTicks*(self: var UI, ticks: int) =
   self.context.draw.ticks = ticks
@@ -401,9 +402,13 @@ proc beginInputFrame*(self: var UI) =
   self.context.update.submittedWidgets.clear()
   self.context.update.dirtyWidgets.clear()
   self.context.update.sliderValues.clear()
+  self.context.update.mouseMiddlePressed = false
+  self.context.update.mouseRightPressed = false
 
 proc finishInputFrame*(self: var UI) =
   self.context.update.mouseLeftPressed = false
+  self.context.update.mouseMiddlePressed = false
+  self.context.update.mouseRightPressed = false
   self.context.update.keyInputs.setLen(0)
   self.context.update.textInputs.setLen(0)
   self.context.update.mouseWheelX = 0
@@ -426,6 +431,19 @@ proc mouseDown*(self: var UI) =
 proc mouseUp*(self: var UI) =
   self.context.update.mouseLeftDown = false
   self.context.update.sliderDragging = InvalidWidgetID
+
+proc mouseMiddleDown*(self: var UI) =
+  let last = self.context.update.mouseMiddleDown
+  self.context.update.mouseMiddleDown = true
+  self.context.update.mouseMiddlePressed = not last
+
+proc mouseMiddleUp*(self: var UI) =
+  self.context.update.mouseMiddleDown = false
+  self.context.update.middleDragging = InvalidWidgetID
+  self.context.draw.middleDragging = InvalidWidgetID
+
+proc mouseRightDown*(self: var UI) =
+  self.context.update.mouseRightPressed = true
 
 proc resizeWindow*(self: var UI, width, height: int) =
   self.context.update.windowWidth = max(width, 0)
@@ -509,6 +527,36 @@ proc active*(self: UI, id: WidgetID): bool =
 proc clicked*(self: UI, id: WidgetID): bool =
   self.active(id)
 
+proc rightClicked*(self: UI, id: WidgetID): bool =
+  if self.phase != EventPhase or not self.context.update.mouseRightPressed:
+    return false
+  let located = self.widgetFrame(id)
+  located.ok and self.context.update.mouseX.toFloat >= located.frame.x and
+    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseY.toFloat >= located.frame.y and
+    self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
+
+proc middleDragDelta*(self: var UI, id: WidgetID):
+    tuple[active: bool, started: bool, deltaX: int] =
+  if self.phase != EventPhase:
+    return (false, false, 0)
+  let located = self.widgetFrame(id)
+  if not located.ok:
+    return (false, false, 0)
+  let hot =
+    self.context.update.mouseX.toFloat >= located.frame.x and
+    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseY.toFloat >= located.frame.y and
+    self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
+  if self.context.update.mouseMiddlePressed and hot:
+    self.context.draw.middleDragging = id
+    self.context.draw.middleDragStartX = self.context.update.mouseX
+    return (true, true, 0)
+  if self.context.draw.middleDragging == id and self.context.update.mouseMiddleDown:
+    return (true, false,
+      self.context.update.mouseX - self.context.draw.middleDragStartX)
+  (false, false, 0)
+
 proc submitted*(self: UI, id: WidgetID): bool =
   id in self.eventSubmittedWidgets
 
@@ -520,6 +568,11 @@ proc sliderValue*(self: UI, id: WidgetID): tuple[active: bool, value: float64] =
 
 proc focused*(self: UI, id: WidgetID): bool =
   self.eventFocusedWidget == id
+
+proc focus*(self: var UI, id: WidgetID) =
+  self.context.update.focusedWidget = id
+  self.context.draw.focusedWidget = id
+  self.eventFocusedWidget = id
 
 proc liveWidget*(self: UI, id: WidgetID): bool =
   id in self.liveWidgetIDs
@@ -2432,6 +2485,7 @@ proc mesh2d*(
       state.changed = false
     return
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
+  ui.markRealtime(id)
   ui.setRenderKey(id, renderKey("mesh2d:" & imagePath & ":" & $state,
       width, height, alignSelf))
   let editor = Mesh2DEditor.new(state, imagePath)

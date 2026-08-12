@@ -1,0 +1,92 @@
+fun textReplaceAllFrom source needle replacement start:
+  define:
+    found = (textFind source needle start false)
+  if (= found -1):
+    textSlice source start (length source)
+  else:
+    string
+      (textSlice source start found)
+      replacement
+      (textReplaceAllFrom source needle replacement (+ found (length needle)))
+
+fun textReplaceAll source needle replacement:
+  if (= needle ""):
+    source
+  else:
+    textReplaceAllFrom source needle replacement 0
+
+fun openFindDialog:
+  set showFind true
+  set showReplace false
+  set showGoto false
+  setEditorText findInputID (editorText findInputID)
+
+fun openReplaceDialog:
+  set showReplace true
+  set showFind false
+  set showGoto false
+  setEditorText replaceFindInputID (editorText findInputID)
+
+fun findFrom start query:
+  define:
+    found = (textFind (activeText) query start (not matchCase))
+  when (= found -1):
+    set found (textFind (activeText) query 0 (not matchCase))
+  found
+
+fun findNextWith query:
+  if (= query ""):
+    set statusText "Enter text to find"
+  else:
+    define:
+      start = (+ (editorCursor (activeEditorID)) 1)
+      found = (findFrom start query)
+    if (= found -1):
+      set statusText (string "Cannot find \"" query "\"")
+    else:
+      set lastFindStart found
+      set lastFindStop (+ found (length query))
+      setEditorSelection (activeEditorID) lastFindStart lastFindStop
+      set statusText (string "Found \"" query "\"")
+
+fun findNext:
+  findNextWith (editorText findInputID)
+
+fun replaceCurrent:
+  define:
+    query = (editorText replaceFindInputID)
+    replacement = (editorText replaceWithInputID)
+  when (or (= lastFindStart -1) (= lastFindStop -1)):
+    findNextWith query
+  when (and (>= lastFindStart 0) (>= lastFindStop lastFindStart)):
+    define:
+      before = (textSlice (activeText) 0 lastFindStart)
+      after = (textSlice (activeText) lastFindStop (length (activeText)))
+      replaced = (string before replacement after)
+    setEditorText (activeEditorID) replaced
+    setEditorCursor (activeEditorID) (+ lastFindStart (length replacement))
+    set lastFindStart -1
+    set lastFindStop -1
+    set statusText "Replaced"
+
+fun replaceAll:
+  define:
+    query = (editorText replaceFindInputID)
+    replacement = (editorText replaceWithInputID)
+  if (= query ""):
+    then:
+      set statusText "Enter text to replace"
+    else:
+      setEditorText (activeEditorID) (textReplaceAll (activeText) query replacement)
+      set statusText "Replace All complete"
+
+fun gotoLine:
+  define:
+    line = (editorText gotoInputID)
+  setEditorLineColumn (activeEditorID) line 1
+  set showGoto false
+  set statusText (string "Line " line)
+
+fun timeDate:
+  insertEditorText (activeEditorID) (timeDateStamp)
+  set statusText "Inserted time/date"

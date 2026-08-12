@@ -1,0 +1,130 @@
+fun handleMenuAction action:
+  when (= action "file.new"):
+    newBuffer
+  when (= action "file.open"):
+    pickFileEvent "duck:filePicked"
+  when (= action "file.save"):
+    saveActiveBuffer
+  when (= action "file.saveas"):
+    pickFileEvent "duck:saveAsPicked"
+  when (= action "file.pagesetup"):
+    set statusText "Page Setup is not available"
+  when (= action "file.print"):
+    set statusText "Print is not available"
+  when (= action "file.exit"):
+    closeDialog ""
+  when (= action "edit.undo"):
+    undoEditor (activeEditorID)
+  when (= action "edit.redo"):
+    redoEditor (activeEditorID)
+  when (= action "edit.cut"):
+    cutEditorSelection (activeEditorID)
+  when (= action "edit.copy"):
+    copyEditorSelection (activeEditorID)
+  when (= action "edit.paste"):
+    pasteEditorClipboard (activeEditorID)
+  when (= action "edit.delete"):
+    deleteEditorSelection (activeEditorID)
+  when (= action "edit.selectall"):
+    selectEditorAll (activeEditorID)
+  when (= action "edit.timedate"):
+    timeDate
+  when (= action "search.find"):
+    openFindDialog
+  when (= action "search.findnext"):
+    findNext
+  when (= action "search.replace"):
+    openReplaceDialog
+  when (= action "search.goto"):
+    set showGoto true
+    set showFind false
+    set showReplace false
+    setEditorText gotoInputID (editorLine (activeEditorID))
+  when (= action "format.wordwrap"):
+    set wordWrap (not wordWrap)
+  when (= action "view.statusbar"):
+    set showStatusBar (not showStatusBar)
+  when (= action "view.linenumbers"):
+    set showLineNumbers (not showLineNumbers)
+  when (= action "buffer.close"):
+    closeActiveBuffer
+  when (= action "help.about"):
+    set showAbout true
+
+component duckMenuBar:
+  define:
+    splitID = (id "duck" "menu" "split")
+    horizontalSplitID = (id "duck" "menu" "split-horizontal")
+    unsplitID = (id "duck" "menu" "unsplit")
+  events:
+    when (clicked splitID):
+      send "duck.editor.split" true
+    when (clicked horizontalSplitID):
+      send "duck.editor.split-horizontal" true
+    when (clicked unsplitID):
+      send "duck.editor.unsplit" true
+  row (id "duck" "menu" "row"):
+    width = fill
+    height = fixed 24
+    gap = 4
+    alignItems = AlignCenter
+    menuBar menuID:
+      width = fill
+      height = fixed 24
+      padding = 0
+      gap = 4
+      background = color 100 100 100
+      alignItems = AlignStretch
+      menu "file" "File":
+        menuItem "new" "New"
+        menuItem "open" "Open..."
+        menuItem "save" "Save"
+        menuItem "saveas" "Save As..."
+        menuDivider
+        menuItem "pagesetup" "Page Setup..."
+        menuItem "print" "Print..."
+        menuDivider
+        menuItem "exit" "Exit"
+      menu "edit" "Edit":
+        menuItem "undo" "Undo"
+        menuItem "redo" "Redo"
+        menuDivider
+        menuItem "cut" "Cut"
+        menuItem "copy" "Copy"
+        menuItem "paste" "Paste"
+        menuItem "delete" "Delete"
+        menuDivider
+        menuItem "selectall" "Select All"
+        menuItem "timedate" "Time/Date"
+      menu "search" "Search":
+        menuItem "find" "Find..."
+        menuItem "findnext" "Find Next"
+        menuItem "replace" "Replace..."
+        menuItem "goto" "Go To..."
+      menu "format" "Format":
+        menuItem "wordwrap":
+          checkbox (id "duck" "menu" "wordwrap") "Word Wrap" wordWrap:
+            width = fill
+            height = fit
+      menu "view" "View":
+        menuItem "statusbar":
+          checkbox (id "duck" "menu" "statusbar") "Status Bar" showStatusBar:
+            width = fill
+            height = fit
+        menuItem "linenumbers":
+          checkbox (id "duck" "menu" "linenumbers") "Line Numbers" showLineNumbers:
+            width = fill
+            height = fit
+      menu "buffer" "Buffer":
+        menuItem "close" "Close Buffer"
+      menu "help" "Help":
+        menuItem "about" "About Duck"
+    button splitID "Split Right":
+      width = fit
+      height = fixed 22
+    button horizontalSplitID "Split Down":
+      width = fit
+      height = fixed 22
+    button unsplitID "Unsplit":
+      width = fit
+      height = fixed 22
