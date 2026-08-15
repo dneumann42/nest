@@ -7,7 +7,7 @@ fun workspaceLabel workspace:
     when (dict-get workspace "urgent"):
       string "! " name
     when (dict-get workspace "focused"):
-      string "[" name "]"
+      name
     when T:
       name
 
@@ -34,19 +34,19 @@ component workspaces key:
     gap = WorkspaceGap
     alignItems = AlignCenter
     if (empty? workspaceList):
-      then:
-        label (id keyText "empty") "-":
-          width = (fixed WorkspaceEmptyWidth)
+      label (id keyText "empty") "-":
+        width = (fixed WorkspaceEmptyWidth)
+        height = fit
+    else:
+      for workspace (iter workspaceList):
+        define:
+          name = (dict-get workspace "name")
+          workspaceID = (id keyText "workspace" name)
+        events:
+          when (clicked workspaceID):
+            shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) ImmediateInterval
+        button workspaceID (workspaceLabel workspace):
+          width = fit
           height = fit
-      else:
-        for workspace (iter workspaceList):
-          define:
-            name = (dict-get workspace "name")
-            workspaceID = (id keyText "workspace" name)
-          events:
-            when (clicked workspaceID):
-              shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) ImmediateInterval
-          button workspaceID (workspaceLabel workspace):
-            width = fit
-            height = fit
-	    background = (workspaceBackgroundColor workspace)
+	  background = (workspaceBackgroundColor workspace)
+

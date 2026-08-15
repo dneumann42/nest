@@ -440,11 +440,8 @@ tabs (id "tabs") labels selected:
         app.runtime.render(splitUi, app.program)
         check app.runtime.lastError == ""
 
-      let opened = getTempDir() / "duck-focused-pane.txt"
-      writeFile(opened, "focused pane content")
       discard app.runtime.evaluator.exec(parse(
-        "send \"duck.editor.focused\" \"pane-2\"\nsend \"duck.editor.open\" \"" &
-          opened.replace("\\", "\\\\") & "\"\n"
+        "setEditorText \"duck:buffer:1\" \"shared pane content\"\n"
       ))
       var focusedPaneUi = UI.init()
       focusedPaneUi.initContext(800, 600)
@@ -453,16 +450,16 @@ tabs (id "tabs") labels selected:
       app.runtime.render(focusedPaneUi, app.program)
       check app.runtime.lastError == ""
       let focusedText = app.runtime.evaluator.exec(parse(
-        "editorText \"duck:workspace:pane:pane-2:editor\"\n"
+        "editorText \"duck:buffer:1\"\n"
       ))
       check focusedText.kind == Text
-      check focusedText.text == "focused pane content"
+      check focusedText.text == "shared pane content"
 
       check app.runtime.lastError == ""
       check app.runtime.get("activeBuffer").number == 0
       check app.runtime.get("buffers").items.len >= 1
       check ui.widget(ui.id(ui.id("duck", "tabs"), "tab", 0)).frame.width > 0
-      check ui.widget(ui.id("duck", "editor", 0)).frame.height > 0
+      check ui.widget(ui.id("duck:workspace", "pane", "pane-1", "editor")).frame.height > 0
     finally:
       fontRelays = originalFontRelays
 
@@ -1169,8 +1166,8 @@ column (id "root"):
       let picked = runtime.get("pickedFile")
       check picked.kind == Text
       check picked.text == duckFile
-      check runtime.get("activeBuffer").number == 0
-      let editorText = runtime.evaluator.exec(parse("editorText \"duck:editor:0\"\n"))
+      check runtime.get("activeBuffer").number == 1
+      let editorText = runtime.evaluator.exec(parse("editorText \"duck:buffer:2\"\n"))
       check editorText.kind == Text
       check editorText.text == duckContent
     finally:

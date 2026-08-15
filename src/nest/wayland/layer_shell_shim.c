@@ -8,6 +8,7 @@
 
 struct nest_layer_shell_state {
   struct wl_display *display;
+  struct wl_surface *surface;
   struct zwlr_layer_shell_v1 *layer_shell;
   struct zwlr_layer_surface_v1 *layer_surface;
   uint32_t configured;
@@ -80,6 +81,7 @@ int nest_wayland_layer_shell_configure(
     return -1;
   }
   state->display = display;
+  state->surface = surface;
 
   registry = wl_display_get_registry(display);
   if (registry == NULL) {
@@ -148,4 +150,16 @@ void nest_wayland_layer_shell_destroy(void) {
   }
 
   memset(state, 0, sizeof(*state));
+}
+
+void nest_wayland_layer_shell_set_margin(int32_t top, int32_t right,
+                                         int32_t bottom, int32_t left) {
+  struct nest_layer_shell_state *state = &global_state;
+  if (state->layer_surface == NULL || state->display == NULL) {
+    return;
+  }
+  zwlr_layer_surface_v1_set_margin(state->layer_surface, top, right, bottom,
+                                   left);
+  wl_surface_commit(state->surface);
+  wl_display_flush(state->display);
 }

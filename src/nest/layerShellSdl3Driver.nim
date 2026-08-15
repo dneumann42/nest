@@ -150,6 +150,7 @@ proc nestLayerShellConfigure(
 ): cint {.importc: "nest_wayland_layer_shell_configure".}
 
 proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
+proc nestLayerShellSetMargin(top, right, bottom, left: int32) {.importc: "nest_wayland_layer_shell_set_margin".}
 
 proc `==`(a, b: MeasureCacheKey): bool {.inline.} =
   a.fontId == b.fontId and a.text == b.text
@@ -728,6 +729,30 @@ proc sdlSetWindowTitle(title: string) =
   if win != nil:
     discard setWindowTitle(win, cstring(title))
 
+proc sdlMoveWindowBy(dx, dy: int) =
+  if win == nil:
+    return
+  if not useLayerShell:
+    var x, y: cint
+    if getWindowPosition(win, x, y):
+      discard setWindowPosition(win, x + dx.cint, y + dy.cint)
+    return
+
+  if EdgeLeft in layerShellConfig.anchors:
+    layerShellConfig.marginLeft += dx.int32
+  elif EdgeRight in layerShellConfig.anchors:
+    layerShellConfig.marginRight -= dx.int32
+  if EdgeTop in layerShellConfig.anchors:
+    layerShellConfig.marginTop += dy.int32
+  elif EdgeBottom in layerShellConfig.anchors:
+    layerShellConfig.marginBottom -= dy.int32
+  nestLayerShellSetMargin(
+    layerShellConfig.marginTop,
+    layerShellConfig.marginRight,
+    layerShellConfig.marginBottom,
+    layerShellConfig.marginLeft,
+  )
+
 # --- Input hook implementations ---
 
 proc sdlGetClipboardText(): string =
@@ -978,6 +1003,7 @@ proc installSdl3Relays() =
     setClipRect: sdlSetClipRect,
     setCursor: sdlSetCursor,
     setWindowTitle: sdlSetWindowTitle,
+    moveWindowBy: sdlMoveWindowBy,
   )
   fontRelays = FontRelays(
     openFont: sdlOpenFont,

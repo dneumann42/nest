@@ -78,7 +78,7 @@ proc runProject*(
           stats.drawOverlay(ui.windowWidth, ui.windowHeight, ui.font())
           ui.requestRedrawAfter(16)
       if app.lastError.len > 0:
-        app.launchCrowErrorDialog(app.lastError)
+        app.launchCrowErrorDialog(app.lastErrorDetails)
       else:
         app.pollCrowErrorDialog()
         app.closeCrowErrorDialog()

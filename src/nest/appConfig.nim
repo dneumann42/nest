@@ -66,16 +66,21 @@ proc overlayDialog*(
     height: Positive,
     title = "Nest Dialog",
     namespace = "nest-dialog",
+    draggable = false,
 ): T =
-  AppConfig.init(width = width, height = height, title = title).layerShell(
-    LayerShellConfig(
+  var layerConfig = LayerShellConfig(
       namespace: namespace,
       layer: LayerOverlay,
       anchors: {},
       exclusiveZone: -1,
       keyboard: KeyboardOnDemand,
     )
-  )
+  if draggable:
+    # An anchored surface can be repositioned by changing its margins.
+    layerConfig.anchors = {EdgeTop, EdgeLeft}
+    layerConfig.marginTop = 96
+    layerConfig.marginLeft = 96
+  AppConfig.init(width = width, height = height, title = title).layerShell(layerConfig)
 
 proc initWindow*(cfg: AppConfig): ScreenLayout =
   if cfg.layerShell:

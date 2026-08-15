@@ -74,8 +74,7 @@ fun replaceAll:
     query = (editorText replaceFindInputID)
     replacement = (editorText replaceWithInputID)
   if (= query ""):
-    then:
-      set statusText "Enter text to replace"
+    set statusText "Enter text to replace"
     else:
       setEditorText (activeEditorID) (textReplaceAll (activeText) query replacement)
       set statusText "Replace All complete"
@@ -90,3 +89,4 @@ fun gotoLine:
 fun timeDate:
   insertEditorText (activeEditorID) (timeDateStamp)
   set statusText "Inserted time/date"
+

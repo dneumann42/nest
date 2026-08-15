@@ -119,12 +119,12 @@ component duckMenuBar:
         menuItem "close" "Close Buffer"
       menu "help" "Help":
         menuItem "about" "About Duck"
-    button splitID "Split Right":
+    button splitID "/":
       width = fit
       height = fixed 22
-    button horizontalSplitID "Split Down":
+    button horizontalSplitID "\\":
       width = fit
       height = fixed 22
-    button unsplitID "Unsplit":
+    button unsplitID "-":
       width = fit
       height = fixed 22

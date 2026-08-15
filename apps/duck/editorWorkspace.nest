@@ -1,7 +1,8 @@
-fun leafPane paneID:
+fun leafPane paneID bufferKey:
   {}:
     kind = "leaf"
     id = paneID
+    bufferKey = bufferKey
 
 fun splitPane splitID direction leftTree rightTree:
   {}:
@@ -26,23 +27,57 @@ fun paneCount tree:
       + (paneCount (dict-get tree "first")) (paneCount (dict-get tree "second"))
 
 fun paneEditorID workspace pane:
-  cond:
-    when (= pane "pane-1"):
-      id "duck" "editor" activeBuffer
-    when true:
-      id workspace "pane" pane "editor"
+  id workspace "pane" pane "editor"
 
-fun splitLeaf tree target direction newPaneID:
+fun paneBufferKey tree target:
   cond:
     when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "id") target)):
-      splitPane (string "split-" newPaneID) direction tree (leafPane newPaneID)
+      dict-get tree "bufferKey"
+    when (= (dict-get tree "kind") "leaf"):
+      ""
+    when true:
+      define:
+        firstKey = (paneBufferKey (dict-get tree "first") target)
+      if (not (= firstKey "")):
+        firstKey
+      else:
+        paneBufferKey (dict-get tree "second") target
+
+fun setPaneBuffer tree target bufferKey:
+  cond:
+    when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "id") target)):
+      dict-put tree "bufferKey" bufferKey
     when (= (dict-get tree "kind") "leaf"):
       tree
     when true:
       dict-put
-        (dict-put tree "first" (splitLeaf (dict-get tree "first") target direction newPaneID))
+        (dict-put tree "first" (setPaneBuffer (dict-get tree "first") target bufferKey))
         "second"
-        (splitLeaf (dict-get tree "second") target direction newPaneID)
+        (setPaneBuffer (dict-get tree "second") target bufferKey)
+
+fun replaceBuffer tree oldBufferKey newBufferKey:
+  cond:
+    when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "bufferKey") oldBufferKey)):
+      dict-put tree "bufferKey" newBufferKey
+    when (= (dict-get tree "kind") "leaf"):
+      tree
+    when true:
+      dict-put
+        (dict-put tree "first" (replaceBuffer (dict-get tree "first") oldBufferKey newBufferKey))
+        "second"
+        (replaceBuffer (dict-get tree "second") oldBufferKey newBufferKey)
+
+fun splitLeaf tree target direction newPaneID bufferKey:
+  cond:
+    when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "id") target)):
+      splitPane (string "split-" newPaneID) direction tree (leafPane newPaneID bufferKey)
+    when (= (dict-get tree "kind") "leaf"):
+      tree
+    when true:
+      dict-put
+        (dict-put tree "first" (splitLeaf (dict-get tree "first") target direction newPaneID bufferKey))
+        "second"
+        (splitLeaf (dict-get tree "second") target direction newPaneID bufferKey)
 
 fun unsplitLeaf tree target:
   cond:
@@ -68,6 +103,7 @@ fun editorTree tree workspace focusedPane:
     when (= kind "leaf"):
       define:
         paneID = (dict-get tree "id")
+        bufferKey = (dict-get tree "bufferKey")
         selectID = (id workspace "pane" paneID "select")
         editorID = (paneEditorID workspace paneID)
         active = (= paneID focusedPane)
@@ -82,10 +118,10 @@ fun editorTree tree workspace focusedPane:
         padding = 3
         gap = 2
         background = (pick active (color 35 75 115) (color 35 40 44))
-        button selectID (string (pick active "● " "") "Editor " paneID):
+        button selectID (string (pick active "● " "") (bufferNameForKey bufferKey)):
           width = fill
           height = fixed 22
-        editor editorID:
+        editor editorID bufferKey:
           width = fill
           height = fill
           fontName = "editor"
@@ -98,29 +134,26 @@ fun editorTree tree workspace focusedPane:
         leftTree = (dict-get tree "first")
         rightTree = (dict-get tree "second")
       if (= direction "vertical"):
-        then:
-          row (id workspace "split" splitID):
-            width = fill
-            height = fill
-            gap = 4
-            editorTree leftTree workspace focusedPane
-            editorTree rightTree workspace focusedPane
-        else:
-          column (id workspace "split" splitID):
-            width = fill
-            height = fill
-            gap = 4
-            editorTree leftTree workspace focusedPane
-            editorTree rightTree workspace focusedPane
+        row (id workspace "split" splitID):
+          width = fill
+          height = fill
+          gap = 4
+          editorTree leftTree workspace focusedPane
+          editorTree rightTree workspace focusedPane
+      else:
+        column (id workspace "split" splitID):
+          width = fill
+          height = fill
+          gap = 4
+          editorTree leftTree workspace focusedPane
+          editorTree rightTree workspace focusedPane
 
 component editorWorkspace key:
   define:
     keyText = (eval key)
 
   state keyText:
-    tree = {}:
-      kind = "leaf"
-      id = "pane-1"
+    tree = (leafPane "pane-1" "duck:buffer:1")
     focusedPane = "pane-1"
     nextPane = 2
     panes = 1
@@ -131,21 +164,13 @@ component editorWorkspace key:
   events:
     when (received "duck.editor.focused"):
       set focusedPane (receive "duck.editor.focused")
-    when (received "duck.editor.open"):
-      define:
-        path = (receive "duck.editor.open")
-        editorID = (paneEditorID keyText focusedPane)
-        content = ""
-      with (open-file path "rb") stream:
-        set content (read-all stream)
-      setEditorText editorID content
-      set statusText (string "Opened " path)
     when (received "duck.editor.split"):
       receive "duck.editor.split"
       when (< panes maxPanes):
         define:
           newPane = (string "pane-" nextPane)
-        set tree (splitLeaf tree focusedPane "vertical" newPane)
+          bufferKey = (paneBufferKey tree focusedPane)
+        set tree (splitLeaf tree focusedPane "vertical" newPane bufferKey)
         set focusedPane newPane
         += nextPane 1
         += panes 1
@@ -154,14 +179,29 @@ component editorWorkspace key:
       when (< panes maxPanes):
         define:
           newPane = (string "pane-" nextPane)
-        set tree (splitLeaf tree focusedPane "horizontal" newPane)
+          bufferKey = (paneBufferKey tree focusedPane)
+        set tree (splitLeaf tree focusedPane "horizontal" newPane bufferKey)
         set focusedPane newPane
         += nextPane 1
         += panes 1
+    when (received "duck.editor.switch-buffer"):
+      set tree (setPaneBuffer tree focusedPane (receive "duck.editor.switch-buffer"))
+    when (received "duck.editor.replace-buffer"):
+      receive "duck.editor.replace-buffer"
+      set tree (replaceBuffer tree closingBufferKey replacementBufferKey)
+    when (received "duck.editor.close-pane"):
+      receive "duck.editor.close-pane"
+      when (> panes 1):
+        define:
+          updatedTree = (unsplitLeaf tree focusedPane)
+        set tree updatedTree
+        set focusedPane (firstPaneID updatedTree)
+        set panes (paneCount updatedTree)
     when (received "duck.editor.unsplit"):
       receive "duck.editor.unsplit"
-      define:
-        updatedTree = (unsplitLeaf tree focusedPane)
-      set tree updatedTree
-      set focusedPane (firstPaneID updatedTree)
-      set panes (paneCount updatedTree)
+      when (> panes 1):
+        define:
+          updatedTree = (unsplitLeaf tree focusedPane)
+        set tree updatedTree
+        set focusedPane (firstPaneID updatedTree)
+        set panes (paneCount updatedTree)

@@ -51,6 +51,15 @@ type
     event: string
     query: string
 
+  ErrorLocation* = object
+    path*, sourceLine*, label*: string
+    line*, column*: int
+
+  ErrorDetails* = object
+    message*: string
+    primary*: ErrorLocation
+    frames*: seq[ErrorLocation]
+
   NestCrowRuntime* = ref object
     evaluator*: Evaluator
     externalEvents: CountTable[string]
@@ -75,6 +84,7 @@ type
     currentUi: ptr UI
     hasError*: bool
     lastError*: string
+    lastErrorDetails*: ErrorDetails
     dismissedError*: string
 
   NestCrowApp* = ref object
@@ -82,6 +92,7 @@ type
     runtime*: NestCrowRuntime
     program*: SyntaxNode
     lastError*: string
+    lastErrorDetails*: ErrorDetails
     errorDialogProcess*: Process
     errorDialogMessage*: string
 
@@ -104,6 +115,33 @@ type
     env: Environment
     command: CommandValue
     path: string
+
+proc errorLocation*(pos: SourcePos, label = ""): ErrorLocation =
+  result.label = label
+  if pos.hasSource:
+    result.path = pos.sourcePath
+    result.sourceLine = pos.sourceLine
+    result.line = pos.line.int
+    result.column = pos.column.int
+
+proc errorDetails*(error: ref EvaluatorError): ErrorDetails =
+  result.message = error.msg
+  result.primary = error.primary.errorLocation()
+  for frame in error.frames:
+    result.frames.add frame.pos.errorLocation(frame.label)
+
+proc errorReport*(details: ErrorDetails): string =
+  result = "error: " & details.message
+  if details.primary.path.len > 0:
+    result.add "\n" & details.primary.path & ":" & $details.primary.line & ":" &
+      $details.primary.column
+  if details.frames.len > 0:
+    result.add "\nStack trace:"
+    for frame in details.frames:
+      result.add "\n  at " & frame.path & ":" & $frame.line & ":" &
+        $frame.column
+      if frame.label.len > 0:
+        result.add " in " & frame.label
 
 proc init*(T: typedesc[NestCrowRuntime]): T
 proc renderNodes(
@@ -550,6 +588,7 @@ proc pollPathCallbacks(runtime: NestCrowRuntime) =
     except EvaluatorError as error:
       runtime.hasError = true
       runtime.lastError = report(error)
+      runtime.lastErrorDetails = error.errorDetails()
       return
     except CatchableError as error:
       runtime.hasError = true
@@ -1320,6 +1359,7 @@ proc renderNodes(
     except EvaluatorError as error:
       runtime.hasError = true
       runtime.lastError = report(error)
+      runtime.lastErrorDetails = error.errorDetails()
       return nothing()
 
 proc renderNodes(runtime: NestCrowRuntime, nodes: seq[SyntaxNode]): Value =
@@ -1371,6 +1411,17 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     let clicked =
       runtime.requireUi().inEventPhase() and
       runtime.requireUi().clicked(runtime.asWidgetID(env.eval(arguments[0])))
+    if clicked:
+      runtime.requireUi().markAllDirty()
+    boolean(clicked)
+
+  runtime.evaluator.native "middleClicked":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "middleClicked expects one widget ID")
+    let clicked = runtime.requireUi().inEventPhase() and
+      runtime.requireUi().middleClicked(runtime.asWidgetID(env.eval(arguments[0])))
     if clicked:
       runtime.requireUi().markAllDirty()
     boolean(clicked)
@@ -2786,7 +2837,9 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         else:
           runtime.requireUi().id("editor")
       key =
-        if arguments.len > 0:
+        if arguments.len > 1:
+          env.idKey(arguments[1], values[1].asString)
+        elif arguments.len > 0:
           env.idKey(arguments[0], values[0].asString)
         else:
           "editor"
@@ -2950,6 +3003,7 @@ proc reload*(app: NestCrowApp): bool {.discardable.} =
   except EvaluatorError as error:
     app.program = nil
     app.lastError = report(error)
+    app.lastErrorDetails = error.errorDetails()
     false
 
 proc init*(T: typedesc[NestCrowApp], rootPath: string): T =
@@ -2963,6 +3017,7 @@ proc render*(runtime: NestCrowRuntime, ui: var UI, program: SyntaxNode) =
   runtime.pollDialogProcesses()
   runtime.hasError = false
   runtime.lastError = ""
+  runtime.lastErrorDetails = ErrorDetails()
   runtime.pollPathCallbacks()
   if runtime.hasError:
     return
@@ -3044,5 +3099,7 @@ proc render*(app: NestCrowApp, ui: var UI) =
   app.runtime.moduleStack.setLen(app.runtime.moduleStack.len - 1)
   if app.runtime.hasError:
     app.lastError = app.runtime.lastError
+    app.lastErrorDetails = app.runtime.lastErrorDetails
   else:
     app.lastError = ""
+    app.lastErrorDetails = ErrorDetails()

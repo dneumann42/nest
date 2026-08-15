@@ -20,16 +20,13 @@ fun volumeSinkSwitchCommand sink:
 
 fun volumeActionCommand action:
   if (= action "toggle"):
-    then:
-      string "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+    string "pactl set-sink-mute @DEFAULT_SINK@ toggle"
     else:
       if (= action "down"):
-        then:
-          string "pactl set-sink-volume @DEFAULT_SINK@ -5%"
+        string "pactl set-sink-volume @DEFAULT_SINK@ -5%"
         else:
           if (= action "up"):
-            then:
-              string "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+            string "pactl set-sink-volume @DEFAULT_SINK@ +5%"
             else:
               string "pavucontrol"
 
@@ -50,3 +47,4 @@ component volumeWidget key:
     width = fit
     height = fit
     textScroll = true
+

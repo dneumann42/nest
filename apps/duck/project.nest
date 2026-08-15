@@ -1,9 +1,9 @@
 main = "main.nest"
-title = "Nest App"
+title = "Duck"
 width = 800
 height = 600
 layerShell = "none"
-namespace = "nest-app"
+namespace = "duck"
 exclusiveZone = -1
 marginTop = 0
 marginRight = 0

@@ -91,6 +91,8 @@ type
     eventActiveWidgets: HashSet[WidgetID]
     eventSubmittedWidgets: HashSet[WidgetID]
     eventFocusedWidget: WidgetID
+    windowDragHandle: WidgetID
+    windowDragLastX, windowDragLastY: int
     scheduledRedrawTicks: int
     hasScheduledRedraw: bool
     frameRedrawn: bool
@@ -527,8 +529,44 @@ proc active*(self: UI, id: WidgetID): bool =
 proc clicked*(self: UI, id: WidgetID): bool =
   self.active(id)
 
+proc dragWindow*(self: var UI, id: WidgetID) =
+  ## Makes this widget a drag handle for the application window.
+  ## Call this from a popup or dialog title region to opt into dragging.
+  if self.phase != EventPhase:
+    return
+  let located = self.widgetFrame(id)
+  if self.context.update.mouseLeftPressed and located.ok:
+    let frame = located.frame
+    if self.context.update.mouseX.toFloat >= frame.x and
+        self.context.update.mouseX.toFloat < frame.x + frame.width and
+        self.context.update.mouseY.toFloat >= frame.y and
+        self.context.update.mouseY.toFloat < frame.y + frame.height:
+      self.windowDragHandle = id
+      self.windowDragLastX = self.context.update.mouseX
+      self.windowDragLastY = self.context.update.mouseY
+  if self.windowDragHandle != id:
+    return
+  if not self.context.update.mouseLeftDown:
+    self.windowDragHandle = InvalidWidgetID
+    return
+  let dx = self.context.update.mouseX - self.windowDragLastX
+  let dy = self.context.update.mouseY - self.windowDragLastY
+  if dx != 0 or dy != 0:
+    moveWindowBy(dx, dy)
+    self.windowDragLastX = self.context.update.mouseX
+    self.windowDragLastY = self.context.update.mouseY
+
 proc rightClicked*(self: UI, id: WidgetID): bool =
   if self.phase != EventPhase or not self.context.update.mouseRightPressed:
+    return false
+  let located = self.widgetFrame(id)
+  located.ok and self.context.update.mouseX.toFloat >= located.frame.x and
+    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseY.toFloat >= located.frame.y and
+    self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
+
+proc middleClicked*(self: UI, id: WidgetID): bool =
+  if self.phase != EventPhase or not self.context.update.mouseMiddlePressed:
     return false
   let located = self.widgetFrame(id)
   located.ok and self.context.update.mouseX.toFloat >= located.frame.x and

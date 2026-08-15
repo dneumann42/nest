@@ -70,16 +70,15 @@ component dateSelector key target:
         gap = CalendarWeekGap
         for weekday (range 0 7):
           if (and (>= cellDay 1) (<= cellDay days)):
-            then:
-              define:
-                dayID = (id keyText "day" cellDay)
-                cellDate = (date year month cellDay)
-              events:
-                when (clicked dayID):
-                  set (value-of target) cellDate
-              button dayID cellDay:
-                width = (fixed CalendarDayWidth)
-                height = fit
+            define:
+              dayID = (id keyText "day" cellDay)
+              cellDate = (date year month cellDay)
+            events:
+              when (clicked dayID):
+                set (value-of target) cellDate
+            button dayID cellDay:
+              width = (fixed CalendarDayWidth)
+              height = fit
             else:
               spacer (id keyText "blank" week weekday):
                 width = (fixed CalendarDayWidth)
@@ -163,17 +162,16 @@ component dateSelectorWithSignal key target clickedTarget:
         gap = CalendarWeekGap
         for weekday (range 0 7):
           if (and (>= cellDay 1) (<= cellDay days)):
-            then:
-              define:
-                dayID = (id keyText "day" cellDay)
-                cellDate = (date year month cellDay)
-              events:
-                when (clicked dayID):
-                  set (value-of target) cellDate
-                  set (value-of clickedTarget) cellDate
-              button dayID cellDay:
-                width = (fixed bw)
-                height = fit
+            define:
+              dayID = (id keyText "day" cellDay)
+              cellDate = (date year month cellDay)
+            events:
+              when (clicked dayID):
+                set (value-of target) cellDate
+                set (value-of clickedTarget) cellDate
+            button dayID cellDay:
+              width = (fixed bw)
+              height = fit
             else:
               spacer (id keyText "blank" week weekday):
                 width = (fixed bw)
@@ -182,3 +180,4 @@ component dateSelectorWithSignal key target clickedTarget:
     label (id keyText "selected-date") selected:
       width = fill
       height = fit
+

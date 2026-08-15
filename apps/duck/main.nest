@@ -9,7 +9,7 @@ use dialogs:
   include labeledInput actionRow findDialog replaceDialog gotoDialog aboutDialog
 
 use editorWorkspace:
-  include leafPane splitPane firstPaneID paneCount paneEditorID splitLeaf unsplitLeaf editorTree editorWorkspace
+  include leafPane splitPane firstPaneID paneCount paneEditorID paneBufferKey setPaneBuffer replaceBuffer splitLeaf unsplitLeaf editorTree editorWorkspace
 
 use appShell:
   include duckStatusBar duckAppShell
@@ -36,6 +36,8 @@ define:
   statusText = "Ready"
   activeBuffer = 0
   nextBuffer = 2
+  closingBufferKey = ""
+  replacementBufferKey = ""
   showFind = false
   showReplace = false
   showGoto = false
@@ -48,21 +50,22 @@ define:
   lastFindStop = -1
   buffers = []:
     {}:
+      key = "duck:buffer:1"
       path = ""
       name = "Untitled 1"
       savedText = ""
 
-fun editorIDFor index:
-  id "duck" "editor" index
+fun bufferKeyAt index:
+  dict-get (nth buffers index) "key"
 
 fun activeEditorID:
-  editorIDFor activeBuffer
+  bufferKeyAt activeBuffer
 
 fun activeText:
   editorText (activeEditorID)
 
 fun bufferDirtyAt index buffer:
-  not (= (editorText (editorIDFor index)) buffer.savedText)
+  not (= (editorText buffer.key) buffer.savedText)
 
 fun bufferTitle index buffer:
   if (bufferDirtyAt index buffer):
@@ -78,6 +81,23 @@ fun bufferLabels source:
     set labels (listAppend labels (bufferTitle bufferIndex buffer))
     += bufferIndex 1
   labels
+
+fun bufferIndexForKey source key index:
+  cond:
+    when (empty? source):
+      -1
+    when (= (first source).key key):
+      index
+    when true:
+      bufferIndexForKey (rest source) key (+ index 1)
+
+fun bufferNameForKey key:
+  define:
+    foundIndex = (bufferIndexForKey buffers key 0)
+  if (>= foundIndex 0):
+    (nth buffers foundIndex).name
+  else:
+    "Closed buffer"
 
 fun removeAt values index:
   if (empty? values):
@@ -102,12 +122,14 @@ fun clampActiveBuffer:
 fun newBuffer:
   define:
     buffer = {}:
+      key = (string "duck:buffer:" nextBuffer)
       path = ""
       name = (string "Untitled " nextBuffer)
       savedText = ""
   set buffers (listAppend buffers buffer)
   set activeBuffer (- (length buffers) 1)
   += nextBuffer 1
+  send "duck.editor.switch-buffer" buffer.key
   clearEditor (activeEditorID)
   set statusText "New document"
 
@@ -115,6 +137,7 @@ fun openFileInEditor path:
   define:
     content = ""
     buffer = {}:
+      key = (string "duck:buffer:" nextBuffer)
       path = path
       name = (pathBaseName path)
       savedText = ""
@@ -123,6 +146,8 @@ fun openFileInEditor path:
   set buffer.savedText content
   set buffers (listAppend buffers buffer)
   set activeBuffer (- (length buffers) 1)
+  += nextBuffer 1
+  send "duck.editor.switch-buffer" buffer.key
   setEditorText (activeEditorID) content
   set statusText (string "Opened " path)
 
@@ -142,26 +167,36 @@ fun saveActiveBuffer:
   else:
     saveActiveBufferAs buffers.[activeBuffer].path
 
-fun closeActiveBuffer:
+fun closeBufferAt index:
   if (> (length buffers) 1):
-    then:
-      set buffers (removeAt buffers activeBuffer)
-      clampActiveBuffer
-      set statusText "Buffer closed"
-    else:
-      clearEditor (activeEditorID)
-      set buffers.[0].path ""
-      set buffers.[0].name "Untitled 1"
-      set buffers.[0].savedText ""
-      set activeBuffer 0
-      set statusText "Last buffer cleared"
+    define:
+      closingKey = (bufferKeyAt index)
+      fallbackIndex = (pick (= index 0) 1 0)
+      fallbackKey = (bufferKeyAt fallbackIndex)
+    set closingBufferKey closingKey
+    set replacementBufferKey fallbackKey
+    send "duck.editor.replace-buffer" true
+    send "duck.editor.close-pane" true
+    set buffers (removeAt buffers index)
+    set activeBuffer (pick (>= index (length buffers)) (- (length buffers) 1) index)
+    set statusText "Buffer closed"
+  else:
+    clearEditor (activeEditorID)
+    set buffers.[0].path ""
+    set buffers.[0].name "Untitled 1"
+    set buffers.[0].savedText ""
+    set activeBuffer 0
+    set statusText "Last buffer cleared"
+
+fun closeActiveBuffer:
+  closeBufferAt activeBuffer
 
 clampActiveBuffer
 
 events:
   when (external "duck:filePicked"):
     set pickedFile (pickResult "duck:filePicked")
-    send "duck.editor.open" pickedFile
+    openFileInEditor pickedFile
     set menuAction pickedFile
     clearPickResult "duck:filePicked"
 
@@ -205,6 +240,16 @@ events:
     set showGoto false
   when (clicked aboutCloseID):
     set showAbout false
+
+  define:
+    tabIndex = 0
+  for buffer (iter buffers):
+    when (clicked (id tabBarID "tab" tabIndex)):
+      set activeBuffer tabIndex
+      send "duck.editor.switch-buffer" buffer.key
+    when (middleClicked (id tabBarID "tab" tabIndex)):
+      closeBufferAt tabIndex
+    += tabIndex 1
 
   when (not (= (menuResult "duck:menubar") nothing)):
     set menuAction (menuResult "duck:menubar")

@@ -106,6 +106,17 @@ suite "ui layout nesting":
     check anchored.layerShellConfig.marginTop == 0
     check anchored.layerShellConfig.marginLeft == 8
 
+  test "draggable overlay dialogs use movable top-left anchors":
+    let app = AppConfig.overlayDialog(
+      width = 260.Positive,
+      height = 120.Positive,
+      draggable = true,
+    )
+    check EdgeTop in app.layerShellConfig.anchors
+    check EdgeLeft in app.layerShellConfig.anchors
+    check app.layerShellConfig.marginTop == 96
+    check app.layerShellConfig.marginLeft == 96
+
   test "palette provides clean dark and light themes":
     let
       dark = Palette.dark()
@@ -1235,11 +1246,14 @@ suite "ui layout nesting":
       var ui = UI.init()
       ui.loadFont("font", "", 18)
       check nestApp.layoutCrowErrorDialogForTest(ui,
-          "missing field: start-label", 620, 300)
+          """error: missing field: start-label
+Stack trace:
+  at /tmp/example/main.nest:12:5 in render
+  at /tmp/example/main.nest:4:1 in main""", 620, 300)
       check ui.widget(ui.id("_nest_error_dialog")).frame.width == 620
       check ui.widget(ui.id("_nest_error_dialog")).frame.height == 300
       check ui.widget(ui.id("_nest_error_header")).frame.height > 0
-      check ui.widget(ui.id("_nest_error_line", "0")).frame.width > 0
+      check ui.widget(ui.id("_nest_error_message", "0")).frame.width > 0
     finally:
       fontRelays = originalFontRelays
 

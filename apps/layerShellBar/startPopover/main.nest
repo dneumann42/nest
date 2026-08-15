@@ -79,11 +79,10 @@ events:
   for command (iter commands):
     when (clicked command.name):
       if (= command.cmd "toggle-perf-overlay"):
-        then:
-          closeDialog command.cmd
-        else:
-          shellLaunch command.cmd
-          closeDialog command.name
+        closeDialog command.cmd
+      else:
+        shellLaunch command.cmd
+        closeDialog command.name
 
 card (id "menu" "panel"):
   width = fill
@@ -148,3 +147,4 @@ card (id "menu" "panel"):
         button cmd.name cmd.label:
           width = fixed StartMenuPowerButtonWidth
           height = fit
+

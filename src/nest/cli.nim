@@ -1,13 +1,13 @@
 import std/[cmdline, os, strutils]
 
-import nest/[errorDialogs, generator, perf, runner]
+import nest/[crowdsl, errorDialogs, generator, perf, runner]
 
 proc usage*(): string =
   """Usage:
   nest --project DIR
   nest run DIR [--perf-overlay] [--benchmark [FRAMES]]
   nest dialog DIR [DATA] [RESULT_PATH] [ANCHOR_JSON]
-  nest error-dialog MESSAGE
+  nest error-dialog [example | MESSAGE]
   nest generate [DIR]
 
 Project files:
@@ -76,9 +76,23 @@ proc main*() =
     elif value.len > 0:
       echo value
   of "error-dialog":
+    if args.len >= 2 and args[1] != "example":
+      runCrowErrorDialog(args[1])
+    else:
+      runCrowErrorDialog(ErrorDetails(
+        message: "missing field: start-label",
+        primary: ErrorLocation(path: "main.nest", line: 12, column: 5,
+          sourceLine: "label (id \"start-label\")"),
+        frames: @[
+          ErrorLocation(path: "main.nest", line: 12, column: 5,
+            label: "renderStartMenu"),
+          ErrorLocation(path: "main.nest", line: 4, column: 1, label: "main"),
+        ],
+      ))
+  of "error-dialog-json":
     if args.len < 2:
       quit(usage(), 1)
-    runCrowErrorDialog(args[1])
+    runCrowErrorDialog(errorDetailsFromJson(args[1]))
   of "generate", "gen":
     let dir =
       if args.len >= 2:

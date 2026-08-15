@@ -71,6 +71,7 @@ type
     setClipRect*: proc(r: Rect) {.nimcall.}
     setCursor*: proc(c: CursorKind) {.nimcall.}
     setWindowTitle*: proc(title: string) {.nimcall.}
+    moveWindowBy*: proc(dx, dy: int) {.nimcall.}
 
   FontRelays* = object
     openFont*: proc(path: string, size: int, metrics: var FontMetrics): Font {.nimcall.}
@@ -107,6 +108,8 @@ var windowRelays* = WindowRelays(
   setCursor: proc(c: CursorKind) =
     discard,
   setWindowTitle: proc(title: string) =
+    discard,
+  moveWindowBy: proc(dx, dy: int) =
     discard,
 )
 
@@ -186,6 +189,11 @@ proc setCursor*(c: CursorKind) =
 
 proc setWindowTitle*(title: string) =
   windowRelays.setWindowTitle(title)
+
+proc moveWindowBy*(dx, dy: int) =
+  ## Moves a normal window or adjusts the position of a layer-shell popup.
+  if dx != 0 or dy != 0:
+    windowRelays.moveWindowBy(dx, dy)
 
 proc openFont*(path: string, size: int, metrics: var FontMetrics): Font =
   fontRelays.openFont(path, size, metrics)
