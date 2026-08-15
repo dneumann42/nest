@@ -12,6 +12,17 @@ fun splitPane splitID direction leftTree rightTree:
     first = leftTree
     second = rightTree
 
+fun clonePaneTree tree:
+  cond:
+    when (= (dict-get tree "kind") "leaf"):
+      leafPane (dict-get tree "id") (dict-get tree "bufferKey")
+    when true:
+      splitPane
+        (dict-get tree "id")
+        (dict-get tree "direction")
+        (clonePaneTree (dict-get tree "first"))
+        (clonePaneTree (dict-get tree "second"))
+
 fun firstPaneID tree:
   cond:
     when (= (dict-get tree "kind") "leaf"):
@@ -46,54 +57,62 @@ fun paneBufferKey tree target:
 fun setPaneBuffer tree target bufferKey:
   cond:
     when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "id") target)):
-      dict-put tree "bufferKey" bufferKey
+      leafPane (dict-get tree "id") bufferKey
     when (= (dict-get tree "kind") "leaf"):
-      tree
+      clonePaneTree tree
     when true:
-      dict-put
-        (dict-put tree "first" (setPaneBuffer (dict-get tree "first") target bufferKey))
-        "second"
+      splitPane
+        (dict-get tree "id")
+        (dict-get tree "direction")
+        (setPaneBuffer (dict-get tree "first") target bufferKey)
         (setPaneBuffer (dict-get tree "second") target bufferKey)
 
 fun replaceBuffer tree oldBufferKey newBufferKey:
   cond:
     when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "bufferKey") oldBufferKey)):
-      dict-put tree "bufferKey" newBufferKey
+      leafPane (dict-get tree "id") newBufferKey
     when (= (dict-get tree "kind") "leaf"):
-      tree
+      clonePaneTree tree
     when true:
-      dict-put
-        (dict-put tree "first" (replaceBuffer (dict-get tree "first") oldBufferKey newBufferKey))
-        "second"
+      splitPane
+        (dict-get tree "id")
+        (dict-get tree "direction")
+        (replaceBuffer (dict-get tree "first") oldBufferKey newBufferKey)
         (replaceBuffer (dict-get tree "second") oldBufferKey newBufferKey)
 
 fun splitLeaf tree target direction newPaneID bufferKey:
   cond:
     when (and (= (dict-get tree "kind") "leaf") (= (dict-get tree "id") target)):
-      splitPane (string "split-" newPaneID) direction tree (leafPane newPaneID bufferKey)
+      splitPane
+        (string "split-" newPaneID)
+        direction
+        (clonePaneTree tree)
+        (leafPane newPaneID bufferKey)
     when (= (dict-get tree "kind") "leaf"):
-      tree
+      clonePaneTree tree
     when true:
-      dict-put
-        (dict-put tree "first" (splitLeaf (dict-get tree "first") target direction newPaneID bufferKey))
-        "second"
+      splitPane
+        (dict-get tree "id")
+        (dict-get tree "direction")
+        (splitLeaf (dict-get tree "first") target direction newPaneID bufferKey)
         (splitLeaf (dict-get tree "second") target direction newPaneID bufferKey)
 
 fun unsplitLeaf tree target:
   cond:
     when (= (dict-get tree "kind") "leaf"):
-      tree
+      clonePaneTree tree
     when (and (= (dict-get (dict-get tree "first") "kind") "leaf") (= (dict-get (dict-get tree "first") "id") target)):
-      dict-get tree "second"
+      clonePaneTree (dict-get tree "second")
     when (and (= (dict-get (dict-get tree "second") "kind") "leaf") (= (dict-get (dict-get tree "second") "id") target)):
-      dict-get tree "first"
+      clonePaneTree (dict-get tree "first")
     when true:
       define:
         leftTree = (dict-get tree "first")
         rightTree = (dict-get tree "second")
-      dict-put
-        (dict-put tree "first" (unsplitLeaf leftTree target))
-        "second"
+      splitPane
+        (dict-get tree "id")
+        (dict-get tree "direction")
+        (unsplitLeaf leftTree target)
         (unsplitLeaf rightTree target)
 
 fun editorTree tree workspace focusedPane:

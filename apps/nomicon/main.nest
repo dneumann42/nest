@@ -1,6 +1,6 @@
 import "actions.nest"
 
-define:
+state "root":
   count = 0
   rootID = id
   titleID = id

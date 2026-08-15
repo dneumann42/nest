@@ -1,6 +1,6 @@
 import "variables.nest"
 
-define:
+state "root":
   startID = (id "start")
   clockID = (id "clock")
   lastAction = ""
@@ -21,7 +21,7 @@ fun defaultConfig:
   {}:
     start-label = "Alatar"
 
-define:
+state "root":
   cfg = defaultConfig
 
 import "components/workspaces.nest"

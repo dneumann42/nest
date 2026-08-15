@@ -1,6 +1,6 @@
 import "../variables.nest"
 
-define:
+state "root":
   closeID = (id "network" "close")
   wifiOnID = (id "network" "wifi" "on")
   wifiOffID = (id "network" "wifi" "off")

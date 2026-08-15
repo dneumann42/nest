@@ -1384,17 +1384,6 @@ proc refreshPerfOverlay(runtime: NestCrowRuntime) {.raises: [].} =
       discard
 
 proc registerNestCommands(runtime: NestCrowRuntime) =
-  runtime.evaluator.native "define":
-    discard layout
-    discard arguments
-    result = nothing()
-    for node in bodyNodes:
-      if node.kind != Binding:
-        raise newException(EvaluatorError, "define body entries must be bindings")
-      if not env.contains(node.bindingSymbol):
-        result = env.eval(node.value)
-        env.define(node.bindingSymbol, result)
-
   runtime.evaluator.native "import":
     discard layout
     discard bodyNodes
@@ -1495,7 +1484,10 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
           env.eval(binding.value)
       if key notin runtime.componentState:
         runtime.componentState[key] = value
-      env.define(binding.bindingSymbol, value)
+      if env.bindings.hasKey(binding.bindingSymbol):
+        env.bindings[binding.bindingSymbol] = value
+      else:
+        env.define(binding.bindingSymbol, value)
       runtime.stateBindings.add StateBinding(env: env, symbol: binding.bindingSymbol, key: key)
     nothing()
 
@@ -3044,6 +3036,7 @@ proc render*(runtime: NestCrowRuntime, ui: var UI, program: SyntaxNode) =
   runtime.pollPathCallbacks()
   if runtime.hasError:
     return
+  runtime.commitState()
   runtime.currentUi = addr ui
   runtime.stateBindings.setLen(0)
   try:
@@ -3123,11 +3116,14 @@ proc render*(app: NestCrowApp, ui: var UI) =
     ui.requestRedrawAfter(0)
   if app.program.isNil:
     return
-  let fullRenderDue = app.lastFullRenderTicks == 0 or ui.hasPendingInput() or
+  let fullRenderDue = app.lastFullRenderTicks == 0 or ui.hasPendingFullRenderInput() or
     ui.needsFullRender() or
     (app.runtime.nextFullRenderTicks > 0 and now >= app.runtime.nextFullRenderTicks)
   if not fullRenderDue and ui.hasRetainedFrame():
-    discard ui.drawRetainedFrame()
+    if ui.hasPendingInput():
+      discard ui.updateRetainedFrame()
+    else:
+      discard ui.drawRetainedFrame()
     ui.requestRedrawAfter(MaintenancePollMs)
     return
   app.lastFullRenderTicks = now

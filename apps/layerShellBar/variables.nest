@@ -8,14 +8,14 @@ define:
   BarHeight = 32
   BarIconSize = - BarHeight 4
   BarOpacity = 0.8
-  BarPadding = 4
-  BarWidgetFontSize = 14
-  BarWidgetPadding = 3
+  BarPadding = 0
+  BarWidgetFontSize = 10
+  BarWidgetPadding = 0
   BarLeftGap = 14
   BarRightGap = 8
 
   DialogPadding = 10
-  DialogPaddingWide = 16
+  DialogPaddingWide = 8
   DialogGap = 8
   DialogSectionGap = 12
   DialogHeaderHeight = 32

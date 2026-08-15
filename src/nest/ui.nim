@@ -105,6 +105,7 @@ type
     scheduledRedrawTicks: int
     hasScheduledRedraw: bool
     inputPending: bool
+    fullRenderInputPending: bool
     frameRedrawn: bool
     phase: UIPhase
     autoIDCounter: uint64
@@ -320,6 +321,9 @@ proc hasPendingWidgetEvents*(self: UI): bool {.raises: [].} =
 proc hasPendingInput*(self: UI): bool {.raises: [].} =
   self.inputPending or self.hasPendingWidgetEvents()
 
+proc hasPendingFullRenderInput*(self: UI): bool {.raises: [].} =
+  self.fullRenderInputPending or self.hasPendingWidgetEvents()
+
 proc needsFullRender*(self: UI): bool {.raises: [].} =
   self.context.draw.dirtyAll or self.context.draw.dirtyWidgets.len > 0
 
@@ -445,6 +449,7 @@ proc finishInputFrame*(self: var UI) =
   self.context.update.dirtyWidgets.clear()
   self.context.update.sliderValues.clear()
   self.inputPending = false
+  self.fullRenderInputPending = false
 
 proc mouseMove*(self: var UI, x, y: int) =
   self.inputPending = true
@@ -455,33 +460,39 @@ proc mouseMove*(self: var UI, x, y: int) =
 
 proc mouseDown*(self: var UI) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   let last = self.context.update.mouseLeftDown
   self.context.update.mouseLeftDown = true
   self.context.update.mouseLeftPressed = not last
 
 proc mouseUp*(self: var UI) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   self.context.update.mouseLeftDown = false
   self.context.update.sliderDragging = InvalidWidgetID
 
 proc mouseMiddleDown*(self: var UI) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   let last = self.context.update.mouseMiddleDown
   self.context.update.mouseMiddleDown = true
   self.context.update.mouseMiddlePressed = not last
 
 proc mouseMiddleUp*(self: var UI) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   self.context.update.mouseMiddleDown = false
   self.context.update.middleDragging = InvalidWidgetID
   self.context.draw.middleDragging = InvalidWidgetID
 
 proc mouseRightDown*(self: var UI) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   self.context.update.mouseRightPressed = true
 
 proc resizeWindow*(self: var UI, width, height: int) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   self.context.update.windowWidth = max(width, 0)
   self.context.update.windowHeight = max(height, 0)
   self.context.draw.windowWidth = self.context.update.windowWidth
@@ -489,15 +500,18 @@ proc resizeWindow*(self: var UI, width, height: int) =
 
 proc keyDown*(self: var UI, key: KeyCode, mods: set[Modifier]) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   self.context.update.keyInputs.add KeyInput(key: key, mods: mods)
 
 proc textInput*(self: var UI, text: string) =
   if text.len > 0:
     self.inputPending = true
+    self.fullRenderInputPending = true
     self.context.update.textInputs.add text
 
 proc mouseWheel*(self: var UI, x, y: float64) =
   self.inputPending = true
+  self.fullRenderInputPending = true
   self.context.update.mouseWheelX += x
   self.context.update.mouseWheelY += y
 
@@ -1837,6 +1851,57 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
     if self.context.draw.hasRedrawRequest:
       self.requestRedrawAfterSafe(self.context.draw.redrawDelayMs)
     self.frameRedrawn = true
+
+proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
+  ## Update hit testing and repaint the last solved frame without re-evaluating Crow.
+  if not self.retainedFrameValid:
+    return false
+  let
+    root = self.root
+    components = self.components
+    componentByID = self.componentByID
+    layoutChildren = self.layoutChildren
+    floatingWidgets = self.floatingWidgets
+    scrollContainers = self.scrollContainers
+  self.root = self.retainedRoot
+  self.components = self.retainedComponents
+  self.componentByID = self.retainedComponentByID
+  self.layoutChildren = self.retainedLayoutChildren
+  self.floatingWidgets = self.retainedFloatingWidgets
+  self.scrollContainers = self.retainedScrollContainers
+
+  let
+    beforeHot = self.context.draw.hotWidgets
+    beforeActive = self.context.draw.activeWidgets
+    beforeSubmitted = self.context.draw.submittedWidgets
+    beforeFocused = self.context.draw.focusedWidget
+  self.context.update.hotWidgets.clear()
+  self.context.update.activeWidgets.clear()
+  self.context.update.dirtyWidgets.clear()
+  self.context.update.resources = self.context.draw.resources
+  self.context.update.sliderDragging =
+    if self.context.update.mouseLeftDown:
+      self.context.draw.sliderDragging
+    else:
+      InvalidWidgetID
+  self.update(self.context.update)
+  for id in self.context.update.dirtyWidgets.items:
+    self.markDirty(id)
+  self.markStateChanges(
+    beforeHot, beforeActive, beforeSubmitted, beforeFocused, self.context.update
+  )
+  switchState(self.context.update, self.context.draw)
+  self.frameRedrawn = self.draw(self.context.draw)
+  if self.context.draw.hasRedrawRequest:
+    self.requestRedrawAfterSafe(self.context.draw.redrawDelayMs)
+  result = self.frameRedrawn
+
+  self.root = root
+  self.components = components
+  self.componentByID = componentByID
+  self.layoutChildren = layoutChildren
+  self.floatingWidgets = floatingWidgets
+  self.scrollContainers = scrollContainers
 
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   let components = self.takeChildren()

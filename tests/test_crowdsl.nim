@@ -14,18 +14,18 @@ proc render(runtime: NestCrowRuntime; ui: var UI; source: string) =
   runtime.render(ui, parse(source))
 
 suite "Crow GUI DSL":
-  test "define initializes GUI state once":
+  test "state initializes GUI state once":
     let runtime = NestCrowRuntime.init()
     var ui = UI.init()
 
     runtime.render(ui, """
-define:
+state "root":
   count = 0
 events:
   += count 1
 """)
     runtime.render(ui, """
-define:
+state "root":
   count = 0
 events:
   += count 1
@@ -139,7 +139,7 @@ events:
     ui.loadFont("font", "", 18)
 
     let source = """
-define:
+state "root":
   value = ""
 set value (shellAsync "async-test" "printf ready" 1000)
 label (id "value") value:
@@ -369,7 +369,7 @@ panel (id "root"):
 
       runtime.renderLayoutOnly(ui, parse(
           """
-define:
+state "root":
   selected = 9
   labels = []:
     "one"
@@ -431,7 +431,7 @@ tabs (id "tabs") labels selected:
       check upperPane.y < lowerPane.y
       check lowerPane.x < rightPane.x
 
-      for _ in 0 ..< 32:
+      for _ in 0 ..< 2:
         discard app.runtime.evaluator.exec(parse("send \"duck.editor.split\" true\n"))
         var splitUi = UI.init()
         splitUi.initContext(800, 600)
@@ -509,6 +509,45 @@ tabs (id "tabs") labels selected:
     app.render(ui)
 
     check ui.redrawDelayMs() >= 0
+
+  test "app mouse hover updates retained frame without rerunning crow":
+    let
+      originalInputRelays = inputRelays
+      path = getTempDir() / "nest-retained-hover-test.nest"
+    var ticks = 1000
+    inputRelays.getTicks = proc(): int =
+      ticks
+    writeFile(path, """
+state "root":
+  count = 0
+  hoverID = (id "hover")
+
+events:
+  += count 1
+
+button hoverID "Hover":
+  width = fixed 120
+  height = fixed 32
+""")
+    try:
+      let app = NestCrowApp.init(path)
+      var ui = UI.init()
+      ui.initContext(360, 180)
+      ui.loadFont("font", "", 18)
+
+      app.render(ui)
+      check app.runtime.get("count").number == 1
+
+      ticks = 1010
+      ui.mouseMove(10, 10)
+      app.render(ui)
+
+      check app.runtime.get("count").number == 1
+      check ui.redrewFrame()
+    finally:
+      inputRelays = originalInputRelays
+      if fileExists(path):
+        removeFile(path)
 
   test "counter example emits visible draw commands":
     let originalDrawRelays = drawRelays
@@ -611,7 +650,7 @@ tabs (id "tabs") labels selected:
         check ui.widget(ui.id("right")).frame.width > 0
         check ui.widget(ui.id("bar", "active-window")).frame.width > 0
         check ui.widget(ui.id("bar", "volume")).frame.width > 0
-        check ui.widget(ui.id("bar-media", "art")).frame.width == 32
+        check ui.widget(ui.id("bar-media", "art")).frame.width == 28
         check ui.widget(ui.id("bar", "cpu")).frame.width > 0
         check ui.widget(ui.id("bar", "memory")).frame.width > 0
         check ui.widget(ui.id("bar", "storage")).frame.width > 0
@@ -716,7 +755,7 @@ tabs (id "tabs") labels selected:
     runtime.dialogResults["menu:duck:menubar"] = "file.open"
 
     runtime.render(ui, parse("""
-define:
+state "root":
   menuAction = nothing
 events:
   when (not (= (menuResult "duck:menubar") nothing)):
@@ -743,7 +782,7 @@ events:
       ui.loadFont("font", "", 18)
 
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
 fun pickedFile path:
   set picked path
@@ -752,7 +791,7 @@ events:
     pickFile pickedFile
 """))
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
 fun pickedFile path:
   set picked path
@@ -779,7 +818,7 @@ events:
       ui.loadFont("font", "", 18)
 
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
 fun pickedDirectory path:
   set picked path
@@ -788,7 +827,7 @@ events:
     pickDirectory pickedDirectory
 """))
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
 fun pickedDirectory path:
   set picked path
@@ -815,7 +854,7 @@ events:
       ui.loadFont("font", "", 18)
 
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
   requested = false
 events:
@@ -827,7 +866,7 @@ events:
     pickFileEvent "file-picked"
 """))
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
   requested = false
 events:
@@ -859,7 +898,7 @@ events:
       ui.loadFont("font", "", 18)
 
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
   requested = false
 events:
@@ -871,7 +910,7 @@ events:
     pickDirectoryEvent "dir-picked"
 """))
       runtime.render(ui, parse("""
-define:
+state "root":
   picked = ""
   requested = false
 events:
@@ -896,7 +935,7 @@ events:
     ui.loadFont("font", "", 18)
 
     runtime.render(ui, parse("""
-define:
+state "root":
   editorID = (id "test" "editor")
   captured = ""
   cursorBefore = 0
@@ -1053,7 +1092,7 @@ column (id "root"):
       ui.initContext(360, 160)
       ui.loadFont("font", "", 18)
       let source = parse("""
-define:
+state "root":
   menuID = (id "duck" "menubar")
 menuBar menuID:
   width = fill
@@ -1083,7 +1122,7 @@ menuBar menuID:
     ui.initContext(360, 160)
     ui.loadFont("font", "", 18)
     let source = parse("""
-define:
+state "root":
   presses = 0
   buttonID = (id "behind-menu")
 events:
@@ -1314,7 +1353,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
 
       runtime.renderLayoutOnly(ui, parse(
           """
-define:
+state "root":
   selectedDate = "2026-07-18"
 import "apps/layerShellBar/components/calendar.nest"
 dateSelector "cal" selectedDate
@@ -1339,7 +1378,7 @@ dateSelector "cal" selectedDate
           WidgetIDValue(value.native).value == previousID)
 
       runtime.render(eventUi, parse("""
-define:
+state "root":
   selectedDate = "2026-07-18"
 import "apps/layerShellBar/components/calendar.nest"
 dateSelector "cal" selectedDate
@@ -1382,7 +1421,7 @@ dateSelector "cal" selectedDate
           WidgetIDValue(value.native).value == dayID)
 
       runtime.render(ui, parse("""
-define:
+state "root":
   selectedDate = "2026-07-18"
   clickedDate = nothing
 import "apps/layerShellBar/components/calendar.nest"

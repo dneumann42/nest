@@ -1,6 +1,6 @@
 import "../variables.nest"
 
-define:
+state "root":
   commands = []:
     {}:
       label = "Packages"
@@ -48,7 +48,7 @@ define:
       cmd = "pcmanfm $HOME/Documents/Library"
       place = "left"
     {}:
-      label = "Perf Overlay"
+      label = "Performance Overlay"
       name = (id "menu" "perf-overlay")
       cmd = "toggle-perf-overlay"
       place = "right"
@@ -147,4 +147,3 @@ card (id "menu" "panel"):
         button cmd.name cmd.label:
           width = fixed StartMenuPowerButtonWidth
           height = fit
-

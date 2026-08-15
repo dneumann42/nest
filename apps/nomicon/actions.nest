@@ -6,7 +6,7 @@ record Action:
   cmd = ""
   place = ""
 
-define:
+state "root":
   actions = []
 
 block-command action:

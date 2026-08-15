@@ -2,7 +2,7 @@ import "../variables.nest"
 import "../components/volume.nest"
 import "../../../lib/components/radioGroup.nest"
 
-define:
+state "root":
   muteID = (id "volume" "mute")
   downID = (id "volume" "down")
   upID = (id "volume" "up")

@@ -1,4 +1,4 @@
-define:
+state "root":
   selectedDate = (today-date)
   clickedDate = nothing
 

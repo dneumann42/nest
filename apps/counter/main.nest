@@ -1,4 +1,4 @@
-define:
+state "root":
   count = 0
   rootID = id
   decrementID = (id "decrement")

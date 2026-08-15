@@ -1,7 +1,7 @@
 import "../variables.nest"
 import "../components/media.nest"
 
-define:
+state "root":
   artworkID = (id "media" "artwork")
   previousID = (id "media" "previous")
   playPauseID = (id "media" "play-pause")

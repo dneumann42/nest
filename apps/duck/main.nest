@@ -9,12 +9,12 @@ use dialogs:
   include labeledInput actionRow findDialog replaceDialog gotoDialog aboutDialog
 
 use editorWorkspace:
-  include leafPane splitPane firstPaneID paneCount paneEditorID paneBufferKey setPaneBuffer replaceBuffer splitLeaf unsplitLeaf editorTree editorWorkspace
+  include leafPane splitPane clonePaneTree firstPaneID paneCount paneEditorID paneBufferKey setPaneBuffer replaceBuffer splitLeaf unsplitLeaf editorTree editorWorkspace
 
 use appShell:
   include duckStatusBar duckAppShell
 
-define:
+state "root":
   rootID = id
   menuID = (id "duck" "menubar")
   tabBarID = (id "duck" "tabs")
@@ -35,6 +35,7 @@ define:
   pickedFile = ""
   statusText = "Ready"
   activeBuffer = 0
+  tabSelection = 0
   nextBuffer = 2
   closingBufferKey = ""
   replacementBufferKey = ""
@@ -46,6 +47,8 @@ define:
   wordWrap = false
   showStatusBar = true
   showLineNumbers = false
+  suppressTabClick = false
+  pendingActiveBuffer = -1
   lastFindStart = -1
   lastFindStop = -1
   buffers = []:
@@ -121,34 +124,34 @@ fun clampActiveBuffer:
 
 fun newBuffer:
   define:
-    buffer = {}:
+    createdBuffer = {}:
       key = (string "duck:buffer:" nextBuffer)
       path = ""
       name = (string "Untitled " nextBuffer)
       savedText = ""
-  set buffers (listAppend buffers buffer)
+  set buffers (listAppend buffers createdBuffer)
   set activeBuffer (- (length buffers) 1)
   += nextBuffer 1
-  send "duck.editor.switch-buffer" buffer.key
+  send "duck.editor.switch-buffer" createdBuffer.key
   clearEditor (activeEditorID)
   set statusText "New document"
 
 fun openFileInEditor path:
   define:
-    content = ""
-    buffer = {}:
+    openedContent = ""
+    openedBuffer = {}:
       key = (string "duck:buffer:" nextBuffer)
       path = path
       name = (pathBaseName path)
       savedText = ""
   with (open-file path "rb") stream:
-    set content (read-all stream)
-  set buffer.savedText content
-  set buffers (listAppend buffers buffer)
+    set openedContent (read-all stream)
+  set openedBuffer.savedText openedContent
+  set buffers (listAppend buffers openedBuffer)
   set activeBuffer (- (length buffers) 1)
   += nextBuffer 1
-  send "duck.editor.switch-buffer" buffer.key
-  setEditorText (activeEditorID) content
+  send "duck.editor.switch-buffer" openedBuffer.key
+  setEditorText (activeEditorID) openedContent
   set statusText (string "Opened " path)
 
 fun saveActiveBufferAs path:
@@ -194,18 +197,6 @@ fun closeActiveBuffer:
 clampActiveBuffer
 
 events:
-  when (external "duck:filePicked"):
-    set pickedFile (pickResult "duck:filePicked")
-    openFileInEditor pickedFile
-    set menuAction pickedFile
-    clearPickResult "duck:filePicked"
-
-  when (external "duck:saveAsPicked"):
-    set pickedFile (pickResult "duck:saveAsPicked")
-    saveActiveBufferAs pickedFile
-    set menuAction pickedFile
-    clearPickResult "duck:saveAsPicked"
-
   when (keyPressed "f3"):
     findNext
   when (keyPressed "f5"):
@@ -241,19 +232,41 @@ events:
   when (clicked aboutCloseID):
     set showAbout false
 
-  define:
+  state "root":
     tabIndex = 0
+  set tabIndex 0
   for buffer (iter buffers):
-    when (clicked (id tabBarID "tab" tabIndex)):
+    when (and (not suppressTabClick) (clicked (id tabBarID "tab" tabIndex))):
       set activeBuffer tabIndex
       send "duck.editor.switch-buffer" buffer.key
-    when (middleClicked (id tabBarID "tab" tabIndex)):
+    when (and (not suppressTabClick) (middleClicked (id tabBarID "tab" tabIndex))):
       closeBufferAt tabIndex
     += tabIndex 1
+  when suppressTabClick:
+    set suppressTabClick false
+  when (>= pendingActiveBuffer 0):
+    set activeBuffer pendingActiveBuffer
+    send "duck.editor.switch-buffer" (activeEditorID)
+    set pendingActiveBuffer -1
 
   when (not (= (menuResult "duck:menubar") nothing)):
     set menuAction (menuResult "duck:menubar")
     handleMenuAction menuAction
     clearMenuResult "duck:menubar"
+
+  when (external "duck:filePicked"):
+    set pickedFile (pickResult "duck:filePicked")
+    openFileInEditor pickedFile
+    set suppressTabClick true
+    set pendingActiveBuffer activeBuffer
+    set menuAction pickedFile
+    clearPickResult "duck:filePicked"
+
+  when (external "duck:saveAsPicked"):
+    set pickedFile (pickResult "duck:saveAsPicked")
+    saveActiveBufferAs pickedFile
+    set suppressTabClick true
+    set menuAction pickedFile
+    clearPickResult "duck:saveAsPicked"
 
 duckAppShell

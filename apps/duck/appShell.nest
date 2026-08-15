@@ -17,6 +17,7 @@ component duckStatusBar:
         height = fit
 
 component duckAppShell:
+  set tabSelection activeBuffer
   panel rootID:
     width = fill
     height = fill
@@ -24,7 +25,7 @@ component duckAppShell:
     padding = 0.0
     alignItems = AlignStretch
     duckMenuBar
-    tabs tabBarID (bufferLabels buffers) activeBuffer:
+    tabs tabBarID (bufferLabels buffers) tabSelection:
       width = fill
       height = fixed 36
       padding = 4
