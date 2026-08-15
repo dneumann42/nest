@@ -61,6 +61,13 @@ method draw*(self: RealtimeProbe, widget: Widget, ctx: var DrawContext) =
   discard ctx
   inc realtimeProbeDraws
 
+type RetainedRedrawProbe = ref object of Component
+
+method draw*(self: RetainedRedrawProbe, widget: Widget, ctx: var DrawContext) =
+  discard self
+  discard widget
+  ctx.requestRedrawAfter(33)
+
 suite "ui layout nesting":
   test "perf stats track bounded rolling fps":
     var stats = PerfStats.init(historySize = 3)
@@ -646,11 +653,38 @@ suite "ui layout nesting":
     discard ui.drawRealtime()
     check realtimeProbeDraws == 2
 
+  test "retained frames repaint without rebuilding layout":
+    realtimeProbeDraws = 0
+    var ui = UI.init()
+    ui.initContext(220, 80)
+
+    ui.layout:
+      discard ui.component(Label1, Component(RealtimeProbe()), fixed(40), fixed(20))
+    check ui.hasRetainedFrame()
+    check realtimeProbeDraws == 1
+
+    discard ui.drawRetainedFrame()
+    check realtimeProbeDraws == 2
+
     ui.layout:
       discard ui.component(Label1, Component(RealtimeProbe()), fixed(40), fixed(20))
     check not ui.hasRealtimeWidgets()
     discard ui.drawRealtime()
     check realtimeProbeDraws == 2
+
+  test "retained frames preserve component redraw requests":
+    var ui = UI.init()
+    ui.initContext(220, 80)
+
+    ui.layout:
+      discard ui.component(
+        Label1, Component(RetainedRedrawProbe()), fixed(40), fixed(20)
+      )
+    ui.clearRedrawRequest()
+
+    discard ui.drawRetainedFrame()
+    check ui.redrawDelayMs() >= 0
+    check ui.redrawDelayMs() <= 33
 
   test "passive backgrounds block input without acting interactive":
     var ui = UI.init()

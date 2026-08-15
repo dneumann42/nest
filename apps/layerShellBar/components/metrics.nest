@@ -27,6 +27,8 @@ component cpuMeter key:
     height = fit
     background = tint "primary"
     textScroll = true
+    fontSize = BarWidgetFontSize
+    buttonPadding = BarWidgetPadding
 
 component memoryMeter key:
   button (id (eval key) "memory") (string "▣ " (shellAsync (id (eval key) "memory-query") (memoryCommand) MediaPollInterval)):
@@ -34,6 +36,8 @@ component memoryMeter key:
     height = fit
     background = tint "rose"
     textScroll = true
+    fontSize = BarWidgetFontSize
+    buttonPadding = BarWidgetPadding
 
 component storageMeter key:
   button (id (eval key) "storage") (string "▤ " (shellAsync (id (eval key) "storage-query") (storageCommand) StoragePollInterval)):
@@ -41,6 +45,8 @@ component storageMeter key:
     height = fit
     background = tint "mauve"
     textScroll = true
+    fontSize = BarWidgetFontSize
+    buttonPadding = BarWidgetPadding
 
 component networkMeter key:
   define:
@@ -57,3 +63,5 @@ component networkMeter key:
     height = fit
     background = tint "sky"
     textScroll = true
+    fontSize = BarWidgetFontSize
+    buttonPadding = BarWidgetPadding

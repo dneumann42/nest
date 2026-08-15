@@ -37,6 +37,7 @@ component workspaces key:
       label (id keyText "empty") "-":
         width = (fixed WorkspaceEmptyWidth)
         height = fit
+        fontSize = BarWidgetFontSize
     else:
       for workspace (iter workspaceList):
         define:
@@ -48,5 +49,6 @@ component workspaces key:
         button workspaceID (workspaceLabel workspace):
           width = fit
           height = fit
+	  fontSize = BarWidgetFontSize
+	  buttonPadding = BarWidgetPadding
 	  background = (workspaceBackgroundColor workspace)
-

@@ -47,6 +47,8 @@ type
     gutterMarkers*: HashSet[int]
     activeLine*: int
     fontName*: string
+    fontSize*: int
+    buttonPadding*: float64
     syntax*: string
     style*: ComponentStyle
 
@@ -73,6 +75,13 @@ type
     floatingWidgets: seq[Widget]
     floatingBelowAnchors: Table[WidgetID, WidgetID]
     componentByID: Table[WidgetID, Component]
+    retainedRoot: Widget
+    retainedComponents: seq[ComponentWidget]
+    retainedComponentByID: Table[WidgetID, Component]
+    retainedLayoutChildren: Table[WidgetID, seq[Widget]]
+    retainedFloatingWidgets: seq[Widget]
+    retainedScrollContainers: HashSet[WidgetID]
+    retainedFrameValid: bool
     retainedRealtimeWidgets: Table[WidgetID, ComponentWidget]
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
@@ -95,6 +104,7 @@ type
     windowDragLastX, windowDragLastY: int
     scheduledRedrawTicks: int
     hasScheduledRedraw: bool
+    inputPending: bool
     frameRedrawn: bool
     phase: UIPhase
     autoIDCounter: uint64
@@ -145,6 +155,8 @@ proc cfg*(
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
     fontName = "font",
+    fontSize = 0,
+    buttonPadding = -1.0,
     syntax = "",
     style = ComponentStyle(),
 ): BoxConfig =
@@ -164,6 +176,8 @@ proc cfg*(
     gutterMarkers: gutterMarkers,
     activeLine: activeLine,
     fontName: fontName,
+    fontSize: fontSize,
+    buttonPadding: buttonPadding,
     syntax: syntax,
     style: style,
   )
@@ -215,6 +229,9 @@ proc font*(self: UI, name = "font"): screen.Font =
 
 proc loadFont*(self: UI, name, path: string, size: Positive) =
   self.context.draw.resources.loadFont(name, path, size)
+
+proc fontAtSize*(self: var UI, name: string, size: int): string =
+  self.context.draw.resources.fontAtSize(name, size)
 
 proc windowWidth*(self: UI): int =
   self.context.draw.windowWidth
@@ -299,6 +316,15 @@ proc hasPendingWidgetEvents*(self: UI): bool {.raises: [].} =
   self.context.draw.activeWidgets.len > 0 or
       self.context.draw.submittedWidgets.len > 0 or
       self.context.draw.middleDragging != InvalidWidgetID
+
+proc hasPendingInput*(self: UI): bool {.raises: [].} =
+  self.inputPending or self.hasPendingWidgetEvents()
+
+proc needsFullRender*(self: UI): bool {.raises: [].} =
+  self.context.draw.dirtyAll or self.context.draw.dirtyWidgets.len > 0
+
+proc hasRetainedFrame*(self: UI): bool {.raises: [].} =
+  self.retainedFrameValid
 
 proc setDrawTicks*(self: var UI, ticks: int) =
   self.context.draw.ticks = ticks
@@ -418,49 +444,60 @@ proc finishInputFrame*(self: var UI) =
   self.context.update.submittedWidgets.clear()
   self.context.update.dirtyWidgets.clear()
   self.context.update.sliderValues.clear()
+  self.inputPending = false
 
 proc mouseMove*(self: var UI, x, y: int) =
+  self.inputPending = true
   self.context.update.mouseX = x
   self.context.update.mouseY = y
   self.context.draw.mouseX = x
   self.context.draw.mouseY = y
 
 proc mouseDown*(self: var UI) =
+  self.inputPending = true
   let last = self.context.update.mouseLeftDown
   self.context.update.mouseLeftDown = true
   self.context.update.mouseLeftPressed = not last
 
 proc mouseUp*(self: var UI) =
+  self.inputPending = true
   self.context.update.mouseLeftDown = false
   self.context.update.sliderDragging = InvalidWidgetID
 
 proc mouseMiddleDown*(self: var UI) =
+  self.inputPending = true
   let last = self.context.update.mouseMiddleDown
   self.context.update.mouseMiddleDown = true
   self.context.update.mouseMiddlePressed = not last
 
 proc mouseMiddleUp*(self: var UI) =
+  self.inputPending = true
   self.context.update.mouseMiddleDown = false
   self.context.update.middleDragging = InvalidWidgetID
   self.context.draw.middleDragging = InvalidWidgetID
 
 proc mouseRightDown*(self: var UI) =
+  self.inputPending = true
   self.context.update.mouseRightPressed = true
 
 proc resizeWindow*(self: var UI, width, height: int) =
+  self.inputPending = true
   self.context.update.windowWidth = max(width, 0)
   self.context.update.windowHeight = max(height, 0)
   self.context.draw.windowWidth = self.context.update.windowWidth
   self.context.draw.windowHeight = self.context.update.windowHeight
 
 proc keyDown*(self: var UI, key: KeyCode, mods: set[Modifier]) =
+  self.inputPending = true
   self.context.update.keyInputs.add KeyInput(key: key, mods: mods)
 
 proc textInput*(self: var UI, text: string) =
   if text.len > 0:
+    self.inputPending = true
     self.context.update.textInputs.add text
 
 proc mouseWheel*(self: var UI, x, y: float64) =
+  self.inputPending = true
   self.context.update.mouseWheelX += x
   self.context.update.mouseWheelY += y
 
@@ -1292,6 +1329,13 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         self.pointerBlockFrames.add widget.frame
       if widget.id in self.liveRealtimeWidgetIDs:
         self.retainedRealtimeWidgets[widget.id] = (component, widget)
+    self.retainedRoot = self.root
+    self.retainedComponents = self.components
+    self.retainedComponentByID = self.componentByID
+    self.retainedLayoutChildren = self.layoutChildren
+    self.retainedFloatingWidgets = self.floatingWidgets
+    self.retainedScrollContainers = self.scrollContainers
+    self.retainedFrameValid = true
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:
@@ -1764,6 +1808,36 @@ proc drawRealtime*(self: var UI): bool {.discardable.} =
   self.context.draw.redrawDelayMs = drawContext.redrawDelayMs
   true
 
+proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
+  ## Repaint the last solved frame without re-evaluating Crow or solving layout.
+  if not self.retainedFrameValid:
+    return false
+  let
+    root = self.root
+    components = self.components
+    componentByID = self.componentByID
+    layoutChildren = self.layoutChildren
+    floatingWidgets = self.floatingWidgets
+    scrollContainers = self.scrollContainers
+  self.root = self.retainedRoot
+  self.components = self.retainedComponents
+  self.componentByID = self.retainedComponentByID
+  self.layoutChildren = self.retainedLayoutChildren
+  self.floatingWidgets = self.retainedFloatingWidgets
+  self.scrollContainers = self.retainedScrollContainers
+  self.context.draw.dirtyAll = true
+  result = self.draw(self.context.draw)
+  self.root = root
+  self.components = components
+  self.componentByID = componentByID
+  self.layoutChildren = layoutChildren
+  self.floatingWidgets = floatingWidgets
+  self.scrollContainers = scrollContainers
+  if result:
+    if self.context.draw.hasRedrawRequest:
+      self.requestRedrawAfterSafe(self.context.draw.redrawDelayMs)
+    self.frameRedrawn = true
+
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   let components = self.takeChildren()
   self.pendingLayouts.add PendingLayout(
@@ -2231,6 +2305,8 @@ proc button*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
     textScroll = false,
+    fontName = "font",
+    buttonPadding = -1.0,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   if ui.phase == EventPhase:
@@ -2238,12 +2314,13 @@ proc button*(
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
-    renderKey("button:" & label & ":" & $textScroll, width, height, alignSelf) & "|" &
+    renderKey("button:" & label & ":" & $textScroll & ":" & fontName & ":" &
+        $buttonPadding, width, height, alignSelf) & "|" &
       $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity &
           "|" &
       $style.opacity,
   )
-  let btn = Button.new(label, textScroll)
+  let btn = Button.new(label, textScroll, fontName, buttonPadding)
   btn.style = style
   ui.attach(box, Component(btn))
   ui.addChild(box)
@@ -2832,7 +2909,10 @@ proc button*(
     textScroll = false,
     style = ComponentStyle(),
 ): bool {.discardable.} =
-  ui.button(ui.nextAutoID(), label, width, height, alignSelf, textScroll, style)
+  ui.button(
+    ui.nextAutoID(), label, width, height, alignSelf,
+    textScroll = textScroll, style = style
+  )
 
 proc menu*(
     ui: var UI,

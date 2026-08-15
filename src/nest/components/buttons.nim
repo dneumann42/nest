@@ -13,15 +13,25 @@ proc drawBorder(f: Frame, c: Color) =
 type Button* = ref object of Interactive
   label: string
   textScroll: bool
+  fontName: string
+  padding: float64
 
-proc new*(T: typedesc[Button], label = "", textScroll = false): T =
-  T(label: label, textScroll: textScroll)
+proc new*(T: typedesc[Button], label = "", textScroll = false,
+    fontName = "font", padding = -1.0): T =
+  T(label: label, textScroll: textScroll, fontName: fontName, padding: padding)
+
+proc horizontalPadding(self: Button): float64 =
+  if self.padding < 0: ButtonPaddingX.toFloat else: self.padding
+
+proc verticalPadding(self: Button): float64 =
+  if self.padding < 0: ButtonPaddingY.toFloat else: self.padding
 
 method measure*(self: Button, resources: Resources): IntrinsicSize =
-  let measurement = resources.measureText("font", self.label)
+  let measurement = resources.measureText(self.fontName, self.label)
   intrinsicSize(
-    (measurement.width + ButtonPaddingX * 2).toFloat,
-    max(measurement.height + ButtonPaddingY * 2, ButtonMinHeight).toFloat,
+    measurement.width.toFloat + self.horizontalPadding * 2.0,
+    max(measurement.height.toFloat + self.verticalPadding * 2.0,
+      ButtonMinHeight.toFloat),
   )
 
 method update*(self: Button, widget: Widget, ctx: var UpdateContext) =
@@ -72,11 +82,13 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       ctx.palette.buttonBorder,
   )
   let
-    (font, _) = ctx.resources.get("font")
-    textExtent = ctx.resources.measureText("font", self.label)
-    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, ButtonPaddingX)
-    textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, ButtonPaddingY)
-    textWidth = max(f.width.toInt - ButtonPaddingX * 2, 0)
+    (font, _) = ctx.resources.get(self.fontName)
+    textExtent = ctx.resources.measureText(self.fontName, self.label)
+    paddingX = self.horizontalPadding.toInt
+    paddingY = self.verticalPadding.toInt
+    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, paddingX)
+    textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, paddingY)
+    textWidth = max(f.width.toInt - paddingX * 2, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
     ctx.requestRedrawAfter(33)
     let

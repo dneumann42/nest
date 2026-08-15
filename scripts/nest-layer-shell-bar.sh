@@ -85,6 +85,7 @@ signal_bar() {
 start_bar_background() {
   (
     cd "$repo_dir"
+    scripts/nest-media-cache.sh prime >/dev/null 2>&1 || true
     exec ./nest run apps/layerShellBar >>"$log_file" 2>&1
   ) &
 }
@@ -95,7 +96,7 @@ toggle_start_popover() {
   fi
 
   start_bar_background
-  local deadline=$((SECONDS + 3))
+  local deadline=$((SECONDS + 15))
   while ((SECONDS < deadline)); do
     if signal_bar; then
       return
@@ -111,6 +112,7 @@ case "$command" in
   start|restart)
     kill_existing_bar
     cd "$repo_dir"
+    scripts/nest-media-cache.sh prime >/dev/null 2>&1 || true
     exec ./nest run apps/layerShellBar >>"$log_file" 2>&1
     ;;
   *)

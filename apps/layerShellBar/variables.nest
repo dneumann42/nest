@@ -5,9 +5,12 @@ define:
   StoragePollInterval = 8000
   NoSpacing = 0
 
-  BarHeight = 42
-  BarIconSize = 28
-  BarOpacity = 0.85
+  BarHeight = 32
+  BarIconSize = - BarHeight 4
+  BarOpacity = 0.8
+  BarPadding = 4
+  BarWidgetFontSize = 14
+  BarWidgetPadding = 3
   BarLeftGap = 14
   BarRightGap = 8
 
@@ -35,25 +38,25 @@ define:
   MetricNetworkWidth = 200
 
   NetworkRowGap = 4
-  NetworkRowHeight = 30
-  NetworkInputHeight = 30
+  NetworkRowHeight = BarHeight
+  NetworkInputHeight = BarHeight
   NetworkConnectButtonWidth = 92
   NetworkActionButtonWidth = 70
   NetworkSelectedOpacity = 0.95
 
   MediaBarButtonWidth = 28
-  MediaBarArtSize = 32
+  MediaBarArtSize = - BarHeight 4
   MediaBarTitleWidth = 150
   MediaBarPlayButtonWidth = 56
   MediaPopoverLeftWidth = 260
   MediaPopoverArtworkHeight = 240
-  MediaControlGap = 8
+  MediaControlGap = 0
   MediaControlButtonWidth = 64
   MediaPlayButtonWidth = 92
-  MediaControlHeight = 36
-  MediaSeekHeight = 30
+  MediaControlHeight = BarHeight
+  MediaSeekHeight = BarHeight
   MediaDetailsGap = 10
-  MediaMetadataRowHeight = 34
+  MediaMetadataRowHeight = BarHeight
   MediaMetadataLabelWidth = 88
   MediaMetadataPadding = 7
 
@@ -79,5 +82,5 @@ define:
   CalendarWeekdayWidth = 34
   CalendarDayWidth = 40
   CalendarPopoverDayWidth = 42
-  CalendarBlankHeight = 24
+  CalendarBlankHeight = BarHeight
   CalendarPopoverOpacity = 0.5

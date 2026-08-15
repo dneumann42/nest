@@ -1,0 +1,25 @@
+;; User defined actions for the nomicon dialog
+
+record Action:
+  label = ""
+  id = ""
+  cmd = ""
+  place = ""
+
+define:
+  actions = []
+
+block-command action:
+  append actions
+    (Action
+      (field-value (statements block) "label" "")
+      (field-value (statements block) "id" "")
+      (field-value (statements block) "cmd" "")
+      (field-value (statements block) "place" "")
+    )
+
+action:
+  label = "Packages"
+  id = (id "menu" "packages")
+  cmd = "shelly-ui"
+  place = "left"

@@ -23,3 +23,5 @@ component notificationWidget key:
     width = fit
     height = fit
     textScroll = true
+    fontSize = BarWidgetFontSize
+    buttonPadding = BarWidgetPadding

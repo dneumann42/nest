@@ -11,6 +11,7 @@ type
   Resources* = object
     resources: TableRef[string, int]
     fontMetrics: TableRef[string, FontMetrics]
+    fontPaths: TableRef[string, string]
     textMeasurements: TableRef[string, TextMeasurement]
     images: TableRef[string, Image]
     imageMeasurements: TableRef[string, TextExtent]
@@ -24,6 +25,7 @@ const MaxImages = 32
 proc new*(T: typedesc[Resources]): T =
   T(
     fontMetrics: newTable[string, FontMetrics](),
+    fontPaths: newTable[string, string](),
     resources: newTable[string, int](),
     textMeasurements: newTable[string, TextMeasurement](),
     images: newTable[string, Image](),
@@ -41,7 +43,17 @@ proc loadFont*(resources: Resources, name, path: string, size: Positive) =
   let font = openFont(path, size, metrics)
   resources.resources[name] = int(font)
   resources.fontMetrics[name] = metrics
+  resources.fontPaths[name] = path
   resources.textMeasurements.clear()
+
+proc fontAtSize*(resources: Resources, name: string, size: int): string =
+  ## Return a font resource at `size`, creating it from the named font when needed.
+  if size <= 0:
+    return name
+  let sourceName = if resources.resources.hasKey(name): name else: "font"
+  result = sourceName & "@" & $size
+  if not resources.resources.hasKey(result):
+    resources.loadFont(result, resources.fontPaths[sourceName], Positive(size))
 
 proc get*(
     resources: Resources, name: string

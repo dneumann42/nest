@@ -5,7 +5,7 @@ import
 import crow, palette, ui, dialogs
 import nest/[input, perf, screen]
 
-const HotReloadPollMs = 100
+const MaintenancePollMs = 100
 
 type
   WidgetIDValue* = ref object of NativeValue
@@ -86,6 +86,7 @@ type
     lastError*: string
     lastErrorDetails*: ErrorDetails
     dismissedError*: string
+    nextFullRenderTicks: int
 
   NestCrowApp* = ref object
     rootPath*: string
@@ -95,6 +96,8 @@ type
     lastErrorDetails*: ErrorDetails
     errorDialogProcess*: Process
     errorDialogMessage*: string
+    lastFullRenderTicks: int
+    lastMaintenanceTicks: int
 
   MenuEntryKind = enum
     MenuEntryItem
@@ -416,6 +419,10 @@ proc evalConfig(
       result.activeLine = value.asNumber.int
     of "fontName":
       result.fontName = value.asString
+    of "fontSize":
+      result.fontSize = value.asNumber(result.fontSize.float64).int
+    of "buttonPadding":
+      result.buttonPadding = value.asNumber(result.buttonPadding)
     of "syntax", "syntaxHighlighter":
       result.syntax = value.asString
     of "background", "backgroundColor":
@@ -549,6 +556,9 @@ proc requestRedrawAfter(
     runtime: NestCrowRuntime, ms: int
 ) {.raises: [EvaluatorError].} =
   try:
+    let due = input.getTicks() + max(ms, 0)
+    if runtime.nextFullRenderTicks == 0 or due < runtime.nextFullRenderTicks:
+      runtime.nextFullRenderTicks = due
     runtime.requireUi().requestRedrawAfter(ms)
   except EvaluatorError as error:
     raise error
@@ -2688,11 +2698,17 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         ""
     let config = env.evalConfig(bodyNodes)
+    let fontName =
+      try:
+        runtime.currentUi[].fontAtSize(config.fontName, config.fontSize)
+      except Exception as error:
+        raise newException(EvaluatorError, error.msg)
     runtime.currentUi[].label(
       id,
       labelText,
       config.width,
       config.height,
+      fontName,
       alignSelf = config.alignSelf,
       textScroll = config.textScroll,
     )
@@ -2712,6 +2728,11 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
       else:
         ""
     let config = env.evalConfig(bodyNodes)
+    let fontName =
+      try:
+        runtime.currentUi[].fontAtSize(config.fontName, config.fontSize)
+      except Exception as error:
+        raise newException(EvaluatorError, error.msg)
     boolean(
       runtime.currentUi[].button(
         id,
@@ -2720,6 +2741,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         config.height,
         config.alignSelf,
         textScroll = config.textScroll,
+        fontName = fontName,
+        buttonPadding = config.buttonPadding,
         style = config.style,
       )
     )
@@ -3088,12 +3111,28 @@ proc renderLayoutOnly*(
 proc render*(app: NestCrowApp, ui: var UI) =
   if app.isNil:
     return
-  ui.requestRedrawAfter(HotReloadPollMs)
-  if app.program.isNil or app.runtime.dependenciesChanged():
+  let now = currentTicks()
+  let maintenanceDue = app.lastMaintenanceTicks == 0 or
+    now - app.lastMaintenanceTicks >= MaintenancePollMs
+  if maintenanceDue:
+    app.lastMaintenanceTicks = now
+    app.runtime.pollShellProcesses(ui)
+    app.runtime.pollDialogProcesses()
+  if app.program.isNil or (maintenanceDue and app.runtime.dependenciesChanged()):
     discard app.reload()
     ui.requestRedrawAfter(0)
   if app.program.isNil:
     return
+  let fullRenderDue = app.lastFullRenderTicks == 0 or ui.hasPendingInput() or
+    ui.needsFullRender() or
+    (app.runtime.nextFullRenderTicks > 0 and now >= app.runtime.nextFullRenderTicks)
+  if not fullRenderDue and ui.hasRetainedFrame():
+    discard ui.drawRetainedFrame()
+    ui.requestRedrawAfter(MaintenancePollMs)
+    return
+  app.lastFullRenderTicks = now
+  app.runtime.nextFullRenderTicks = 0
+  ui.requestRedrawAfter(MaintenancePollMs)
   app.runtime.moduleStack.add app.rootPath
   app.runtime.render(ui, app.program)
   app.runtime.moduleStack.setLen(app.runtime.moduleStack.len - 1)

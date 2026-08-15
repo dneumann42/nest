@@ -468,6 +468,9 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   ren = createRenderer(win, nil)
   if ren == nil:
     quit("Could not create SDL renderer")
+  # Do not let animated layer-shell frames queue ahead of compositor input.
+  # SDL falls back gracefully when the selected backend cannot enable VSync.
+  discard setRenderVSync(ren, 1)
   discard setRenderDrawBlendMode(ren, BLENDMODE_BLEND)
   discard setRenderDrawColor(ren, 0, 0, 0, 0)
   discard renderClear(ren)

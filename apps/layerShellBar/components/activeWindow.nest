@@ -10,9 +10,10 @@ component activeWindow key:
       width = fixed ActiveWindowWidth
       height = fit
       textScroll = true
+      fontSize = BarWidgetFontSize
     else:
       label (id keyText "active-window") title:
         width = fixed ActiveWindowWidth
         height = fit
         textScroll = true
-
+        fontSize = BarWidgetFontSize

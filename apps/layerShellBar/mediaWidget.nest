@@ -49,6 +49,8 @@ component mediaWidget key:
     button previousID "◀":
       width = (fixed MediaBarButtonWidth)
       height = fit
+      fontSize = BarWidgetFontSize
+      buttonPadding = BarWidgetPadding
     imageButton artID art:
       width = (fixed MediaBarArtSize)
       height = (fixed MediaBarArtSize)
@@ -56,9 +58,15 @@ component mediaWidget key:
       width = (fixed MediaBarTitleWidth)
       height = fit
       textScroll = true
+      fontSize = BarWidgetFontSize
+      buttonPadding = BarWidgetPadding
     button playPauseID playPauseLabel:
       width = (fixed MediaBarPlayButtonWidth)
       height = fit
+      fontSize = BarWidgetFontSize
+      buttonPadding = BarWidgetPadding
     button nextID "▶":
       width = (fixed MediaBarButtonWidth)
       height = fit
+      fontSize = BarWidgetFontSize
+      buttonPadding = BarWidgetPadding
