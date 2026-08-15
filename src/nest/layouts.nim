@@ -23,6 +23,9 @@ type
     min*: float64
     max*: float64
 
+  EdgeInsets* = object
+    left*, top*, right*, bottom*: float64
+
   Justification* = enum
     JustifyStart
     JustifyCenter
@@ -57,6 +60,25 @@ proc hug*(preferred: float64, min = 0.0, max = Inf): SizePolicy =
 proc prefer*(value: float64, min = 0.0, max = Inf): SizePolicy =
   SizePolicy(kind: Prefer, value: value, min: min, max: max)
 
+proc insets*(all: float64): EdgeInsets =
+  EdgeInsets(left: all, top: all, right: all, bottom: all)
+
+proc insets*(left, top, right, bottom: float64): EdgeInsets =
+  EdgeInsets(left: left, top: top, right: right, bottom: bottom)
+
+proc resolveInsets(
+    padding, paddingLeft, paddingTop, paddingRight, paddingBottom: float64
+): EdgeInsets =
+  result = insets(padding)
+  if paddingLeft == paddingLeft:
+    result.left = paddingLeft
+  if paddingTop == paddingTop:
+    result.top = paddingTop
+  if paddingRight == paddingRight:
+    result.right = paddingRight
+  if paddingBottom == paddingBottom:
+    result.bottom = paddingBottom
+
 proc widgetPolicy(policy: SizePolicy): WidgetSizePolicy =
   let kind =
     case policy.kind
@@ -65,7 +87,8 @@ proc widgetPolicy(policy: SizePolicy): WidgetSizePolicy =
     of Fit: WidgetFit
     of Hug: WidgetHug
     of Prefer: WidgetPrefer
-  WidgetSizePolicy(kind: kind, value: policy.value, min: policy.min, max: policy.max)
+  WidgetSizePolicy(kind: kind, value: policy.value, min: policy.min,
+      max: policy.max)
 
 proc newLayout*(): Layout =
   Layout(solver: newSolver())
@@ -188,10 +211,11 @@ proc remove*(ui: Layout, group: ConstraintGroup) =
     ui.solver.remove constraint
 
 proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
-  discard ui.constrain(child.left == parent.left + inset)
-  discard ui.constrain(child.top == parent.top + inset)
-  discard ui.constrain(child.right == parent.right - inset)
-  discard ui.constrain(child.bottom == parent.bottom - inset)
+  let pad = insets(inset)
+  discard ui.constrain(child.left == parent.left + pad.left)
+  discard ui.constrain(child.top == parent.top + pad.top)
+  discard ui.constrain(child.right == parent.right - pad.right)
+  discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
 
 proc effectiveAlignment(child: Widget, parentAlignment: Alignment): Alignment =
   if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
@@ -201,96 +225,109 @@ proc overlay*(
     parent: Widget,
     children: openArray[Widget],
     padding = 0.0,
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
     alignItems = AlignStretch,
     justifyContent = JustifyCenter,
 ) =
+  let pad = resolveInsets(padding, paddingLeft, paddingTop, paddingRight,
+      paddingBottom)
   for child in children:
     case child.effectiveAlignment(alignItems)
     of AlignAuto, AlignStretch:
-      discard ui.constrain(child.left == parent.left + padding)
+      discard ui.constrain(child.left == parent.left + pad.left)
       if child.stretchWidth:
-        discard ui.constrain(child.right == parent.right - padding)
+        discard ui.constrain(child.right == parent.right - pad.right)
     of AlignStart:
-      discard ui.constrain(child.left == parent.left + padding)
-      discard ui.constrain(child.right <= parent.right - padding)
+      discard ui.constrain(child.left == parent.left + pad.left)
+      discard ui.constrain(child.right <= parent.right - pad.right)
     of AlignCenter:
-      discard ui.constrain(child.left >= parent.left + padding)
-      discard ui.constrain(child.right <= parent.right - padding)
-      discard ui.constrain(child.centerX == parent.centerX)
+      discard ui.constrain(child.left >= parent.left + pad.left)
+      discard ui.constrain(child.right <= parent.right - pad.right)
+      discard ui.constrain(child.centerX == parent.left + pad.left +
+          (parent.width - pad.left - pad.right) / 2.0)
     of AlignEnd:
-      discard ui.constrain(child.left >= parent.left + padding)
-      discard ui.constrain(child.right == parent.right - padding)
+      discard ui.constrain(child.left >= parent.left + pad.left)
+      discard ui.constrain(child.right == parent.right - pad.right)
 
     if child.stretchHeight:
-      discard ui.constrain(child.top == parent.top + padding)
-      discard ui.constrain(child.bottom == parent.bottom - padding)
+      discard ui.constrain(child.top == parent.top + pad.top)
+      discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
     else:
       case justifyContent
       of JustifyStart:
-        discard ui.constrain(child.top == parent.top + padding)
-        discard ui.constrain(child.bottom <= parent.bottom - padding)
+        discard ui.constrain(child.top == parent.top + pad.top)
+        discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
       of JustifyCenter:
-        discard ui.constrain(child.top >= parent.top + padding)
-        discard ui.constrain(child.bottom <= parent.bottom - padding)
-        discard ui.constrain(child.centerY == parent.centerY)
+        discard ui.constrain(child.top >= parent.top + pad.top)
+        discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
+        discard ui.constrain(child.centerY == parent.top + pad.top +
+            (parent.height - pad.top - pad.bottom) / 2.0)
       of JustifyEnd:
-        discard ui.constrain(child.top >= parent.top + padding)
-        discard ui.constrain(child.bottom == parent.bottom - padding)
+        discard ui.constrain(child.top >= parent.top + pad.top)
+        discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
 
 proc alignRowChild(
     ui: Layout,
     parent, child: Widget,
     alignment: Alignment,
-    padding: float64,
+    padding: EdgeInsets,
     allowOverflowY = false,
 ) =
+  let pad = padding
   case alignment
   of AlignAuto:
     ui.alignRowChild(parent, child, AlignStretch, padding, allowOverflowY)
   of AlignStart:
-    discard ui.constrain(child.top == parent.top + padding)
+    discard ui.constrain(child.top == parent.top + pad.top)
     if not allowOverflowY:
-      discard ui.constrain(child.bottom <= parent.bottom - padding)
+      discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
   of AlignCenter:
-    discard ui.constrain(child.top >= parent.top + padding)
+    discard ui.constrain(child.top >= parent.top + pad.top)
     if not allowOverflowY:
-      discard ui.constrain(child.bottom <= parent.bottom - padding)
-    discard ui.constrain(child.centerY == parent.centerY)
+      discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
+    discard ui.constrain(child.centerY == parent.top + pad.top +
+        (parent.height - pad.top - pad.bottom) / 2.0)
   of AlignEnd:
-    discard ui.constrain(child.top >= parent.top + padding)
-    discard ui.constrain(child.bottom == parent.bottom - padding)
+    discard ui.constrain(child.top >= parent.top + pad.top)
+    discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
   of AlignStretch:
-    discard ui.constrain(child.top == parent.top + padding)
+    discard ui.constrain(child.top == parent.top + pad.top)
     if child.stretchHeight:
-      discard ui.constrain(child.bottom <= parent.bottom - padding)
-      discard ui.constrain(child.bottom == parent.bottom - padding)
+      discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
+      discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
 
 proc alignColumnChild(
     ui: Layout,
     parent, child: Widget,
     alignment: Alignment,
-    padding: float64,
+    padding: EdgeInsets,
     allowOverflowX = false,
 ) =
+  let pad = padding
   case alignment
   of AlignAuto:
     ui.alignColumnChild(parent, child, AlignStretch, padding, allowOverflowX)
   of AlignStart:
-    discard ui.constrain(child.left == parent.left + padding)
+    discard ui.constrain(child.left == parent.left + pad.left)
     if not allowOverflowX:
-      discard ui.constrain(child.right <= parent.right - padding)
+      discard ui.constrain(child.right <= parent.right - pad.right)
   of AlignCenter:
-    discard ui.constrain(child.left >= parent.left + padding)
+    discard ui.constrain(child.left >= parent.left + pad.left)
     if not allowOverflowX:
-      discard ui.constrain(child.right <= parent.right - padding)
-    discard ui.constrain(child.centerX == parent.centerX)
+      discard ui.constrain(child.right <= parent.right - pad.right)
+    discard ui.constrain(child.centerX == parent.left + pad.left +
+        (parent.width - pad.left - pad.right) / 2.0)
   of AlignEnd:
-    discard ui.constrain(child.left >= parent.left + padding)
-    discard ui.constrain(child.right == parent.right - padding)
+    discard ui.constrain(child.left >= parent.left + pad.left)
+    discard ui.constrain(child.right == parent.right - pad.right)
   of AlignStretch:
-    discard ui.constrain(child.left == parent.left + padding)
+    discard ui.constrain(child.left == parent.left + pad.left)
     if child.stretchWidth:
-      discard ui.constrain(child.width == parent.width - padding * 2.0)
+      discard ui.constrain(child.width == parent.width - pad.left -
+          pad.right)
 
 proc row*(
     ui: Layout,
@@ -298,6 +335,10 @@ proc row*(
     children: openArray[Widget],
     gap = 0.0,
     padding = 0.0,
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
     alignItems = AlignStretch,
     justifyContent = JustifyStart,
     scrollX = false,
@@ -305,16 +346,18 @@ proc row*(
 ) =
   if children.len == 0:
     return
+  let pad = resolveInsets(padding, paddingLeft, paddingTop, paddingRight,
+      paddingBottom)
 
   for child in children:
     ui.alignRowChild(
-      parent, child, child.effectiveAlignment(alignItems), padding, scrollY
+      parent, child, child.effectiveAlignment(alignItems), pad, scrollY
     )
 
   if parent.fitWidth:
-    discard ui.constrain(children[0].left == parent.left + padding)
+    discard ui.constrain(children[0].left == parent.left + pad.left)
   else:
-    discard ui.constrain(children[0].left >= parent.left + padding)
+    discard ui.constrain(children[0].left >= parent.left + pad.left)
 
   for i in 1 ..< children.len:
     discard ui.constrain(children[i].left == children[i - 1].right + gap)
@@ -330,33 +373,38 @@ proc row*(
       )
 
   if not parent.fitWidth and not scrollX:
-    discard ui.constrain(children[^1].right <= parent.right - padding)
+    discard ui.constrain(children[^1].right <= parent.right - pad.right)
 
   if parent.fitWidth:
     var contentWidth: Expression = children[0].width.toExpression
     for i in 1 ..< children.len:
       contentWidth = contentWidth + children[i].width + gap
-    discard ui.constrain((parent.width == contentWidth + padding * 2.0) | Strong)
+    discard ui.constrain((parent.width == contentWidth + pad.left +
+        pad.right) | Strong)
 
   if parent.fitHeight:
     for child in children:
-      discard ui.constrain(parent.height >= child.height + padding * 2.0)
+      discard ui.constrain(parent.height >= child.height + pad.top +
+          pad.bottom)
       discard ui.constrain(
-        (parent.height == child.height + padding * 2.0) | FillRemainingStrength
+        (parent.height == child.height + pad.top + pad.bottom) |
+            FillRemainingStrength
       )
 
   case justifyContent
   of JustifyStart:
-    discard ui.constrain(children[0].left == parent.left + padding)
+    discard ui.constrain(children[0].left == parent.left + pad.left)
     if not scrollX:
       discard ui.constrain(
-        (children[^1].right == parent.right - padding) | FillRemainingStrength
+        (children[^1].right == parent.right - pad.right) |
+            FillRemainingStrength
       )
   of JustifyCenter:
     discard
-      ui.constrain((children[0].left + children[^1].right) / 2.0 == parent.centerX)
+      ui.constrain((children[0].left + children[^1].right) / 2.0 ==
+          parent.left + pad.left + (parent.width - pad.left - pad.right) / 2.0)
   of JustifyEnd:
-    discard ui.constrain(children[^1].right == parent.right - padding)
+    discard ui.constrain(children[^1].right == parent.right - pad.right)
 
 proc column*(
     ui: Layout,
@@ -364,6 +412,10 @@ proc column*(
     children: openArray[Widget],
     gap = 0.0,
     padding = 0.0,
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
     alignItems = AlignStretch,
     justifyContent = JustifyStart,
     scrollX = false,
@@ -371,16 +423,18 @@ proc column*(
 ) =
   if children.len == 0:
     return
+  let pad = resolveInsets(padding, paddingLeft, paddingTop, paddingRight,
+      paddingBottom)
 
   for child in children:
     ui.alignColumnChild(
-      parent, child, child.effectiveAlignment(alignItems), padding, scrollX
+      parent, child, child.effectiveAlignment(alignItems), pad, scrollX
     )
 
   if parent.fitHeight:
-    discard ui.constrain(children[0].top == parent.top + padding)
+    discard ui.constrain(children[0].top == parent.top + pad.top)
   else:
-    discard ui.constrain(children[0].top >= parent.top + padding)
+    discard ui.constrain(children[0].top >= parent.top + pad.top)
 
   for i in 1 ..< children.len:
     discard ui.constrain(children[i].top == children[i - 1].bottom + gap)
@@ -396,33 +450,38 @@ proc column*(
       )
 
   if not parent.fitHeight and not scrollY:
-    discard ui.constrain(children[^1].bottom <= parent.bottom - padding)
+    discard ui.constrain(children[^1].bottom <= parent.bottom - pad.bottom)
 
   if parent.fitHeight:
     var contentHeight: Expression = children[0].height.toExpression
     for i in 1 ..< children.len:
       contentHeight = contentHeight + children[i].height + gap
-    discard ui.constrain((parent.height == contentHeight + padding * 2.0) | Strong)
+    discard ui.constrain((parent.height == contentHeight + pad.top +
+        pad.bottom) | Strong)
 
   if parent.fitWidth:
     for child in children:
-      discard ui.constrain(parent.width >= child.width + padding * 2.0)
+      discard ui.constrain(parent.width >= child.width + pad.left +
+          pad.right)
       discard ui.constrain(
-        (parent.width == child.width + padding * 2.0) | FillRemainingStrength
+        (parent.width == child.width + pad.left + pad.right) |
+            FillRemainingStrength
       )
 
   case justifyContent
   of JustifyStart:
-    discard ui.constrain(children[0].top == parent.top + padding)
+    discard ui.constrain(children[0].top == parent.top + pad.top)
     if not scrollY:
       discard ui.constrain(
-        (children[^1].bottom == parent.bottom - padding) | FillRemainingStrength
+        (children[^1].bottom == parent.bottom - pad.bottom) |
+            FillRemainingStrength
       )
   of JustifyCenter:
     discard
-      ui.constrain((children[0].top + children[^1].bottom) / 2.0 == parent.centerY)
+      ui.constrain((children[0].top + children[^1].bottom) / 2.0 ==
+          parent.top + pad.top + (parent.height - pad.top - pad.bottom) / 2.0)
   of JustifyEnd:
-    discard ui.constrain(children[^1].bottom == parent.bottom - padding)
+    discard ui.constrain(children[^1].bottom == parent.bottom - pad.bottom)
 
 proc alignLeft*(ui: Layout, a, b: Widget, offset = 0.0) =
   discard ui.constrain(a.left == b.left + offset)

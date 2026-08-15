@@ -1,6 +1,6 @@
 import std/[os, strutils, tables]
 
-import crow/[parser, syntax]
+import owl/[parser, syntax]
 import nest/[appConfig, layerShellSdl3Driver]
 
 type ProjectConfig* = object
@@ -15,7 +15,7 @@ type ProjectConfig* = object
 
 proc defaultProjectConfig*(): ProjectConfig =
   ProjectConfig(
-    main: "main.nest",
+    main: "main.owl",
     title: "Nest",
     width: 800,
     height: 600,
@@ -111,7 +111,7 @@ proc collectProjectVariables(
 
 proc loadProjectConfig*(projectDir: string): ProjectConfig =
   result = defaultProjectConfig()
-  let configPath = projectDir / "project.nest"
+  let configPath = projectDir / "project.owl"
   if not fileExists(configPath):
     return
 

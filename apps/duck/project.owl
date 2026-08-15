@@ -1,4 +1,4 @@
-main = "main.nest"
+main = "main.owl"
 title = "Duck"
 width = 800
 height = 600

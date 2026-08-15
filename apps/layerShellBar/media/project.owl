@@ -1,4 +1,4 @@
-main = "main.nest"
+main = "main.owl"
 title = "Media"
 width = 760
 height = 400

@@ -1,16 +1,16 @@
 import std/[json, os, osproc]
 
-import nest/[appConfig, crowdsl, runtime, ui]
+import nest/[appConfig, owldsl, runtime, ui]
 import nest/input
 
-proc closeCrowErrorDialog*(app: NestCrowApp) =
+proc closeOwlErrorDialog*(app: NestOwlApp) =
   if app.errorDialogProcess != nil:
     if app.errorDialogProcess.running:
       app.errorDialogProcess.terminate
     app.errorDialogProcess.close
     app.errorDialogProcess = nil
 
-proc pollCrowErrorDialog*(app: NestCrowApp) =
+proc pollOwlErrorDialog*(app: NestOwlApp) =
   if app.errorDialogProcess != nil and not app.errorDialogProcess.running:
     app.errorDialogProcess.close
     app.errorDialogProcess = nil
@@ -41,14 +41,14 @@ proc errorDetailsFromJson*(value: string): ErrorDetails =
   except CatchableError:
     result = ErrorDetails(message: value)
 
-proc launchCrowErrorDialog*(app: NestCrowApp, details: ErrorDetails) =
+proc launchOwlErrorDialog*(app: NestOwlApp, details: ErrorDetails) =
   let message = details.errorReport()
   if message.len == 0 or app.runtime.dismissedError == message:
     return
-  app.pollCrowErrorDialog()
+  app.pollOwlErrorDialog()
   if app.errorDialogProcess != nil and app.errorDialogMessage == message:
     return
-  app.closeCrowErrorDialog()
+  app.closeOwlErrorDialog()
   try:
     app.errorDialogProcess = startProcess(
       getAppFilename(), args = @["error-dialog-json", details.detailsJson()], options = {poUsePath}
@@ -59,7 +59,7 @@ proc launchCrowErrorDialog*(app: NestCrowApp, details: ErrorDetails) =
   except IOError:
     discard
 
-template crowErrorDialogBody(
+template owlErrorDialogBody(
     ui: var UI, details: ErrorDetails, copied, stackExpanded: var bool, running: var bool
 ) =
   ui.events:
@@ -88,7 +88,7 @@ template crowErrorDialogBody(
       ),
     ):
       let titleID = ui.id("_nest_error_title")
-      ui.label(titleID, "Crow error", fill(), fit())
+      ui.label(titleID, "Owl error", fill(), fit())
       ui.dragWindow(titleID)
       discard ui.button(ui.id("_nest_error_close"), "×", fixed(26), fixed(26))
     ui.column(
@@ -98,7 +98,7 @@ template crowErrorDialogBody(
             alignItems = AlignStretch
       ),
     ):
-      for index, line in crowErrorLines(details.message, maxLines = 1024):
+      for index, line in owlErrorLines(details.message, maxLines = 1024):
         ui.label(ui.id("_nest_error_message", $index), line, fill(), fit())
       if details.primary.path.len > 0:
         ui.diagnosticLabel(ui.id("_nest_error_primary"),
@@ -126,13 +126,13 @@ template crowErrorDialogBody(
     ):
       discard ui.button(ui.id("_nest_error_copy"), "Copy", fit(), fit())
 
-proc drawCrowErrorDialog(
+proc drawOwlErrorDialog(
     ui: var UI, details: ErrorDetails, copied, stackExpanded: var bool, running: var bool
 ) =
   ui.layout:
-    crowErrorDialogBody(ui, details, copied, stackExpanded, running)
+    owlErrorDialogBody(ui, details, copied, stackExpanded, running)
 
-proc layoutCrowErrorDialogForTest*(
+proc layoutOwlErrorDialogForTest*(
     ui: var UI, message: string, width, height: int
 ): bool =
   var
@@ -141,22 +141,22 @@ proc layoutCrowErrorDialogForTest*(
     running = true
   ui.initContext(width, height)
   ui.beginLayout(width, height)
-  crowErrorDialogBody(ui, ErrorDetails(message: message), copied, stackExpanded, running)
+  owlErrorDialogBody(ui, ErrorDetails(message: message), copied, stackExpanded, running)
   ui.applyIntrinsicSizes(ui.resources)
   ui.endLayout()
 
-proc runCrowErrorDialog*(details: ErrorDetails) =
+proc runOwlErrorDialog*(details: ErrorDetails) =
   var ui = UI.init()
   var copied = false
   var stackExpanded = false
   application AppConfig.overlayDialog(
     width = 620.Positive,
     height = 360.Positive,
-    title = "Crow Error",
-    namespace = "nest-crow-error-dialog",
+    title = "Owl Error",
+    namespace = "nest-owl-error-dialog",
     draggable = true,
   ), ui:
-    drawCrowErrorDialog(ui, details, copied, stackExpanded, running)
+    drawOwlErrorDialog(ui, details, copied, stackExpanded, running)
 
-proc runCrowErrorDialog*(message: string) =
-  runCrowErrorDialog(ErrorDetails(message: message))
+proc runOwlErrorDialog*(message: string) =
+  runOwlErrorDialog(ErrorDetails(message: message))

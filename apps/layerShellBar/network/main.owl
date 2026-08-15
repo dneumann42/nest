@@ -1,4 +1,4 @@
-import "../variables.nest"
+import "../variables.owl"
 
 state "root":
   closeID = (id "network" "close")

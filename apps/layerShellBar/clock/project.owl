@@ -1,4 +1,4 @@
-main = "main.nest"
+main = "main.owl"
 title = "Clock"
 width = 420
 height = 420

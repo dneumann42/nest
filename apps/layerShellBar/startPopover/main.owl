@@ -1,4 +1,4 @@
-import "../variables.nest"
+import "../variables.owl"
 
 state "root":
   commands = []:
@@ -48,7 +48,7 @@ state "root":
       cmd = "pcmanfm $HOME/Documents/Library"
       place = "left"
     {}:
-      label = "Performance Overlay"
+      label = "Perf Overlay"
       name = (id "menu" "perf-overlay")
       cmd = "toggle-perf-overlay"
       place = "right"

@@ -1,4 +1,4 @@
-import nest/[crowdsl, dialogs, layerShellSdl3Driver]
+import nest/[owldsl, dialogs, layerShellSdl3Driver]
 import nest/[backend, screen]
 import nest/perf
 
@@ -88,14 +88,14 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
     initLayerShellSdl3Driver()
   else:
     initBackend()
-  crowdsl.runtimeWake = layerShellSdl3Driver.wakeEventLoop
+  owldsl.runtimeWake = layerShellSdl3Driver.wakeEventLoop
   result = createWindow(cfg.width, cfg.height)
-  crowdsl.pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
+  owldsl.pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
     try:
       dialogs.browse(callback, window = layerShellSdl3Driver.currentSdlWindow())
     except CatchableError:
       discard
-  crowdsl.pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure,
+  owldsl.pickDirectoryDialog = proc(callback: PathSelectedProc) {.closure,
       raises: [].} =
     try:
       dialogs.browseFolder(callback, window = layerShellSdl3Driver.currentSdlWindow())

@@ -1,6 +1,6 @@
 import std/posix
 
-import nest/crowdsl
+import nest/owldsl
 import nest/layerShellSdl3Driver
 
 const sigUsr1Event* = "sigusr1"
@@ -27,6 +27,6 @@ proc consumePendingSigUsr1(): bool =
   pendingSigUsr1 = 0
   true
 
-proc queuePendingExternalSignals*(runtime: NestCrowRuntime) =
+proc queuePendingExternalSignals*(runtime: NestOwlRuntime) =
   if consumePendingSigUsr1():
     runtime.queueExternal(sigUsr1Event)

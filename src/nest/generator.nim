@@ -11,8 +11,8 @@ proc generateProject*(projectDir: string) =
     createDir(dir)
 
   writeProjectFile(
-    dir / "project.nest",
-    """main = "main.nest"
+    dir / "project.owl",
+    """main = "main.owl"
 title = "Nest App"
 width = 800
 height = 600
@@ -26,7 +26,7 @@ marginLeft = 0
 """,
   )
   writeProjectFile(
-    dir / "main.nest",
+    dir / "main.owl",
     """define:
   count = 0
   rootID = id

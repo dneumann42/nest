@@ -36,7 +36,8 @@ type
 
   BoxConfig* = object
     width*, height*: SizePolicy
-    gap*, padding*: float64
+    gap*: float64
+    padding*: EdgeInsets
     alignItems*: Alignment
     justifyContent*: Justification
     alignSelf*: Alignment
@@ -48,7 +49,7 @@ type
     activeLine*: int
     fontName*: string
     fontSize*: int
-    buttonPadding*: float64
+    buttonPadding*: EdgeInsets
     syntax*: string
     style*: ComponentStyle
 
@@ -56,7 +57,8 @@ type
     kind: LayoutKind
     parent: Widget
     children: seq[Widget]
-    gap, padding: float64
+    gap: float64
+    padding: EdgeInsets
     alignItems: Alignment
     justifyContent: Justification
     scrollX, scrollY: bool
@@ -145,6 +147,10 @@ proc cfg*(
     height = fill(),
     gap = 0.0,
     padding = 0.0,
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
     alignItems = AlignStretch,
     justifyContent = JustifyStart,
     alignSelf = AlignAuto,
@@ -161,11 +167,20 @@ proc cfg*(
     syntax = "",
     style = ComponentStyle(),
 ): BoxConfig =
+  var resolvedPadding = insets(padding)
+  if paddingLeft == paddingLeft:
+    resolvedPadding.left = paddingLeft
+  if paddingTop == paddingTop:
+    resolvedPadding.top = paddingTop
+  if paddingRight == paddingRight:
+    resolvedPadding.right = paddingRight
+  if paddingBottom == paddingBottom:
+    resolvedPadding.bottom = paddingBottom
   BoxConfig(
     width: width,
     height: height,
     gap: gap,
-    padding: padding,
+    padding: resolvedPadding,
     alignItems: alignItems,
     justifyContent: justifyContent,
     alignSelf: alignSelf,
@@ -178,7 +193,7 @@ proc cfg*(
     activeLine: activeLine,
     fontName: fontName,
     fontSize: fontSize,
-    buttonPadding: buttonPadding,
+    buttonPadding: insets(buttonPadding),
     syntax: syntax,
     style: style,
   )
@@ -416,11 +431,17 @@ proc renderKey(kind: string, config: BoxConfig): string =
   let styleKey =
     "|" & $config.style.hasBackground & "|" & $config.style.background & "|" &
     $config.style.hasOpacity & "|" & $config.style.opacity
+  let paddingKey = $config.padding.left & "," & $config.padding.top & "," &
+    $config.padding.right & "," & $config.padding.bottom
+  let buttonPaddingKey = $config.buttonPadding.left & "," &
+    $config.buttonPadding.top & "," & $config.buttonPadding.right & "," &
+    $config.buttonPadding.bottom
   kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
-    $config.padding & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
+    paddingKey & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
     $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars & "|" &
-    config.fontName & "|" & config.syntax & styleKey
+    config.fontName & "|" & $config.fontSize & "|" & buttonPaddingKey & "|" &
+    config.syntax & styleKey
 
 proc renderKey(kind: string, width, height: SizePolicy,
     alignSelf: Alignment): string =
@@ -612,7 +633,8 @@ proc rightClicked*(self: UI, id: WidgetID): bool =
     return false
   let located = self.widgetFrame(id)
   located.ok and self.context.update.mouseX.toFloat >= located.frame.x and
-    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseX.toFloat < located.frame.x +
+        located.frame.width and
     self.context.update.mouseY.toFloat >= located.frame.y and
     self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
 
@@ -621,7 +643,8 @@ proc middleClicked*(self: UI, id: WidgetID): bool =
     return false
   let located = self.widgetFrame(id)
   located.ok and self.context.update.mouseX.toFloat >= located.frame.x and
-    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseX.toFloat < located.frame.x +
+        located.frame.width and
     self.context.update.mouseY.toFloat >= located.frame.y and
     self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
 
@@ -634,14 +657,16 @@ proc middleDragDelta*(self: var UI, id: WidgetID):
     return (false, false, 0)
   let hot =
     self.context.update.mouseX.toFloat >= located.frame.x and
-    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseX.toFloat < located.frame.x +
+        located.frame.width and
     self.context.update.mouseY.toFloat >= located.frame.y and
     self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
   if self.context.update.mouseMiddlePressed and hot:
     self.context.draw.middleDragging = id
     self.context.draw.middleDragStartX = self.context.update.mouseX
     return (true, true, 0)
-  if self.context.draw.middleDragging == id and self.context.update.mouseMiddleDown:
+  if self.context.draw.middleDragging == id and
+      self.context.update.mouseMiddleDown:
     return (true, false,
       self.context.update.mouseX - self.context.draw.middleDragStartX)
   (false, false, 0)
@@ -992,7 +1017,8 @@ proc preferredWidth(
     if pending.children.len == 0:
       return widget.widthPolicy.min
     var width =
-      pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
+      pending.padding.left + pending.padding.right +
+      pending.gap * max(pending.children.len - 1, 0).toFloat
     for child in pending.children:
       width += self.preferredWidth(child, pendingByParent)
     width.clampPolicy(widget.widthPolicy)
@@ -1001,14 +1027,14 @@ proc preferredWidth(
     for child in pending.children:
       width =
         max(width, self.preferredWidth(child, pendingByParent) +
-            pending.padding * 2.0)
+            pending.padding.left + pending.padding.right)
     width.clampPolicy(widget.widthPolicy)
   of OverlayLayout:
     var width = widget.widthPolicy.min
     for child in pending.children:
       width =
         max(width, self.preferredWidth(child, pendingByParent) +
-            pending.padding * 2.0)
+            pending.padding.left + pending.padding.right)
     width.clampPolicy(widget.widthPolicy)
 
 proc preferredHeight(
@@ -1023,14 +1049,17 @@ proc preferredHeight(
     var height = widget.heightPolicy.min
     for child in pending.children:
       height = max(
-        height, self.preferredHeight(child, pendingByParent) + pending.padding * 2.0
+        height, self.preferredHeight(child, pendingByParent) +
+            pending.padding.top +
+          pending.padding.bottom
       )
     height.clampPolicy(widget.heightPolicy)
   of ColumnLayout:
     if pending.children.len == 0:
       return widget.heightPolicy.min
     var height =
-      pending.padding * 2.0 + pending.gap * max(pending.children.len - 1, 0).toFloat
+      pending.padding.top + pending.padding.bottom +
+      pending.gap * max(pending.children.len - 1, 0).toFloat
     for child in pending.children:
       height += self.preferredHeight(child, pendingByParent)
     height.clampPolicy(widget.heightPolicy)
@@ -1038,7 +1067,9 @@ proc preferredHeight(
     var height = widget.heightPolicy.min
     for child in pending.children:
       height = max(
-        height, self.preferredHeight(child, pendingByParent) + pending.padding * 2.0
+        height, self.preferredHeight(child, pendingByParent) +
+            pending.padding.top +
+          pending.padding.bottom
       )
     height.clampPolicy(widget.heightPolicy)
 
@@ -1052,8 +1083,10 @@ proc assignDirectStack(
   case pending.kind
   of ColumnLayout:
     let
-      availableWidth = max(parentFrame.width - pending.padding * 2.0, 0.0)
-      availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
+      availableWidth = max(parentFrame.width - pending.padding.left -
+          pending.padding.right, 0.0)
+      availableHeight = max(parentFrame.height - pending.padding.top -
+          pending.padding.bottom, 0.0)
     var fixedHeight = pending.gap * max(pending.children.len - 1, 0).toFloat
     var fillCount = 0
     for child in pending.children:
@@ -1070,11 +1103,12 @@ proc assignDirectStack(
     var y =
       case pending.justifyContent
       of JustifyCenter:
-        parentFrame.y + (parentFrame.height - contentHeight) / 2.0
+        parentFrame.y + pending.padding.top + (availableHeight -
+            contentHeight) / 2.0
       of JustifyEnd:
-        parentFrame.y + parentFrame.height - pending.padding - contentHeight
+        parentFrame.y + parentFrame.height - pending.padding.bottom - contentHeight
       of JustifyStart:
-        parentFrame.y + pending.padding
+        parentFrame.y + pending.padding.top
     for child in pending.children:
       let childHeight =
         if child.heightPolicy.kind == WidgetFill and not pending.scrollY:
@@ -1094,19 +1128,21 @@ proc assignDirectStack(
       let x =
         case alignment
         of AlignCenter:
-          parentFrame.x + (parentFrame.width - childWidth) / 2.0
+          parentFrame.x + pending.padding.left + (availableWidth - childWidth) / 2.0
         of AlignEnd:
-          parentFrame.x + parentFrame.width - pending.padding - childWidth
+          parentFrame.x + parentFrame.width - pending.padding.right - childWidth
         else:
-          parentFrame.x + pending.padding
+          parentFrame.x + pending.padding.left
       child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
       if pendingByParent.hasKey(child.id):
         self.assignDirectStack(pendingByParent[child.id], pendingByParent)
       y += childHeight + pending.gap
   of RowLayout:
     let
-      availableWidth = max(parentFrame.width - pending.padding * 2.0, 0.0)
-      availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
+      availableWidth = max(parentFrame.width - pending.padding.left -
+          pending.padding.right, 0.0)
+      availableHeight = max(parentFrame.height - pending.padding.top -
+          pending.padding.bottom, 0.0)
     var fixedWidth = pending.gap * max(pending.children.len - 1, 0).toFloat
     var fillCount = 0
     for child in pending.children:
@@ -1123,11 +1159,11 @@ proc assignDirectStack(
     var x =
       case pending.justifyContent
       of JustifyCenter:
-        parentFrame.x + (parentFrame.width - contentWidth) / 2.0
+        parentFrame.x + pending.padding.left + (availableWidth - contentWidth) / 2.0
       of JustifyEnd:
-        parentFrame.x + parentFrame.width - pending.padding - contentWidth
+        parentFrame.x + parentFrame.width - pending.padding.right - contentWidth
       of JustifyStart:
-        parentFrame.x + pending.padding
+        parentFrame.x + pending.padding.left
     for child in pending.children:
       let childWidth =
         if child.widthPolicy.kind == WidgetFill and not pending.scrollX:
@@ -1147,19 +1183,22 @@ proc assignDirectStack(
       let y =
         case alignment
         of AlignCenter:
-          parentFrame.y + (parentFrame.height - childHeight) / 2.0
+          parentFrame.y + pending.padding.top + (availableHeight -
+              childHeight) / 2.0
         of AlignEnd:
-          parentFrame.y + parentFrame.height - pending.padding - childHeight
+          parentFrame.y + parentFrame.height - pending.padding.bottom - childHeight
         else:
-          parentFrame.y + pending.padding
+          parentFrame.y + pending.padding.top
       child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
       if pendingByParent.hasKey(child.id):
         self.assignDirectStack(pendingByParent[child.id], pendingByParent)
       x += childWidth + pending.gap
   of OverlayLayout:
     let
-      availableWidth = max(parentFrame.width - pending.padding * 2.0, 0.0)
-      availableHeight = max(parentFrame.height - pending.padding * 2.0, 0.0)
+      availableWidth = max(parentFrame.width - pending.padding.left -
+          pending.padding.right, 0.0)
+      availableHeight = max(parentFrame.height - pending.padding.top -
+          pending.padding.bottom, 0.0)
     for child in pending.children:
       var childWidth =
         if child.widthPolicy.kind == WidgetFill or (
@@ -1180,19 +1219,20 @@ proc assignDirectStack(
       let x =
         case alignment
         of AlignCenter:
-          parentFrame.x + (parentFrame.width - childWidth) / 2.0
+          parentFrame.x + pending.padding.left + (availableWidth - childWidth) / 2.0
         of AlignEnd:
-          parentFrame.x + parentFrame.width - pending.padding - childWidth
+          parentFrame.x + parentFrame.width - pending.padding.right - childWidth
         else:
-          parentFrame.x + pending.padding
+          parentFrame.x + pending.padding.left
       let y =
         case pending.justifyContent
         of JustifyCenter:
-          parentFrame.y + (parentFrame.height - childHeight) / 2.0
+          parentFrame.y + pending.padding.top + (availableHeight -
+              childHeight) / 2.0
         of JustifyEnd:
-          parentFrame.y + parentFrame.height - pending.padding - childHeight
+          parentFrame.y + parentFrame.height - pending.padding.bottom - childHeight
         of JustifyStart:
-          parentFrame.y + pending.padding
+          parentFrame.y + pending.padding.top
       child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
       if pendingByParent.hasKey(child.id):
         self.assignDirectStack(pendingByParent[child.id], pendingByParent)
@@ -1205,7 +1245,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       parent: self.root,
       children: children,
       gap: 0.0,
-      padding: 0.0,
+      padding: insets(0.0),
       alignItems: AlignStretch,
       justifyContent: JustifyStart,
       scrollX: false,
@@ -1257,7 +1297,10 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         pending.parent,
         pending.children,
         gap = pending.gap,
-        padding = pending.padding,
+        paddingLeft = pending.padding.left,
+        paddingTop = pending.padding.top,
+        paddingRight = pending.padding.right,
+        paddingBottom = pending.padding.bottom,
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
         scrollX = pending.scrollX,
@@ -1268,7 +1311,10 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         pending.parent,
         pending.children,
         gap = pending.gap,
-        padding = pending.padding,
+        paddingLeft = pending.padding.left,
+        paddingTop = pending.padding.top,
+        paddingRight = pending.padding.right,
+        paddingBottom = pending.padding.bottom,
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
         scrollX = pending.scrollX,
@@ -1278,7 +1324,10 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       self.layout.overlay(
         pending.parent,
         pending.children,
-        padding = pending.padding,
+        paddingLeft = pending.padding.left,
+        paddingTop = pending.padding.top,
+        paddingRight = pending.padding.right,
+        paddingBottom = pending.padding.bottom,
         alignItems = pending.alignItems,
         justifyContent = pending.justifyContent,
       )
@@ -1823,7 +1872,7 @@ proc drawRealtime*(self: var UI): bool {.discardable.} =
   true
 
 proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
-  ## Repaint the last solved frame without re-evaluating Crow or solving layout.
+  ## Repaint the last solved frame without re-evaluating Owl or solving layout.
   if not self.retainedFrameValid:
     return false
   let
@@ -1853,7 +1902,7 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
     self.frameRedrawn = true
 
 proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
-  ## Update hit testing and repaint the last solved frame without re-evaluating Crow.
+  ## Update hit testing and repaint the last solved frame without re-evaluating Owl.
   if not self.retainedFrameValid:
     return false
   let
@@ -2371,7 +2420,7 @@ proc button*(
     alignSelf = AlignAuto,
     textScroll = false,
     fontName = "font",
-    buttonPadding = -1.0,
+    buttonPadding = insets(-1.0),
     style = ComponentStyle(),
 ): bool {.discardable.} =
   if ui.phase == EventPhase:
@@ -2380,7 +2429,9 @@ proc button*(
   ui.setRenderKey(
     id,
     renderKey("button:" & label & ":" & $textScroll & ":" & fontName & ":" &
-        $buttonPadding, width, height, alignSelf) & "|" &
+        $buttonPadding.left & "," & $buttonPadding.top & "," &
+        $buttonPadding.right & "," & $buttonPadding.bottom, width, height,
+        alignSelf) & "|" &
       $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity &
           "|" &
       $style.opacity,
@@ -2389,6 +2440,29 @@ proc button*(
   btn.style = style
   ui.attach(box, Component(btn))
   ui.addChild(box)
+
+proc button*(
+    ui: var UI,
+    id: WidgetID,
+    label: string,
+    width, height: SizePolicy,
+    alignSelf = AlignAuto,
+    textScroll = false,
+    fontName = "font",
+    buttonPadding: float64,
+    style = ComponentStyle(),
+): bool {.discardable.} =
+  ui.button(
+    id,
+    label,
+    width,
+    height,
+    alignSelf,
+    textScroll,
+    fontName,
+    insets(buttonPadding),
+    style,
+  )
 
 proc menu*(
     ui: var UI,
@@ -2451,7 +2525,7 @@ proc tabs*(
     height = fit(),
     alignSelf = AlignAuto,
     gap = 0.0,
-    padding = 0.0,
+    padding = insets(0.0),
     style = ComponentStyle(),
     tabStyle = TabStyle(),
 ) =
@@ -2487,7 +2561,15 @@ proc tabs*(
         fit(), fixed(30), AlignAuto))
     ui.attach(box, Component(TabButton.new(label, i == selected, tabStyle)))
     ui.addChild(box)
-  ui.row(cfg(width = fill(), height = fit(), gap = gap, padding = padding))
+  ui.row(cfg(
+    width = fill(),
+    height = fit(),
+    gap = gap,
+    paddingLeft = padding.left,
+    paddingTop = padding.top,
+    paddingRight = padding.right,
+    paddingBottom = padding.bottom,
+  ))
   discard ui.popLayout()
 
 proc label*(
@@ -3000,7 +3082,7 @@ proc tabs*(
     height = fit(),
     alignSelf = AlignAuto,
     gap = 0.0,
-    padding = 0.0,
+    padding = insets(0.0),
     style = ComponentStyle(),
     tabStyle = TabStyle(),
 ) =

@@ -1,4 +1,4 @@
-import "../variables.nest"
+import "../variables.owl"
 
 fun workspaceLabel workspace:
   define:

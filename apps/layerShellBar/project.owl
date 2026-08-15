@@ -1,6 +1,6 @@
-import "variables.nest"
+import "variables.owl"
 
-main = "main.nest"
+main = "main.owl"
 title = "Nest Layer Shell Bar"
 width = 1
 height = BarHeight

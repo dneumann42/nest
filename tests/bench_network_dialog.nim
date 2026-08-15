@@ -1,7 +1,7 @@
 import std/[strformat, strutils, times]
 
-import crow
-import nest/[crowdsl, screen, ui]
+import owl
+import nest/[owldsl, screen, ui]
 
 proc installFonts() =
   fontRelays = FontRelays(
@@ -70,7 +70,7 @@ proc valueText(value: Value): string =
   else:
     $value
 
-proc installShellStubs(runtime: NestCrowRuntime; rows: int) =
+proc installShellStubs(runtime: NestOwlRuntime; rows: int) =
   runtime.evaluator.native "shell":
     discard layout
     discard bodyNodes
@@ -85,7 +85,7 @@ proc installShellStubs(runtime: NestCrowRuntime; rows: int) =
     text(shellValue(env.eval(arguments[0]).valueText, rows))
 
 proc runCase(rows, frames: int) =
-  let app = NestCrowApp.init("apps/layerShellBar/network/main.nest")
+  let app = NestOwlApp.init("apps/layerShellBar/network/main.owl")
   app.runtime.installShellStubs(rows)
   var ui = UI.init()
   ui.initContext(620, 520)

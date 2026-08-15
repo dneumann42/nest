@@ -2,7 +2,7 @@ import std/[os, strutils]
 
 import nest/[
   appConfig,
-  crowdsl,
+  owldsl,
   dialogAnchors,
   errorDialogs,
   externalSignals,
@@ -47,7 +47,7 @@ proc runProject*(
       SingleInstanceLock()
 
   var ui = UI.init()
-  let app = NestCrowApp.init(mainPath)
+  let app = NestOwlApp.init(mainPath)
   app.runtime.dialogData = dialogData
   installExternalSignalHandlers()
   var
@@ -78,10 +78,10 @@ proc runProject*(
           stats.drawOverlay(ui.windowWidth, ui.windowHeight, ui.font())
           ui.requestRedrawAfter(16)
       if app.lastError.len > 0:
-        app.launchCrowErrorDialog(app.lastErrorDetails)
+        app.launchOwlErrorDialog(app.lastErrorDetails)
       else:
-        app.pollCrowErrorDialog()
-        app.closeCrowErrorDialog()
+        app.pollOwlErrorDialog()
+        app.closeOwlErrorDialog()
       if app.runtime.requestQuit:
         running = false
       if options.benchmarkFrames > 0 and stats.frameCount >=
@@ -93,5 +93,5 @@ proc runProject*(
     app.runtime.closeDialogProcesses()
     app.runtime.closeShellProcesses()
     app.runtime.closeWorkspaceSubscriptions()
-    app.closeCrowErrorDialog()
+    app.closeOwlErrorDialog()
     instanceLock.removeSingleInstanceLock()

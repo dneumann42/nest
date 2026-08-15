@@ -1,4 +1,4 @@
-import "../variables.nest"
+import "../variables.owl"
 
 fun notificationCountCommand:
   string "python3 -c 'import json,subprocess; total=0\nfor cmd in ((\"makoctl\",\"list\",\"-j\"),(\"makoctl\",\"history\",\"-j\")):\n    try:\n        total += len(json.loads(subprocess.check_output(cmd, stderr=subprocess.DEVNULL) or b\"[]\"))\n    except Exception:\n        pass\nprint(total, end=\"\")'"

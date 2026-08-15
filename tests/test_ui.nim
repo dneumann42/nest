@@ -694,7 +694,8 @@ suite "ui layout nesting":
       ui.panel(Panel1, cfg(width = fixed(80), height = fixed(40),
           style = ComponentStyle(hasBackground: true))):
         discard
-      discard ui.component(Button1, Component(RealtimeProbe()), fixed(20), fixed(20))
+      discard ui.component(Button1, Component(RealtimeProbe()), fixed(20),
+          fixed(20))
 
     check ui.pointerOverUi(10, 10)
     check not ui.pointerOverInteractive(10, 10)
@@ -1234,6 +1235,32 @@ suite "ui layout nesting":
     checkFrame(ui.widget(Button3), 200, 60, 40, 20)
     checkFrame(ui.widget(Button4), 250, 60, 50, 20)
 
+  test "block layouts center within asymmetric padding":
+    var ui = UI.init()
+    ui.beginLayout(300, 120)
+
+    ui.row(
+      Body,
+      cfg(
+        width = fill(),
+        height = fixed(80),
+        gap = 10.0,
+        paddingLeft = 20.0,
+        paddingTop = 5.0,
+        paddingRight = 40.0,
+        paddingBottom = 15.0,
+        alignItems = AlignCenter,
+        justifyContent = JustifyCenter,
+      ),
+    ):
+      ui.button(Button1, "One", width = fixed(40), height = fixed(20))
+      ui.button(Button2, "Two", width = fixed(50), height = fixed(20))
+
+    ui.endLayout()
+
+    checkFrame(ui.widget(Button1), 90, 25, 40, 20)
+    checkFrame(ui.widget(Button2), 140, 25, 50, 20)
+
   test "panel wrapper draws a container parent and lays out labels":
     var ui = UI.init()
     ui.beginLayout(400, 300)
@@ -1260,7 +1287,7 @@ suite "ui layout nesting":
     checkFrame(ui.widget(Label1), 160, 125, 80, 20)
     checkFrame(ui.widget(Label2), 160, 155, 80, 20)
 
-  test "crow error dialog layout renders visible widgets":
+  test "owl error dialog layout renders visible widgets":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1279,11 +1306,11 @@ suite "ui layout nesting":
     try:
       var ui = UI.init()
       ui.loadFont("font", "", 18)
-      check nestApp.layoutCrowErrorDialogForTest(ui,
+      check nestApp.layoutOwlErrorDialogForTest(ui,
           """error: missing field: start-label
 Stack trace:
-  at /tmp/example/main.nest:12:5 in render
-  at /tmp/example/main.nest:4:1 in main""", 620, 300)
+  at /tmp/example/main.owl:12:5 in render
+  at /tmp/example/main.owl:4:1 in main""", 620, 300)
       check ui.widget(ui.id("_nest_error_dialog")).frame.width == 620
       check ui.widget(ui.id("_nest_error_dialog")).frame.height == 300
       check ui.widget(ui.id("_nest_error_header")).frame.height > 0

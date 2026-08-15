@@ -2,7 +2,7 @@ import
   std/[json, locks, math, os, osproc, sets, streams, strformat, strutils,
       tables, times]
 
-import crow, palette, ui, dialogs
+import owl, palette, ui, dialogs
 import nest/[input, perf, screen]
 
 const MaintenancePollMs = 100
@@ -23,6 +23,9 @@ type
 
   ColorValue* = ref object of NativeValue
     value*: Color
+
+  InsetsValue* = ref object of NativeValue
+    value*: EdgeInsets
 
   DialogProcess = ref object
     process: Process
@@ -60,7 +63,7 @@ type
     primary*: ErrorLocation
     frames*: seq[ErrorLocation]
 
-  NestCrowRuntime* = ref object
+  NestOwlRuntime* = ref object
     evaluator*: Evaluator
     externalEvents: CountTable[string]
     componentState: Table[string, Value]
@@ -88,9 +91,9 @@ type
     dismissedError*: string
     nextFullRenderTicks: int
 
-  NestCrowApp* = ref object
+  NestOwlApp* = ref object
     rootPath*: string
-    runtime*: NestCrowRuntime
+    runtime*: NestOwlRuntime
     program*: SyntaxNode
     lastError*: string
     lastErrorDetails*: ErrorDetails
@@ -146,12 +149,12 @@ proc errorReport*(details: ErrorDetails): string =
       if frame.label.len > 0:
         result.add " in " & frame.label
 
-proc init*(T: typedesc[NestCrowRuntime]): T
+proc init*(T: typedesc[NestOwlRuntime]): T
 proc renderNodes(
-  runtime: NestCrowRuntime, env: Environment, nodes: seq[SyntaxNode]
+  runtime: NestOwlRuntime, env: Environment, nodes: seq[SyntaxNode]
 ): Value
 
-proc renderNodes(runtime: NestCrowRuntime, nodes: seq[SyntaxNode]): Value
+proc renderNodes(runtime: NestOwlRuntime, nodes: seq[SyntaxNode]): Value
 
 type RuntimeWakeProc = proc() {.gcsafe, raises: [].}
 type PathSelectedProc* = proc(path: string) {.closure, raises: [].}
@@ -174,11 +177,11 @@ var pickDirectoryDialog*: PathPickerProc = proc(
   except CatchableError:
     discard
 
-proc queueExternal*(runtime: NestCrowRuntime, name: string) =
+proc queueExternal*(runtime: NestOwlRuntime, name: string) =
   if name.len > 0:
     runtime.externalEvents.inc(name)
 
-proc consumeExternal(runtime: NestCrowRuntime, name: string): bool =
+proc consumeExternal(runtime: NestOwlRuntime, name: string): bool =
   let count = runtime.externalEvents.getOrDefault(name)
   if count <= 0:
     return false
@@ -191,7 +194,7 @@ proc consumeExternal(runtime: NestCrowRuntime, name: string): bool =
 proc stateKey(scope, field: string): string {.raises: [].} =
   scope & "\x1f" & field
 
-proc receiveMessage(runtime: NestCrowRuntime, topic: string): Value {.raises: [].} =
+proc receiveMessage(runtime: NestOwlRuntime, topic: string): Value {.raises: [].} =
   var queue = runtime.messages.getOrDefault(topic)
   if queue.len == 0:
     return nothing()
@@ -202,7 +205,7 @@ proc receiveMessage(runtime: NestCrowRuntime, topic: string): Value {.raises: []
   else:
     runtime.messages[topic] = queue
 
-proc commitState(runtime: NestCrowRuntime) {.raises: [].} =
+proc commitState(runtime: NestOwlRuntime) {.raises: [].} =
   for binding in runtime.stateBindings:
     let value = binding.env.bindings.getOrDefault(binding.symbol)
     runtime.componentState[binding.key] = value
@@ -222,7 +225,10 @@ proc justifyValue(justification: Justification): Value =
 proc colorValue(color: Color): Value =
   nativeValue(ColorValue(value: color))
 
-proc requireUi(runtime: NestCrowRuntime): var UI {.raises: [EvaluatorError].} =
+proc insetsValue(insets: EdgeInsets): Value =
+  nativeValue(InsetsValue(value: insets))
+
+proc requireUi(runtime: NestOwlRuntime): var UI {.raises: [EvaluatorError].} =
   if runtime.currentUi.isNil:
     raise newException(EvaluatorError, "Nest UI is not rendering")
   runtime.currentUi[]
@@ -287,7 +293,7 @@ proc asIntSet(value: Value): HashSet[int] =
     for token in value.asString.replace(",", " ").splitWhitespace:
       result.addToken(token)
 
-proc asWidgetID(runtime: NestCrowRuntime, value: Value): WidgetID =
+proc asWidgetID(runtime: NestOwlRuntime, value: Value): WidgetID =
   if value.kind == Native and value.native of WidgetIDValue:
     WidgetIDValue(value.native).value
   else:
@@ -314,6 +320,14 @@ proc asJustification(value: Value, fallback: Justification): Justification =
 proc asColor(value: Value, fallback: Color): Color =
   if value.kind == Native and value.native of ColorValue:
     ColorValue(value.native).value
+  else:
+    fallback
+
+proc asInsets(value: Value, fallback: EdgeInsets): EdgeInsets =
+  if value.kind == Native and value.native of InsetsValue:
+    InsetsValue(value.native).value
+  elif value.kind in {Number, Text}:
+    insets(value.asNumber(fallback.left))
   else:
     fallback
 
@@ -396,7 +410,15 @@ proc evalConfig(
     of "gap":
       result.gap = value.asNumber(result.gap)
     of "padding":
-      result.padding = value.asNumber(result.padding)
+      result.padding = value.asInsets(result.padding)
+    of "paddingLeft":
+      result.padding.left = value.asNumber(result.padding.left)
+    of "paddingTop":
+      result.padding.top = value.asNumber(result.padding.top)
+    of "paddingRight":
+      result.padding.right = value.asNumber(result.padding.right)
+    of "paddingBottom":
+      result.padding.bottom = value.asNumber(result.padding.bottom)
     of "alignItems":
       result.alignItems = value.asAlignment(result.alignItems)
     of "justifyContent":
@@ -422,7 +444,7 @@ proc evalConfig(
     of "fontSize":
       result.fontSize = value.asNumber(result.fontSize.float64).int
     of "buttonPadding":
-      result.buttonPadding = value.asNumber(result.buttonPadding)
+      result.buttonPadding = value.asInsets(result.buttonPadding)
     of "syntax", "syntaxHighlighter":
       result.syntax = value.asString
     of "background", "backgroundColor":
@@ -494,13 +516,13 @@ proc collectMenus(
     let args = env.menuArgs(node.arguments)
     result.add MenuSpec(label: args.label, path: args.path, body: node.body)
 
-proc currentDir(runtime: NestCrowRuntime): string =
+proc currentDir(runtime: NestOwlRuntime): string =
   if runtime.moduleStack.len > 0:
     runtime.moduleStack[^1].parentDir
   else:
     getCurrentDir()
 
-proc resolveModulePath(runtime: NestCrowRuntime, path: string): string =
+proc resolveModulePath(runtime: NestOwlRuntime, path: string): string =
   if path.isAbsolute:
     return path.normalizedPath
 
@@ -514,7 +536,7 @@ proc resolveModulePath(runtime: NestCrowRuntime, path: string): string =
 
   (getCurrentDir() / path).normalizedPath
 
-proc rememberFile(runtime: NestCrowRuntime, path: string) =
+proc rememberFile(runtime: NestOwlRuntime, path: string) =
   try:
     runtime.loadedFiles[path] = getLastModificationTime(path)
   except OSError:
@@ -553,7 +575,7 @@ proc clockRedrawMs(pattern: string): int =
   if pattern.contains("s"): 1000 else: 60_000
 
 proc requestRedrawAfter(
-    runtime: NestCrowRuntime, ms: int
+    runtime: NestOwlRuntime, ms: int
 ) {.raises: [EvaluatorError].} =
   try:
     let due = input.getTicks() + max(ms, 0)
@@ -566,7 +588,7 @@ proc requestRedrawAfter(
     discard
 
 proc queuePathCallback(
-    runtime: NestCrowRuntime, env: Environment, command: CommandValue, path: string
+    runtime: NestOwlRuntime, env: Environment, command: CommandValue, path: string
 ) =
   runtime.pendingPathCallbacks.add PendingPathCallback(
     env: env, command: command, path: path
@@ -576,7 +598,7 @@ proc queuePathCallback(
   except Exception:
     discard
 
-proc queuePathEvent(runtime: NestCrowRuntime, eventName, path: string) =
+proc queuePathEvent(runtime: NestOwlRuntime, eventName, path: string) =
   if eventName.len == 0:
     return
   runtime.pathPickerResults[eventName] = path
@@ -586,7 +608,7 @@ proc queuePathEvent(runtime: NestCrowRuntime, eventName, path: string) =
   except Exception:
     discard
 
-proc pollPathCallbacks(runtime: NestCrowRuntime) =
+proc pollPathCallbacks(runtime: NestOwlRuntime) =
   if runtime.pendingPathCallbacks.len == 0:
     return
   let callbacks = runtime.pendingPathCallbacks
@@ -902,7 +924,7 @@ proc stopWorkspaceSubscription(subscription: WorkspaceSubscription) {.raises: []
   deinitLock(subscription.lock)
 
 proc subscribedSwayWorkspaces(
-    runtime: NestCrowRuntime, key: string
+    runtime: NestOwlRuntime, key: string
 ): Value {.raises: [].} =
   let subscriptionKey = "workspace:" & key
   if subscriptionKey notin runtime.workspaceSubscriptions:
@@ -916,7 +938,7 @@ proc subscribedSwayWorkspaces(
   parseSwayWorkspaceValues(subscription.currentWorkspaceOutput())
 
 proc subscribedSwayActiveWindow(
-    runtime: NestCrowRuntime, key: string
+    runtime: NestOwlRuntime, key: string
 ): string {.raises: [].} =
   let subscriptionKey = "window:" & key
   if subscriptionKey notin runtime.workspaceSubscriptions:
@@ -935,7 +957,7 @@ proc currentTicks(): int {.raises: [].} =
   except Exception:
     0
 
-proc pollShellProcesses*(runtime: NestCrowRuntime, ui: var UI) =
+proc pollShellProcesses*(runtime: NestOwlRuntime, ui: var UI) =
   var finished: seq[string]
   for key, shell in runtime.shellProcesses.pairs:
     if not shell.process.running:
@@ -959,7 +981,7 @@ proc pollShellProcesses*(runtime: NestCrowRuntime, ui: var UI) =
   for key in finished:
     runtime.shellProcesses.del key
 
-proc closeShellProcesses*(runtime: NestCrowRuntime) =
+proc closeShellProcesses*(runtime: NestOwlRuntime) =
   for shell in runtime.shellProcesses.values:
     if shell.process.running:
       shell.process.terminate
@@ -978,13 +1000,13 @@ proc launchShellCommand(command: string): bool {.raises: [].} =
   except IOError:
     false
 
-proc closeWorkspaceSubscriptions*(runtime: NestCrowRuntime) =
+proc closeWorkspaceSubscriptions*(runtime: NestOwlRuntime) =
   for subscription in runtime.workspaceSubscriptions.values:
     subscription.stopWorkspaceSubscription()
   runtime.workspaceSubscriptions.clear()
 
 proc asyncShellOutput(
-    runtime: NestCrowRuntime, key, command: string, intervalMs: int
+    runtime: NestOwlRuntime, key, command: string, intervalMs: int
 ): string {.raises: [].} =
   let runningShell = runtime.shellProcesses.getOrDefault(key)
   if intervalMs <= 0 and runningShell != nil and runningShell.command != command:
@@ -1071,7 +1093,7 @@ proc dialogResultPath(key: string): string =
   let ticks = $currentTicks()
   getTempDir() / ("nest-dialog-" & $getCurrentProcessId() & "-" & ticks & "-" & safeKey)
 
-proc dialogAnchorJson(runtime: NestCrowRuntime, anchorID: WidgetID): string =
+proc dialogAnchorJson(runtime: NestOwlRuntime, anchorID: WidgetID): string =
   if runtime.currentUi.isNil or anchorID == InvalidWidgetID:
     return ""
   let
@@ -1091,7 +1113,7 @@ proc dialogAnchorJson(runtime: NestCrowRuntime, anchorID: WidgetID): string =
   )
 
 proc launchDialogProcess(
-    runtime: NestCrowRuntime, key, projectDir, data: string,
+    runtime: NestOwlRuntime, key, projectDir, data: string,
         anchorID = InvalidWidgetID
 ) {.raises: [EvaluatorError].} =
   if key in runtime.dialogProcesses:
@@ -1122,7 +1144,7 @@ proc launchDialogProcess(
   runtime.dialogProcesses[key] = DialogProcess(process: process,
       resultPath: resultPath)
 
-proc pollDialogProcesses*(runtime: NestCrowRuntime) =
+proc pollDialogProcesses*(runtime: NestOwlRuntime) =
   var finished: seq[string]
   for key, dialog in runtime.dialogProcesses.pairs:
     if not dialog.process.running:
@@ -1147,7 +1169,7 @@ proc pollDialogProcesses*(runtime: NestCrowRuntime) =
   for key in finished:
     runtime.dialogProcesses.del key
 
-proc closeManagedDialog*(runtime: NestCrowRuntime, key: string) =
+proc closeManagedDialog*(runtime: NestOwlRuntime, key: string) =
   if key notin runtime.dialogProcesses:
     return
   let dialog = runtime.dialogProcesses[key]
@@ -1163,7 +1185,7 @@ proc closeManagedDialog*(runtime: NestCrowRuntime, key: string) =
   dialog.process.close
   runtime.dialogProcesses.del key
 
-proc closeDialogProcesses*(runtime: NestCrowRuntime) =
+proc closeDialogProcesses*(runtime: NestOwlRuntime) =
   for dialog in runtime.dialogProcesses.values:
     if dialog.process.running:
       dialog.process.terminate
@@ -1177,7 +1199,7 @@ proc closeDialogProcesses*(runtime: NestCrowRuntime) =
   runtime.closeShellProcesses()
   runtime.closeWorkspaceSubscriptions()
 
-proc crowErrorLines*(message: string, maxLineLen = 68, maxLines = 7): seq[string] =
+proc owlErrorLines*(message: string, maxLineLen = 68, maxLines = 7): seq[string] =
   for rawLine in message.splitLines:
     var line = rawLine
     if line.len == 0:
@@ -1239,7 +1261,7 @@ proc openDiagnosticLocation*(line: string) =
 proc isErrorHighlightLine(line: string): bool =
   line.contains("error:") or line.strip.startsWith("^")
 
-proc renderCrowErrorLine*(
+proc renderOwlErrorLine*(
     ui: var UI, index: int, line: string, width, height: SizePolicy
 ) =
   let
@@ -1257,7 +1279,7 @@ proc renderCrowErrorLine*(
   ):
     openDiagnosticLocation(line)
 
-proc renderErrorDialog*(runtime: NestCrowRuntime, ui: var UI, message: string) =
+proc renderErrorDialog*(runtime: NestOwlRuntime, ui: var UI, message: string) =
   if message.len == 0 or runtime.dismissedError == message:
     return
 
@@ -1292,7 +1314,7 @@ proc renderErrorDialog*(runtime: NestCrowRuntime, ui: var UI, message: string) =
               alignItems = AlignCenter
         ),
       ):
-        ui.label(ui.id("_nest_error_title"), "Crow error", fill(), fit())
+        ui.label(ui.id("_nest_error_title"), "Owl error", fill(), fit())
         discard ui.button(closeID, "Close", fit(), fit())
       ui.column(
         ui.id("_nest_error_body"),
@@ -1304,8 +1326,8 @@ proc renderErrorDialog*(runtime: NestCrowRuntime, ui: var UI, message: string) =
           alignItems = AlignStretch,
         ),
       ):
-        for index, line in crowErrorLines(message):
-          renderCrowErrorLine(ui, index, line, fill(), fit())
+        for index, line in owlErrorLines(message):
+          renderOwlErrorLine(ui, index, line, fill(), fit())
       ui.row(
         ui.id("_nest_error_actions"),
         cfg(width = fill(), height = fit(), gap = 8,
@@ -1314,12 +1336,12 @@ proc renderErrorDialog*(runtime: NestCrowRuntime, ui: var UI, message: string) =
         discard ui.button(copyID, "Copy", fit(), fit())
 
 proc loadSyntaxFile*(
-    runtime: NestCrowRuntime, path: string
+    runtime: NestOwlRuntime, path: string
 ): SyntaxNode {.raises: [EvaluatorError].} =
   var resolved = path
   try:
     resolved = runtime.resolveModulePath(path)
-    result = crow.parse(readFile(resolved), resolved)
+    result = owl.parse(readFile(resolved), resolved)
     runtime.rememberFile(resolved)
   except IOError as error:
     raise newException(EvaluatorError, resolved & ": " & error.msg)
@@ -1332,7 +1354,7 @@ proc loadSyntaxFile*(
     raise converted
 
 proc importModule(
-    runtime: NestCrowRuntime, env: Environment, path: string, pos = noSourcePos()
+    runtime: NestOwlRuntime, env: Environment, path: string, pos = noSourcePos()
 ) {.raises: [EvaluatorError].} =
   let resolved =
     try:
@@ -1358,7 +1380,7 @@ proc importModule(
     runtime.moduleStack.setLen(runtime.moduleStack.len - 1)
 
 proc renderNodes(
-    runtime: NestCrowRuntime, env: Environment, nodes: seq[SyntaxNode]
+    runtime: NestOwlRuntime, env: Environment, nodes: seq[SyntaxNode]
 ): Value =
   result = nothing()
   for node in nodes:
@@ -1372,10 +1394,10 @@ proc renderNodes(
       runtime.lastErrorDetails = error.errorDetails()
       return nothing()
 
-proc renderNodes(runtime: NestCrowRuntime, nodes: seq[SyntaxNode]): Value =
+proc renderNodes(runtime: NestOwlRuntime, nodes: seq[SyntaxNode]): Value =
   runtime.renderNodes(runtime.evaluator.env, nodes)
 
-proc refreshPerfOverlay(runtime: NestCrowRuntime) {.raises: [].} =
+proc refreshPerfOverlay(runtime: NestOwlRuntime) {.raises: [].} =
   if not runtime.currentUi.isNil:
     runtime.currentUi[].markAllDirty()
     try:
@@ -1383,7 +1405,7 @@ proc refreshPerfOverlay(runtime: NestCrowRuntime) {.raises: [].} =
     except Exception:
       discard
 
-proc registerNestCommands(runtime: NestCrowRuntime) =
+proc registerNestCommands(runtime: NestOwlRuntime) =
   runtime.evaluator.native "import":
     discard layout
     discard bodyNodes
@@ -1488,7 +1510,8 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
         env.bindings[binding.bindingSymbol] = value
       else:
         env.define(binding.bindingSymbol, value)
-      runtime.stateBindings.add StateBinding(env: env, symbol: binding.bindingSymbol, key: key)
+      runtime.stateBindings.add StateBinding(env: env,
+          symbol: binding.bindingSymbol, key: key)
     nothing()
 
   runtime.evaluator.native "send":
@@ -1577,6 +1600,36 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
     if arguments.len != 1:
       raise newException(EvaluatorError, "prefer expects one size")
     sizeValue(prefer(env.eval(arguments[0]).asNumber))
+
+  runtime.evaluator.native "insets":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    case values.len
+    of 0:
+      insetsValue(insets(0.0))
+    of 1:
+      insetsValue(insets(values[0].asNumber))
+    of 2:
+      let
+        vertical = values[0].asNumber
+        horizontal = values[1].asNumber
+      insetsValue(insets(horizontal, vertical, horizontal, vertical))
+    of 3:
+      let
+        top = values[0].asNumber
+        horizontal = values[1].asNumber
+        bottom = values[2].asNumber
+      insetsValue(insets(horizontal, top, horizontal, bottom))
+    else:
+      insetsValue(
+        insets(
+          values[0].asNumber,
+          values[1].asNumber,
+          values[2].asNumber,
+          values[3].asNumber,
+        )
+      )
 
   runtime.evaluator.native "clock":
     discard layout
@@ -2969,7 +3022,7 @@ proc registerNestCommands(runtime: NestCrowRuntime) =
   runtime.evaluator.env.define("JustifyCenter", justifyValue(JustifyCenter))
   runtime.evaluator.env.define("JustifyEnd", justifyValue(JustifyEnd))
 
-proc init*(T: typedesc[NestCrowRuntime]): T =
+proc init*(T: typedesc[NestOwlRuntime]): T =
   result = T(
     evaluator: Evaluator.init(),
     externalEvents: initCountTable[string](),
@@ -2987,16 +3040,16 @@ proc init*(T: typedesc[NestCrowRuntime]): T =
   )
   result.registerNestCommands()
 
-proc get*(runtime: NestCrowRuntime, name: string): Value {.raises: [
+proc get*(runtime: NestOwlRuntime, name: string): Value {.raises: [
     EvaluatorError].} =
   runtime.evaluator.env.get(name)
 
 proc widgetID*(
-    runtime: NestCrowRuntime, name: string
+    runtime: NestOwlRuntime, name: string
 ): WidgetID {.raises: [EvaluatorError].} =
   runtime.asWidgetID(runtime.get(name))
 
-proc dependenciesChanged*(runtime: NestCrowRuntime): bool =
+proc dependenciesChanged*(runtime: NestOwlRuntime): bool =
   for path, lastTime in runtime.loadedFiles:
     try:
       if getLastModificationTime(path) != lastTime:
@@ -3004,12 +3057,12 @@ proc dependenciesChanged*(runtime: NestCrowRuntime): bool =
     except OSError:
       return true
 
-proc reload*(app: NestCrowApp): bool {.discardable.} =
+proc reload*(app: NestOwlApp): bool {.discardable.} =
   if app.runtime != nil:
     app.runtime.closeDialogProcesses()
     app.runtime.closeShellProcesses()
     app.runtime.closeWorkspaceSubscriptions()
-  app.runtime = NestCrowRuntime.init()
+  app.runtime = NestOwlRuntime.init()
   app.runtime.loadedFiles.clear()
   try:
     app.program = app.runtime.loadSyntaxFile(app.rootPath)
@@ -3021,11 +3074,11 @@ proc reload*(app: NestCrowApp): bool {.discardable.} =
     app.lastErrorDetails = error.errorDetails()
     false
 
-proc init*(T: typedesc[NestCrowApp], rootPath: string): T =
-  result = T(rootPath: rootPath.normalizedPath, runtime: NestCrowRuntime.init())
+proc init*(T: typedesc[NestOwlApp], rootPath: string): T =
+  result = T(rootPath: rootPath.normalizedPath, runtime: NestOwlRuntime.init())
   discard result.reload()
 
-proc render*(runtime: NestCrowRuntime, ui: var UI, program: SyntaxNode) =
+proc render*(runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode) =
   if program.isNil:
     return
   runtime.pollShellProcesses(ui)
@@ -3046,11 +3099,11 @@ proc render*(runtime: NestCrowRuntime, ui: var UI, program: SyntaxNode) =
     runtime.commitState()
     runtime.currentUi = nil
 
-proc loadComponentLibrary*(runtime: NestCrowRuntime, path: string) =
+proc loadComponentLibrary*(runtime: NestOwlRuntime, path: string) =
   runtime.importModule(runtime.evaluator.env, path)
 
 proc renderComponent*(
-    runtime: NestCrowRuntime,
+    runtime: NestOwlRuntime,
     ui: var UI,
     libraryPath, componentName: string,
     arguments: openArray[SyntaxNode],
@@ -3071,7 +3124,7 @@ proc renderComponent*(
     runtime.currentUi = nil
 
 proc renderComponent*(
-    runtime: NestCrowRuntime,
+    runtime: NestOwlRuntime,
     ui: var UI,
     libraryPath, componentName: string,
     arguments: openArray[string] = [],
@@ -3082,7 +3135,7 @@ proc renderComponent*(
   runtime.renderComponent(ui, libraryPath, componentName, nodes)
 
 proc renderLayoutOnly*(
-    runtime: NestCrowRuntime, ui: var UI, program: SyntaxNode, width, height: int
+    runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode, width, height: int
 ) =
   if program.isNil:
     return
@@ -3101,7 +3154,7 @@ proc renderLayoutOnly*(
     runtime.commitState()
     runtime.currentUi = nil
 
-proc render*(app: NestCrowApp, ui: var UI) =
+proc render*(app: NestOwlApp, ui: var UI) =
   if app.isNil:
     return
   let now = currentTicks()
@@ -3116,9 +3169,11 @@ proc render*(app: NestCrowApp, ui: var UI) =
     ui.requestRedrawAfter(0)
   if app.program.isNil:
     return
-  let fullRenderDue = app.lastFullRenderTicks == 0 or ui.hasPendingFullRenderInput() or
+  let fullRenderDue = app.lastFullRenderTicks == 0 or
+      ui.hasPendingFullRenderInput() or
     ui.needsFullRender() or
-    (app.runtime.nextFullRenderTicks > 0 and now >= app.runtime.nextFullRenderTicks)
+    (app.runtime.nextFullRenderTicks > 0 and now >=
+        app.runtime.nextFullRenderTicks)
   if not fullRenderDue and ui.hasRetainedFrame():
     if ui.hasPendingInput():
       discard ui.updateRetainedFrame()

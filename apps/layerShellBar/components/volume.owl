@@ -1,4 +1,4 @@
-import "../variables.nest"
+import "../variables.owl"
 
 fun volumeStatusCommand:
   string "if pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -qi yes; then printf 'muted'; else pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR==1 {gsub(/[^0-9]/,\"\",$2); if ($2 == \"\") print \"n/a\"; else printf \"%s%%\", $2; exit} END {if (NR == 0) printf \"n/a\"}'; fi"

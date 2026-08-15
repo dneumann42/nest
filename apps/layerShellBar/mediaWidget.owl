@@ -1,5 +1,5 @@
-import "variables.nest"
-import "components/media.nest"
+import "variables.owl"
+import "components/media.owl"
 
 component mediaWidget key:
   define:

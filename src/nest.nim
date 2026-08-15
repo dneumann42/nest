@@ -11,8 +11,8 @@ import nest/layerShellSdl3Driver
 export LayerShellConfig, LayerShellLayer, LayerShellEdge, LayerShellKeyboardMode
 export dockTop, dockBottom, dockLeft, dockRight
 
-import crow
-export crow
+import owl
+export owl
 
 when isMainModule:
   import nest/cli

@@ -1,7 +1,7 @@
 import std/[os, strutils, tables, unittest]
 
-import crow
-import nest/[crowdsl, input, perf, projectConfig, resources, ui]
+import owl
+import nest/[owldsl, input, perf, projectConfig, resources, ui]
 import nest/[coords, screen]
 
 proc widget(ui: UI, id: WidgetID): Widget =
@@ -10,12 +10,12 @@ proc widget(ui: UI, id: WidgetID): Widget =
       return box
   raise newException(ValueError, "missing widget: " & $id)
 
-proc render(runtime: NestCrowRuntime; ui: var UI; source: string) =
+proc render(runtime: NestOwlRuntime; ui: var UI; source: string) =
   runtime.render(ui, parse(source))
 
-suite "Crow GUI DSL":
+suite "Owl GUI DSL":
   test "state initializes GUI state once":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
 
     runtime.render(ui, """
@@ -35,7 +35,7 @@ events:
     check runtime.get("count").number == 2
 
   test "state persists a component model through ordinary set":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
 
     runtime.render(ui, """
@@ -55,7 +55,7 @@ events:
     check runtime.get("count").number == 2
 
   test "state initializes structured values":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
 
     runtime.render(ui, """
@@ -69,8 +69,8 @@ state "tree":
     check runtime.get("value").kind == Dictionary
     check runtime.get("value").entries["kind"].text == "leaf"
 
-  test "Crow functions retain dictionary arguments in dictionary fields":
-    let runtime = NestCrowRuntime.init()
+  test "Owl functions retain dictionary arguments in dictionary fields":
+    let runtime = NestOwlRuntime.init()
     let value = runtime.evaluator.exec(parse("""
 fun leaf name:
   {}:
@@ -89,35 +89,35 @@ dict-get (split "vertical" (leaf "one") (leaf "two")) "first"
     check value.entries["kind"].text == "leaf"
 
   test "imports are loaded once per runtime":
-    let dir = getTempDir() / "nest-crow-import-once-test"
+    let dir = getTempDir() / "nest-owl-import-once-test"
     createDir(dir)
-    writeFile(dir / "module.nest", """
+    writeFile(dir / "module.owl", """
 fun importedLabel:
   label (id "imported") "Imported":
     width = fit
     height = fit
 """)
 
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(300, 120)
     ui.loadFont("font", "", 18)
 
     let source = """
-import "module.nest"
+import "module.owl"
 importedLabel
 """
     let before = registeredSourceCount()
-    runtime.render(ui, parse(source, dir / "main.nest"))
+    runtime.render(ui, parse(source, dir / "main.owl"))
     let afterFirst = registeredSourceCount()
-    runtime.render(ui, parse(source, dir / "main.nest"))
+    runtime.render(ui, parse(source, dir / "main.owl"))
 
     check afterFirst == before + 2
     check registeredSourceCount() == afterFirst
 
-  test "perf overlay can be toggled from crow":
+  test "perf overlay can be toggled from owl":
     setPerfOverlay(false)
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(300, 120)
     ui.loadFont("font", "", 18)
@@ -133,7 +133,7 @@ events:
     check not perfOverlayEnabled()
 
   test "async shell output can refresh state after first render":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(300, 120)
     ui.loadFont("font", "", 18)
@@ -156,7 +156,7 @@ label (id "value") value:
     check runtime.get("value").text == "ready"
 
   test "zero interval async shell replaces stale command for same key":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(300, 120)
     ui.loadFont("font", "", 18)
@@ -195,7 +195,7 @@ label (id "value") value:
       removeFile(outputPath)
 
   test "shell launch survives runtime shell cleanup":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     let outputPath = getTempDir() / "nest-shell-launch-test"
     if fileExists(outputPath):
       removeFile(outputPath)
@@ -218,7 +218,7 @@ label (id "value") value:
       removeFile(outputPath)
 
   test "shellQuote and copyText expose shell-safe clipboard actions":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     let originalClipboard = clipboardRelays
     var copied = ""
     clipboardRelays = ClipboardRelays(
@@ -237,7 +237,7 @@ label (id "value") value:
     check copied == "debug output"
 
   test "start popover terminal commands use foot with script paths":
-    let source = readFile("apps/layerShellBar/startPopover/main.nest")
+    let source = readFile("apps/layerShellBar/startPopover/main.owl")
 
     check source.contains(
       "cmd = \"foot /home/dneumann/.config/sway/scripts/monitors.sh pick\""
@@ -250,8 +250,8 @@ label (id "value") value:
 
   test "volume dialog status does not reuse bar percentage command":
     let
-      dialogSource = readFile("apps/layerShellBar/volume/main.nest")
-      componentSource = readFile("apps/layerShellBar/components/volume.nest")
+      dialogSource = readFile("apps/layerShellBar/volume/main.owl")
+      componentSource = readFile("apps/layerShellBar/components/volume.owl")
 
     check dialogSource.contains("set status (shell (volumeDialogStatusCommand))")
     check not dialogSource.contains("set status (shell (volumeStatusCommand))")
@@ -261,8 +261,8 @@ label (id "value") value:
 
   test "notification mailbox uses uncapped indexed scroll list":
     let
-      dialogSource = readFile("apps/layerShellBar/notifications/main.nest")
-      componentSource = readFile("apps/layerShellBar/components/notifications.nest")
+      dialogSource = readFile("apps/layerShellBar/notifications/main.owl")
+      componentSource = readFile("apps/layerShellBar/components/notifications.owl")
 
     check dialogSource.contains("scrollY = true")
     check dialogSource.contains("rows = list")
@@ -276,7 +276,7 @@ label (id "value") value:
     check componentSource.contains("for item in rows:")
 
   test "network dialog exposes only actionable controls":
-    let dialogSource = readFile("apps/layerShellBar/network/main.nest")
+    let dialogSource = readFile("apps/layerShellBar/network/main.owl")
 
     check dialogSource.contains("Loading network status...")
     check dialogSource.contains("Loading Wi-Fi networks...")
@@ -290,10 +290,10 @@ label (id "value") value:
 
   test "start popover can request perf overlay toggle":
     let
-      menuSource = readFile("apps/layerShellBar/startPopover/main.nest")
-      barSource = readFile("apps/layerShellBar/main.nest")
+      menuSource = readFile("apps/layerShellBar/startPopover/main.owl")
+      barSource = readFile("apps/layerShellBar/main.owl")
 
-    check menuSource.contains("label = \"Performance Overlay\"")
+    check menuSource.contains("label = \"Perf Overlay\"")
     check menuSource.contains("cmd = \"toggle-perf-overlay\"")
     check menuSource.contains("closeDialog command.cmd")
     check barSource.contains("when (= lastAction \"toggle-perf-overlay\"):")
@@ -316,7 +316,7 @@ label (id "value") value:
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let runtime = NestCrowRuntime.init()
+      let runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(300, 120)
       ui.loadFont("font", "", 18)
@@ -345,6 +345,31 @@ panel (id "root"):
     finally:
       fontRelays = originalFontRelays
 
+  test "layout config supports owl insets and padding edge overrides":
+    let runtime = NestOwlRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+
+    runtime.renderLayoutOnly(ui, parse(
+        """
+row (id "root"):
+  width = (fixed 200)
+  height = (fixed 80)
+  padding = (insets 4 8 12 16)
+  paddingLeft = 20
+  gap = 5
+  label (id "label") "Inset":
+    width = (fixed 40)
+    height = (fixed 20)
+"""), 300, 120)
+
+    check not runtime.hasError
+    let label = ui.id("label")
+    check ui.widget(label).frame.x == 20
+    check ui.widget(label).frame.y == 8
+    check ui.widget(label).frame.width == 40
+    check ui.widget(label).frame.height == 20
+
   test "tabs command renders labels and clamps selected symbol":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -362,7 +387,7 @@ panel (id "root"):
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let runtime = NestCrowRuntime.init()
+      let runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(300, 120)
       ui.loadFont("font", "", 18)
@@ -404,7 +429,7 @@ tabs (id "tabs") labels selected:
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let app = NestCrowApp.init("apps/duck/main.nest")
+      let app = NestOwlApp.init("apps/duck/main.owl")
       var ui = UI.init()
       ui.initContext(800, 600)
       ui.loadFont("font", "", 18)
@@ -459,12 +484,13 @@ tabs (id "tabs") labels selected:
       check app.runtime.get("activeBuffer").number == 0
       check app.runtime.get("buffers").items.len >= 1
       check ui.widget(ui.id(ui.id("duck", "tabs"), "tab", 0)).frame.width > 0
-      check ui.widget(ui.id("duck:workspace", "pane", "pane-1", "editor")).frame.height > 0
+      check ui.widget(ui.id("duck:workspace", "pane", "pane-1",
+          "editor")).frame.height > 0
     finally:
       fontRelays = originalFontRelays
 
   test "counter example renders and button clicks mutate state":
-    let app = NestCrowApp.init("apps/counter/main.nest")
+    let app = NestOwlApp.init("apps/counter/main.owl")
     var ui = UI.init()
     ui.initContext(360, 180)
     ui.loadFont("font", "", 18)
@@ -489,7 +515,7 @@ tabs (id "tabs") labels selected:
     check app.runtime.get("count").number == 1
 
   test "reloading an app schedules an immediate redraw":
-    let app = NestCrowApp.init("apps/counter/main.nest")
+    let app = NestOwlApp.init("apps/counter/main.owl")
     var ui = UI.init()
     ui.initContext(360, 180)
     ui.loadFont("font", "", 18)
@@ -501,7 +527,7 @@ tabs (id "tabs") labels selected:
     check ui.redrawDelayMs() == 0
 
   test "apps poll for hot reloads while idle":
-    let app = NestCrowApp.init("apps/counter/main.nest")
+    let app = NestOwlApp.init("apps/counter/main.owl")
     var ui = UI.init()
     ui.initContext(360, 180)
     ui.loadFont("font", "", 18)
@@ -510,10 +536,10 @@ tabs (id "tabs") labels selected:
 
     check ui.redrawDelayMs() >= 0
 
-  test "app mouse hover updates retained frame without rerunning crow":
+  test "app mouse hover updates retained frame without rerunning owl":
     let
       originalInputRelays = inputRelays
-      path = getTempDir() / "nest-retained-hover-test.nest"
+      path = getTempDir() / "nest-retained-hover-test.owl"
     var ticks = 1000
     inputRelays.getTicks = proc(): int =
       ticks
@@ -530,7 +556,7 @@ button hoverID "Hover":
   height = fixed 32
 """)
     try:
-      let app = NestCrowApp.init(path)
+      let app = NestOwlApp.init(path)
       var ui = UI.init()
       ui.initContext(360, 180)
       ui.loadFont("font", "", 18)
@@ -599,7 +625,7 @@ button hoverID "Hover":
       drawText: countText,
     )
     try:
-      let app = NestCrowApp.init("apps/counter/main.nest")
+      let app = NestOwlApp.init("apps/counter/main.owl")
       var ui = UI.init()
       ui.initContext(360, 180)
       ui.loadFont("font", "", 18)
@@ -629,9 +655,9 @@ button hoverID "Hover":
           bg: Color): TextExtent =
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
-    var app: NestCrowApp = nil
+    var app: NestOwlApp = nil
     try:
-      app = NestCrowApp.init("apps/layerShellBar/main.nest")
+      app = NestOwlApp.init("apps/layerShellBar/main.owl")
       var ui = UI.init()
       let barHeight = loadProjectConfig("apps/layerShellBar").height
       ui.initContext(800, barHeight)
@@ -650,14 +676,14 @@ button hoverID "Hover":
         check ui.widget(ui.id("right")).frame.width > 0
         check ui.widget(ui.id("bar", "active-window")).frame.width > 0
         check ui.widget(ui.id("bar", "volume")).frame.width > 0
-        check ui.widget(ui.id("bar-media", "art")).frame.width == 28
+        check ui.widget(ui.id("bar-media", "art")).frame.width == 26
         check ui.widget(ui.id("bar", "cpu")).frame.width > 0
         check ui.widget(ui.id("bar", "memory")).frame.width > 0
         check ui.widget(ui.id("bar", "storage")).frame.width > 0
         check ui.widget(ui.id("bar", "notifications")).frame.width > 0
         check ui.widget(ui.id("bar", "network")).frame.width > 0
 
-      let mediaApp = NestCrowApp.init("apps/layerShellBar/media/main.nest")
+      let mediaApp = NestOwlApp.init("apps/layerShellBar/media/main.owl")
       var mediaUi = UI.init()
       mediaUi.initContext(760, 400)
       mediaUi.loadFont("font", "", 18)
@@ -676,17 +702,17 @@ button hoverID "Hover":
         check tableFrame.x >= detailsFrame.x
 
       for spec in [
-        ("apps/layerShellBar/startPopover/main.nest", 420, 420, ui.id("menu",
+        ("apps/layerShellBar/startPopover/main.owl", 420, 420, ui.id("menu",
             "panel")),
-        ("apps/layerShellBar/volume/main.nest", 260, 170, ui.id("volume",
+        ("apps/layerShellBar/volume/main.owl", 260, 170, ui.id("volume",
             "panel")),
-        ("apps/layerShellBar/notifications/main.nest", 420, 260, ui.id(
+        ("apps/layerShellBar/notifications/main.owl", 420, 260, ui.id(
             "notifications", "panel")),
-        ("apps/layerShellBar/network/main.nest", 620, 520, ui.id("network",
+        ("apps/layerShellBar/network/main.owl", 620, 520, ui.id("network",
             "panel")),
       ]:
         let (path, width, height, rootID) = spec
-        let dialogApp = NestCrowApp.init(path)
+        let dialogApp = NestOwlApp.init(path)
         var dialogUi = UI.init()
         dialogUi.initContext(width, height)
         dialogUi.loadFont("font", "", 18)
@@ -694,7 +720,7 @@ button hoverID "Hover":
         check dialogApp.runtime.lastError == ""
         if dialogApp.runtime.lastError == "":
           check dialogUi.widget(rootID).frame.width > 0
-          if path == "apps/layerShellBar/startPopover/main.nest":
+          if path == "apps/layerShellBar/startPopover/main.owl":
             let
               panelFrame = dialogUi.widget(rootID).frame
               leftFrame = dialogUi.widget(dialogUi.id("menu", "left")).frame
@@ -710,7 +736,7 @@ button hoverID "Hover":
       fontRelays = originalFontRelays
 
   test "dialog commands expose launch data and close value":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
     runtime.dialogData = "Alatar"
 
     let data = runtime.evaluator.exec(parse("dialogData\n"))
@@ -724,7 +750,7 @@ button hoverID "Hover":
     check runtime.dialogCloseValue == "applications"
 
   test "dialog result commands track completed child values":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
     runtime.dialogResults["start"] = "files"
 
     let result = runtime.evaluator.exec(parse("dialogResult \"start\"\n"))
@@ -736,7 +762,7 @@ button hoverID "Hover":
     check cleared.kind == Nothing
 
   test "menu result commands track completed child paths":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
     runtime.dialogResults["menu:main"] = "file.saveas"
 
     let result = runtime.evaluator.exec(parse("menuResult \"main\"\n"))
@@ -748,7 +774,7 @@ button hoverID "Hover":
     check cleared.kind == Nothing
 
   test "menu result can drive event branches":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(240, 80)
     ui.loadFont("font", "", 18)
@@ -776,7 +802,7 @@ events:
       if not callback.isNil:
         callback("/tmp/example.txt")
     try:
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(240, 80)
       ui.loadFont("font", "", 18)
@@ -812,7 +838,7 @@ events:
       if not callback.isNil:
         callback("/tmp/example-dir")
     try:
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(240, 80)
       ui.loadFont("font", "", 18)
@@ -848,7 +874,7 @@ events:
       if not callback.isNil:
         callback("/tmp/event-file.txt")
     try:
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(240, 80)
       ui.loadFont("font", "", 18)
@@ -892,7 +918,7 @@ events:
       if not callback.isNil:
         callback("/tmp/event-dir")
     try:
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(240, 80)
       ui.loadFont("font", "", 18)
@@ -928,8 +954,8 @@ events:
     finally:
       pickDirectoryDialog = originalPickDirectoryDialog
 
-  test "editor text can be read and replaced from crow":
-    var runtime = NestCrowRuntime.init()
+  test "editor text can be read and replaced from owl":
+    var runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(240, 120)
     ui.loadFont("font", "", 18)
@@ -963,7 +989,7 @@ panel (id "root"):
     check runtime.get("cursorBefore").number == 3
     check runtime.get("cursorAfter").number == 3
 
-  test "crow menubar renders top menus and arbitrary menu item bodies":
+  test "owl menubar renders top menus and arbitrary menu item bodies":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -980,7 +1006,7 @@ panel (id "root"):
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let runtime = NestCrowRuntime.init()
+      let runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(360, 160)
       ui.loadFont("font", "", 18)
@@ -1046,7 +1072,7 @@ column (id "root"):
     width = fill
     height = fixed 24
 """)
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(420, 180)
       ui.loadFont("font", "", 18)
@@ -1070,7 +1096,7 @@ column (id "root"):
     finally:
       fontRelays = originalFontRelays
 
-  test "crow menubar emits clicked item full path":
+  test "owl menubar emits clicked item full path":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1087,7 +1113,7 @@ column (id "root"):
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(360, 160)
       ui.loadFont("font", "", 18)
@@ -1117,7 +1143,7 @@ menuBar menuID:
       fontRelays = originalFontRelays
 
   test "menu popovers consume clicks before widgets beneath them":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(360, 160)
     ui.loadFont("font", "", 18)
@@ -1180,11 +1206,11 @@ column (id "root"):
       if not callback.isNil:
         callback(duckFile)
     try:
-      var runtime = NestCrowRuntime.init()
+      var runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(360, 180)
       ui.loadFont("font", "", 18)
-      let source = parse(readFile("apps/duck/main.nest"), "apps/duck/main.nest")
+      let source = parse(readFile("apps/duck/main.owl"), "apps/duck/main.owl")
 
       runtime.openMenus["duck:menubar"] = "file"
       runtime.render(ui, source)
@@ -1214,7 +1240,7 @@ column (id "root"):
       fontRelays = originalFontRelays
 
   test "menu popover item pattern closes with full item path":
-    let runtime = NestCrowRuntime.init()
+    let runtime = NestOwlRuntime.init()
     let itemID = UI.init().id("menu", "item", "0")
     var ui = UI.init()
     ui.initContext(260, 80)
@@ -1247,8 +1273,8 @@ card (id "menu" "panel"):
     check runtime.requestQuit
     check runtime.dialogCloseValue == "file.saveas"
 
-  test "crow events can test pressed keys":
-    let runtime = NestCrowRuntime.init()
+  test "owl events can test pressed keys":
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(120, 80)
     ui.loadFont("font", "", 18)
@@ -1264,13 +1290,13 @@ events:
     check runtime.dialogCloseValue == "closed"
 
   test "openDialog reports missing child projects":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
 
     expect EvaluatorError:
       discard runtime.evaluator.exec(parse("openDialog \"missing\" \"./does-not-exist\"\n"))
 
-  test "crow render errors do not add inline error dialogs":
-    let runtime = NestCrowRuntime.init()
+  test "owl render errors do not add inline error dialogs":
+    let runtime = NestOwlRuntime.init()
     var ui = UI.init()
     ui.initContext(320, 36)
     ui.loadFont("font", "", 18)
@@ -1289,20 +1315,20 @@ panel (id "root"):
       discard ui.widget(errorDialogID)
 
   test "diagnostic locations parse emacs-compatible report lines":
-    let primary = diagnosticLocation("/tmp/app/main.nest:12:7: error: missing field")
+    let primary = diagnosticLocation("/tmp/app/main.owl:12:7: error: missing field")
     check primary.ok
-    check primary.path == "/tmp/app/main.nest"
+    check primary.path == "/tmp/app/main.owl"
     check primary.line == 12
     check primary.column == 7
 
-    let frame = diagnosticLocation("  at /tmp/app/main.nest:20:3 in render")
+    let frame = diagnosticLocation("  at /tmp/app/main.owl:20:3 in render")
     check frame.ok
-    check frame.path == "/tmp/app/main.nest"
+    check frame.path == "/tmp/app/main.owl"
     check frame.line == 20
     check frame.column == 3
 
   test "date intrinsics expose minimal calendar math":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
 
     check runtime.evaluator.exec(parse("date 2026 7 18\n")).text == "2026-07-18"
     check runtime.evaluator.exec(parse("date-year \"2026-07-18\"\n")).number == 2026
@@ -1314,7 +1340,7 @@ panel (id "root"):
     check runtime.evaluator.exec(parse("date-add-months \"2026-03-31\" -1\n")).text == "2026-02-28"
 
   test "sway workspace intrinsics parse state and quote activation commands":
-    var runtime = NestCrowRuntime.init()
+    var runtime = NestOwlRuntime.init()
 
     let parsed = runtime.evaluator.exec(parse("""
 swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"urgent\":false},{\"name\":\"dev's\",\"num\":2,\"focused\":false,\"visible\":false,\"urgent\":true}]"
@@ -1329,7 +1355,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
     check runtime.evaluator.exec(parse("swayWorkspaceCommand \"dev's\"\n")).text ==
       "swaymsg workspace 'dev'\\''s'"
 
-  test "crow calendar component renders and selects previous month":
+  test "owl calendar component renders and selects previous month":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1346,7 +1372,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let runtime = NestCrowRuntime.init()
+      let runtime = NestOwlRuntime.init()
       var ui = UI.init()
       ui.initContext(320, 320)
       ui.loadFont("font", "", 18)
@@ -1355,7 +1381,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
           """
 state "root":
   selectedDate = "2026-07-18"
-import "apps/layerShellBar/components/calendar.nest"
+import "apps/layerShellBar/components/calendar.owl"
 dateSelector "cal" selectedDate
 """), 320, 320)
 
@@ -1380,7 +1406,7 @@ dateSelector "cal" selectedDate
       runtime.render(eventUi, parse("""
 state "root":
   selectedDate = "2026-07-18"
-import "apps/layerShellBar/components/calendar.nest"
+import "apps/layerShellBar/components/calendar.owl"
 dateSelector "cal" selectedDate
 """))
 
@@ -1388,7 +1414,7 @@ dateSelector "cal" selectedDate
     finally:
       fontRelays = originalFontRelays
 
-  test "crow calendar component signals selected day clicks":
+  test "owl calendar component signals selected day clicks":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1405,7 +1431,7 @@ dateSelector "cal" selectedDate
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let runtime = NestCrowRuntime.init()
+      let runtime = NestOwlRuntime.init()
       let dayID = UI.init().id("cal", "day", "18")
       var ui = UI.init()
       ui.initContext(320, 320)
@@ -1424,7 +1450,7 @@ dateSelector "cal" selectedDate
 state "root":
   selectedDate = "2026-07-18"
   clickedDate = nothing
-import "apps/layerShellBar/components/calendar.nest"
+import "apps/layerShellBar/components/calendar.owl"
 dateSelectorWithSignal "cal" selectedDate clickedDate
 """))
 
@@ -1433,7 +1459,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
     finally:
       fontRelays = originalFontRelays
 
-  test "nim can render a crow-defined component":
+  test "nim can render an owl-defined component":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1450,7 +1476,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
       TextExtent(w: max(text.len, 1) * 9, h: 18),
     )
     try:
-      let runtime = NestCrowRuntime.init()
+      let runtime = NestOwlRuntime.init()
       runtime.evaluator.env.define("selectedDate", text("2026-07-18"))
       var ui = UI.init()
       ui.initContext(320, 320)
@@ -1459,7 +1485,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
       ui.beginLayout(320, 320)
       runtime.renderComponent(
         ui,
-        "apps/layerShellBar/components/calendar.nest",
+        "apps/layerShellBar/components/calendar.owl",
         "dateSelector",
         @[stringLiteral("nim-cal"), symbol("selectedDate")],
       )

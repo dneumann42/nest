@@ -124,7 +124,7 @@ fun aboutDialog:
       label (id "duck" "about" "body") "Duck Editor v0.0.0":
         width = fill
         height = fit
-      label (id "duck" "about" "features") "Text editor written in crow using nest":
+      label (id "duck" "about" "features") "Text editor written in owl using nest":
         width = fill
         height = fit
       actionRow (id "duck" "about" "actions"):

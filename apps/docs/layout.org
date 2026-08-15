@@ -72,6 +72,18 @@ echo body.frame
 echo status.frame
 #+end_src
 
+Padding can be set for all edges with =padding= or per edge with
+=paddingLeft=, =paddingTop=, =paddingRight=, and =paddingBottom=. In Owl DSL,
+=padding = (insets left top right bottom)= sets all four edges in one expression,
+and edge bindings can override individual sides:
+
+#+begin_src nest
+row (id "body"):
+  gap = 8
+  padding = (insets 16 8 16 12)
+  paddingLeft = 24
+#+end_src
+
 Result:
 
 #+begin_example

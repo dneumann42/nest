@@ -87,6 +87,28 @@ suite "constraint layout":
     checkFrame first, 8, 8, 120, 20
     checkFrame second, 140, 8, 90, 20
 
+  test "row supports independent padding edges":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let first = ui.box("first", width = fixed(50), height = fixed(20))
+    let second = ui.box("second", width = fixed(60), height = fixed(30))
+
+    ui.root window
+    ui.row(
+      window,
+      [first, second],
+      gap = 10,
+      paddingLeft = 20,
+      paddingTop = 5,
+      paddingRight = 30,
+      paddingBottom = 15,
+    )
+    ui.resize(300, 100)
+    ui.solve()
+
+    checkFrame first, 20, 5, 50, 20
+    checkFrame second, 80, 5, 60, 30
+
   test "fit height row with flexible children survives invalid resize dimensions":
     let ui = newLayout()
     let window = ui.box("window")
@@ -95,7 +117,8 @@ suite "constraint layout":
     let button = ui.box("button", width = fixed(40), height = fixed(24))
 
     ui.root window
-    ui.column(window, [rowPanel], alignItems = AlignCenter, justifyContent = JustifyCenter)
+    ui.column(window, [rowPanel], alignItems = AlignCenter,
+        justifyContent = JustifyCenter)
     ui.row(rowPanel, [flexible, button])
     ui.resize(-1, -1)
     ui.solve()

@@ -1,5 +1,5 @@
-import "../variables.nest"
-import "../components/notifications.nest"
+import "../variables.owl"
+import "../components/notifications.owl"
 
 state "root":
   closeID = (id "notifications" "close")

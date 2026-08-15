@@ -1,4 +1,4 @@
-import "variables.nest"
+import "variables.owl"
 
 state "root":
   startID = (id "start")
@@ -24,12 +24,12 @@ fun defaultConfig:
 state "root":
   cfg = defaultConfig
 
-import "components/workspaces.nest"
-import "components/activeWindow.nest"
-import "components/volume.nest"
-import "components/metrics.nest"
-import "components/notifications.nest"
-import "mediaWidget.nest"
+import "components/workspaces.owl"
+import "components/activeWindow.owl"
+import "components/volume.owl"
+import "components/metrics.owl"
+import "components/notifications.owl"
+import "mediaWidget.owl"
 
 events:
   when (external "sigusr1"):

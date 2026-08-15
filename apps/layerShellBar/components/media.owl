@@ -1,4 +1,4 @@
-import "../variables.nest"
+import "../variables.owl"
 
 fun mediaTool:
   "scripts/nest-media-cache.sh"

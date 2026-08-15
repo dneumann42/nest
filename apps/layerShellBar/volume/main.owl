@@ -1,6 +1,6 @@
-import "../variables.nest"
-import "../components/volume.nest"
-import "../../../lib/components/radioGroup.nest"
+import "../variables.owl"
+import "../components/volume.owl"
+import "../../../lib/components/radioGroup.owl"
 
 state "root":
   muteID = (id "volume" "mute")

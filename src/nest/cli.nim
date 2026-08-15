@@ -1,6 +1,6 @@
 import std/[cmdline, os, strutils]
 
-import nest/[crowdsl, errorDialogs, generator, perf, runner]
+import nest/[owldsl, errorDialogs, generator, perf, runner]
 
 proc usage*(): string =
   """Usage:
@@ -11,8 +11,8 @@ proc usage*(): string =
   nest generate [DIR]
 
 Project files:
-  DIR/project.nest  optional project config
-  DIR/main.nest     default UI entrypoint
+  DIR/project.owl  optional project config
+  DIR/main.owl     default UI entrypoint
 """
 
 proc parseRunPerfOptions(args: seq[string]; start: int): PerfOptions =
@@ -77,22 +77,22 @@ proc main*() =
       echo value
   of "error-dialog":
     if args.len >= 2 and args[1] != "example":
-      runCrowErrorDialog(args[1])
+      runOwlErrorDialog(args[1])
     else:
-      runCrowErrorDialog(ErrorDetails(
+      runOwlErrorDialog(ErrorDetails(
         message: "missing field: start-label",
-        primary: ErrorLocation(path: "main.nest", line: 12, column: 5,
+        primary: ErrorLocation(path: "main.owl", line: 12, column: 5,
           sourceLine: "label (id \"start-label\")"),
         frames: @[
-          ErrorLocation(path: "main.nest", line: 12, column: 5,
+          ErrorLocation(path: "main.owl", line: 12, column: 5,
             label: "renderStartMenu"),
-          ErrorLocation(path: "main.nest", line: 4, column: 1, label: "main"),
+          ErrorLocation(path: "main.owl", line: 4, column: 1, label: "main"),
         ],
       ))
   of "error-dialog-json":
     if args.len < 2:
       quit(usage(), 1)
-    runCrowErrorDialog(errorDetailsFromJson(args[1]))
+    runOwlErrorDialog(errorDetailsFromJson(args[1]))
   of "generate", "gen":
     let dir =
       if args.len >= 2:

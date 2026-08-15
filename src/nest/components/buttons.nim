@@ -1,4 +1,4 @@
-import ../[resources, widgets2]
+import ../[layouts, resources, widgets2]
 import component
 import nest/[coords, screen]
 
@@ -14,23 +14,33 @@ type Button* = ref object of Interactive
   label: string
   textScroll: bool
   fontName: string
-  padding: float64
+  padding: EdgeInsets
 
 proc new*(T: typedesc[Button], label = "", textScroll = false,
-    fontName = "font", padding = -1.0): T =
+    fontName = "font", padding = insets(-1.0)): T =
   T(label: label, textScroll: textScroll, fontName: fontName, padding: padding)
 
-proc horizontalPadding(self: Button): float64 =
-  if self.padding < 0: ButtonPaddingX.toFloat else: self.padding
+proc new*(T: typedesc[Button], label: string, textScroll: bool,
+    fontName: string, padding: float64): T =
+  T.new(label, textScroll, fontName, insets(padding))
 
-proc verticalPadding(self: Button): float64 =
-  if self.padding < 0: ButtonPaddingY.toFloat else: self.padding
+proc leftPadding(self: Button): float64 =
+  if self.padding.left < 0: ButtonPaddingX.toFloat else: self.padding.left
+
+proc rightPadding(self: Button): float64 =
+  if self.padding.right < 0: ButtonPaddingX.toFloat else: self.padding.right
+
+proc topPadding(self: Button): float64 =
+  if self.padding.top < 0: ButtonPaddingY.toFloat else: self.padding.top
+
+proc bottomPadding(self: Button): float64 =
+  if self.padding.bottom < 0: ButtonPaddingY.toFloat else: self.padding.bottom
 
 method measure*(self: Button, resources: Resources): IntrinsicSize =
   let measurement = resources.measureText(self.fontName, self.label)
   intrinsicSize(
-    measurement.width.toFloat + self.horizontalPadding * 2.0,
-    max(measurement.height.toFloat + self.verticalPadding * 2.0,
+    measurement.width.toFloat + self.leftPadding + self.rightPadding,
+    max(measurement.height.toFloat + self.topPadding + self.bottomPadding,
       ButtonMinHeight.toFloat),
   )
 
@@ -84,11 +94,12 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
   let
     (font, _) = ctx.resources.get(self.fontName)
     textExtent = ctx.resources.measureText(self.fontName, self.label)
-    paddingX = self.horizontalPadding.toInt
-    paddingY = self.verticalPadding.toInt
-    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, paddingX)
-    textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, paddingY)
-    textWidth = max(f.width.toInt - paddingX * 2, 0)
+    paddingLeft = self.leftPadding.toInt
+    paddingTop = self.topPadding.toInt
+    paddingRight = self.rightPadding.toInt
+    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, paddingLeft)
+    textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, paddingTop)
+    textWidth = max(f.width.toInt - paddingLeft - paddingRight, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
     ctx.requestRedrawAfter(33)
     let
@@ -96,7 +107,8 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       cycle = textExtent.width + gap
       offset = (ctx.ticks div 24) mod cycle
     saveState()
-    setClipRect(ctx.clippedRect(rect(textX, f.y.toInt, textWidth, f.height.toInt)))
+    setClipRect(ctx.clippedRect(rect(textX, f.y.toInt, textWidth,
+        f.height.toInt)))
     discard drawText(
       Font(font),
       textX - offset,
@@ -116,5 +128,6 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     restoreState()
   else:
     discard drawText(
-      Font(font), textX, textY, self.label, ctx.palette.textColor, color(0, 0, 0, 0)
+      Font(font), textX, textY, self.label, ctx.palette.textColor, color(0, 0,
+          0, 0)
     )

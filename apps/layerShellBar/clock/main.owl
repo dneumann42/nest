@@ -2,8 +2,8 @@ state "root":
   selectedDate = (today-date)
   clickedDate = nothing
 
-import "../variables.nest"
-import "../components/calendar.nest"
+import "../variables.owl"
+import "../components/calendar.owl"
 
 events:
   when (keyPressed "escape"):
