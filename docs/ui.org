@@ -5,10 +5,11 @@ state of their own; the application owns its state and describes what the window
 should contain right now. Positions and sizes come from a constraint solver, so
 a declaration states relationships, not pixels.
 
-Every portion of an interface is declared with the ~widget~ macro, and the state
-behind it follows Model / Msg / update / view: one state type, one message type,
-one procedure that applies a message to the state, and widgets that declare the
-window from the state. Every example below follows that.
+Every portion of an interface is a ~widget~: a named routine that declares its
+children, owns the state it needs, and emits its own events. A parent either
+handles a child's event or emits one of its own in its place, so an interface
+grows as a tree of small widgets rather than one state type and one event
+enumeration.
 
 The library API is documented in the generated reference (~nimble docs~). Layout
 constraints are covered in [[file:layout.org][layout.org]]. Every built-in
@@ -17,108 +18,69 @@ widget is shown in the gallery application, ~apps/gallery/gallery.nim~
 
 * A Complete Application
 
-A counter. Two buttons, a label, one integer of state.
+A counter: its own state type, its own event type, one widget, one line to run
+it.
 
 #+begin_src nim
 import nest
 
 type
-  Model = object
+  Counter = object
     count: int
 
-  Msg = enum
-    Increment
-    Decrement
+  CounterEvent = enum
+    Incremented
+    Decremented
 
-proc update(model: var Model, msg: Msg) =
-  case msg
-  of Increment: inc model.count
-  of Decrement: dec model.count
+proc update(model: var Counter, event: CounterEvent) =
+  case event
+  of Incremented: inc model.count
+  of Decremented: dec model.count
 
-widget counter(model: Model, msgs: var seq[Msg]):
+widget counter(model: Counter) emits CounterEvent:
   ui.panel(ui.id("root"), cfg(padding = 16, gap = 12, alignItems = AlignCenter,
       justifyContent = JustifyCenter)):
     ui.label(ui.id("title"), "Counter", width = fit(), height = fit())
     ui.row(ui.id("controls"), cfg(width = fit(), height = fit(), gap = 8,
         alignItems = AlignCenter)):
       if ui.button(ui.id("dec"), "-", width = fixed(32), height = fit()):
-        msgs.add Decrement
+        emit Decremented
       ui.label(ui.id("count"), $model.count, width = fixed(80), height = fit())
       if ui.button(ui.id("inc"), "+", width = fixed(32), height = fit()):
-        msgs.add Increment
+        emit Incremented
 
 when isMainModule:
-  var
-    ui = UI.init()
-    model = Model()
-    msgs: seq[Msg]
-
-  let appCfg = AppConfig.init(width = 320, height = 160, title = "Counter")
-
-  application appCfg, ui:
-    ui.layout:
-      ui.events:
-        msgs.setLen(0)
-
-      ui.counter(model, msgs)
-
-      ui.events:
-        for msg in msgs:
-          model.update(msg)
-        if msgs.len > 0:
-          ui.markAllDirty()
+  runApp(AppConfig.init(width = 320, height = 160, title = "Counter"),
+      Counter(), update, counter)
 #+end_src
 
-Four pieces appear in every application:
-
-- ~UI.init()~ creates the widget tree and its solver.
-- ~AppConfig.init(...)~ describes the window.
-- ~application cfg, ui: blk~ opens the window and runs ~blk~ once per frame. It
-  injects ~running~; setting it to false leaves the loop.
-- ~ui.layout: blk~ runs one frame of the UI.
+~runApp~ opens the window and runs the frame loop: it holds the model, calls the
+root widget once per frame, and applies the events it emitted with ~update~.
 
 * Widgets
 
 ~widget name(params): body~ declares a portion of an interface. It expands to a
-procedure that takes the ~UI~ as its first parameter and runs the body inside
+routine that takes the ~UI~ as its first parameter and runs the body inside
 ~ui.scope("name")~.
 
 #+begin_src nim
 import nest
 
-type Model = object
+type Counter = object
   count: int
 
-widget counterLabel(model: Model):
+widget counterLabel(model: Counter):
   ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
 
 # The same declaration written by hand:
-proc counterLabelByHand(ui: var UI, model: Model) =
+proc counterLabelByHand(ui: var UI, model: Counter) =
   ui.scope("counterLabelByHand"):
     ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
 #+end_src
 
-The two declarations above are equivalent. This is the point of the macro's
-shape: the body is ordinary Nim, every call keeps its ~ui.~ prefix, and turning
-a widget into a procedure or back is a change to the header only. No type is
-declared, and nothing in the body has to move.
-
-Call a widget with method-call syntax, like any other:
-
-#+begin_src nim
-import nest
-
-type Model = object
-  count: int
-
-widget counterLabel(model: Model):
-  ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
-
-widget panelWithCount(model: Model):
-  ui.panel(ui.id("root"), cfg(padding = 8, gap = 6)):
-    ui.label(ui.id("title"), "Count", width = fit(), height = fit())
-    ui.counterLabel(model)
-#+end_src
+The two declarations above are equivalent. The body is ordinary Nim, every call
+keeps its ~ui.~ prefix, and turning a widget into a procedure or back is a change
+to the header only. No type is declared, and nothing in the body has to move.
 
 ** Ids Are Scoped By The Widget
 
@@ -194,64 +156,6 @@ widget details():
     ui.field("Version", "0.0.0", labelWidth = fixed(120))
 #+end_src
 
-A ~var~ parameter is how a widget writes back, and is the right way to pass a
-message queue.
-
-#+begin_src nim
-import nest
-
-type Msg = enum
-  Retry
-
-widget errorBanner(text: string, msgs: var seq[Msg]):
-  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
-    ui.coloredLabel(ui.id("text"), text, ui.palette.rose, width = fill(),
-        height = fit())
-    if ui.button(ui.id("retry"), "Retry", width = fit(), height = fit()):
-      msgs.add Retry
-#+end_src
-
-** Reporting Events
-
-A widget reports an event by declaring a return type with ~->~. The result is
-discardable, as it is for the built-in widgets.
-
-#+begin_src nim
-import nest
-
-widget labelledButton(label, text: string) -> bool:
-  ui.row(ui.id("row"), cfg(width = fit(), height = fit(), gap = 6,
-      alignItems = AlignCenter)):
-    ui.label(ui.id("label"), label, width = fit(), height = fit())
-    result = ui.button(ui.id("button"), text, width = fit(), height = fit())
-
-type Msg = enum
-  Deleted
-
-widget toolbar(msgs: var seq[Msg]):
-  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
-    if ui.labelledButton("Danger", "Delete"):
-      msgs.add Deleted
-    # The result can also be ignored.
-    ui.labelledButton("Nothing", "Ignore")
-#+end_src
-
-A widget that reports several things returns a tuple, or takes ~var~ parameters.
-
-#+begin_src nim
-import nest
-
-widget pager(page, pages: int) -> tuple[back, forward: bool]:
-  ui.row(ui.id("row"), cfg(width = fit(), height = fit(), gap = 6,
-      alignItems = AlignCenter)):
-    result.back = ui.button(ui.id("back"), "<", width = fixed(28),
-        height = fit())
-    ui.label(ui.id("position"), $page & " / " & $pages, width = fixed(70),
-        height = fit())
-    result.forward = ui.button(ui.id("forward"), ">", width = fixed(28),
-        height = fit())
-#+end_src
-
 ** Exporting
 
 Mark the name to export a widget from its module.
@@ -286,8 +190,8 @@ proc summary(tasks: seq[Task]): string =
       inc done
   $done & " of " & $tasks.len & " done"
 
-# Declares, but deliberately shares the caller's scope, so the ids it
-# builds belong to whichever widget called it.
+# Declares, but deliberately shares the caller's scope, so the ids it builds
+# belong to whichever widget called it.
 proc rowLabel(ui: var UI, key, text: string) =
   ui.label(ui.id(key, "label"), text, width = fill(), height = fit())
 
@@ -295,7 +199,7 @@ widget taskList(tasks: seq[Task]):
   ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
     ui.label(ui.id("summary"), tasks.summary, width = fill(), height = fit())
     for task in tasks:
-      ui.rowLabel($task.title, task.title)
+      ui.rowLabel(task.title, task.title)
 #+end_src
 
 * The Frame
@@ -322,12 +226,20 @@ widget passProbe(log: var seq[string]):
   ui.label(ui.id("hello"), "hello", width = fit(), height = fit())
 #+end_src
 
-Two rules follow from the double pass:
+Three rules follow from the double pass:
 
 1. State changes belong in the event pass. Code that runs in both passes would
    apply a change twice.
 2. Declarations must not depend on anything the layout pass changes, because the
    event pass has already run with the previous values.
+3. Events are emitted during the event pass. Consume them where they are
+   returned, or accumulate them with ~add~; assigning them to a variable that
+   outlives the call loses them, because the layout pass runs the widget again
+   and returns nothing.
+
+A local whose name matches one of the ~ui.~ routines shadows it: a variable
+called ~events~ breaks ~ui.events~, and a loop variable called ~row~ breaks
+~ui.row~. Name an event queue ~emitted~, and a loop index ~rowIndex~.
 
 ~ui.events:~ marks a block as event-pass only.
 
@@ -342,164 +254,9 @@ widget quitHint(quitRequested: var bool):
   ui.label(ui.id("hint"), "Press Escape to quit", width = fit(), height = fit())
 #+end_src
 
-* Model, Msg, Update, View
-
-The architecture has four parts.
-
-- ~Model~: all application state.
-- ~Msg~: every event the interface can produce, as data.
-- ~update~: the only code that writes to the model.
-- widgets: declare the window from the model and collect messages.
-
-The wiring is the same in every application:
-
-1. Clear the message queue at the start of the event pass.
-2. Declare the interface. During the event pass it collects messages; during the
-   layout pass it builds widgets.
-3. Fold the messages into the model at the end of the event pass.
-
-Because step 3 runs before the layout pass, the widgets built in the same frame
-already show the new state.
-
-#+begin_src nim
-import nest
-
-type
-  Model = object
-    count: int
-
-  Msg = enum
-    Increment
-
-proc update(model: var Model, msg: Msg) =
-  case msg
-  of Increment: inc model.count
-
-widget root(model: Model, msgs: var seq[Msg]):
-  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
-    ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
-    if ui.button(ui.id("inc"), "+", width = fit(), height = fit()):
-      msgs.add Increment
-
-proc runFrame(ui: var UI, model: var Model, msgs: var seq[Msg]) =
-  ui.layout:
-    ui.events:
-      msgs.setLen(0)
-
-    ui.root(model, msgs)
-
-    ui.events:
-      for msg in msgs:
-        model.update(msg)
-      if msgs.len > 0:
-        ui.markAllDirty()
-#+end_src
-
-A widget takes the model as a non-~var~ parameter. That is the point of the
-split: a widget cannot change state, so the model has exactly one writer.
-
-** Messages With Payloads
-
-An enum is enough while messages carry no data. Use an object variant when they
-do.
-
-#+begin_src nim
-import nest
-
-type
-  Field = enum
-    FieldName
-    FieldEmail
-
-  MsgKind = enum
-    SetField
-    SetVolume
-    Submit
-    Clear
-
-  Msg = object
-    case kind: MsgKind
-    of SetField:
-      field: Field
-      text: string
-    of SetVolume:
-      value: float64
-    of Submit, Clear:
-      discard
-
-  Model = object
-    name: string
-    email: string
-    volume: float64
-    submitted: bool
-
-proc update(model: var Model, msg: Msg) =
-  case msg.kind
-  of SetField:
-    case msg.field
-    of FieldName: model.name = msg.text
-    of FieldEmail: model.email = msg.text
-  of SetVolume:
-    model.volume = msg.value
-  of Submit:
-    model.submitted = true
-  of Clear:
-    model = Model()
-
-widget form(model: Model, msgs: var seq[Msg]):
-  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
-    let volume = ui.slider(ui.id("volume"), model.volume, 0.0, 1.0,
-        width = fill(), height = fixed(24))
-    if volume.active:
-      msgs.add Msg(kind: SetVolume, value: volume.value)
-
-    ui.row(ui.id("actions"), cfg(width = fit(), height = fit(), gap = 8)):
-      if ui.button(ui.id("submit"), "Submit", width = fit(), height = fit()):
-        msgs.add Msg(kind: Submit)
-      if ui.button(ui.id("clear"), "Clear", width = fit(), height = fit()):
-        msgs.add Msg(kind: Clear)
-#+end_src
-
-** One Message Per Event
-
-Messages name events, not setters. ~Submit~ and ~Clear~ describe what happened;
-what they do to the model is ~update~'s decision. A second button that clears
-the form adds no new code to ~update~.
-
-#+begin_src nim
-import nest
-
-type
-  Msg = enum
-    Reset
-
-  Model = object
-    count: int
-    history: seq[int]
-
-proc update(model: var Model, msg: Msg) =
-  case msg
-  of Reset:
-    model.history.add model.count
-    model.count = 0
-
-widget resetBar(model: Model, msgs: var seq[Msg]):
-  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
-    if ui.button(ui.id("reset"), "Reset", width = fit(), height = fit()):
-      msgs.add Reset
-    if ui.button(ui.id("again"), "Start over", width = fit(), height = fit()):
-      msgs.add Reset
-    ui.label(ui.id("runs"), "runs: " & $model.history.len, width = fit(),
-        height = fit())
-#+end_src
-
-* Events
-
 Interaction is recorded when a frame updates its widgets, and observed on the
-next frame's event pass. A press therefore becomes a click one frame later;
-Nest requests that frame itself, so no polling is needed.
-
-The counter, frame by frame, with the pointer over the ~+~ button:
+next frame's event pass. A press therefore becomes a click one frame later; Nest
+requests that frame itself, so no polling is needed.
 
 #+begin_example
 frame 1 no input   : count=0 drawn=[-,0,+]
@@ -508,240 +265,722 @@ frame 3 held       : count=1 drawn=[-,1,+]
 frame 4 release    : count=1 drawn=[-,1,+]
 #+end_example
 
-Frame 2 records the press. Frame 3 observes the click, applies ~Increment~, and
-draws ~1~ in that same frame.
+Frame 2 records the press. Frame 3 observes the click, applies ~Incremented~,
+and draws ~1~ in that same frame.
 
-** Event Queries
+* Events Between Widgets
 
-| Query                    | Reports                                           |
-|--------------------------+---------------------------------------------------|
-| ~ui.clicked(id)~         | widget is being pressed                           |
-| ~ui.rightClicked(id)~    | right button pressed over the widget this frame   |
-| ~ui.middleClicked(id)~   | middle button pressed over the widget this frame  |
-| ~ui.middleDragDelta(id)~ | middle-button drag state and horizontal distance  |
-| ~ui.submitted(id)~       | widget was submitted, as by the Enter key         |
-| ~ui.focused(id)~         | widget holds keyboard focus                       |
-| ~ui.sliderValue(id)~     | value under the pointer while a slider is dragged |
-| ~ui.keyPressed(name)~    | named key was pressed this frame                  |
-| ~ui.active(id)~          | widget is held down                               |
-
-Widget helpers wrap the common cases. ~ui.button~ returns ~ui.clicked~ for its
-own id, so both spellings work.
-
-#+begin_src nim
-import nest
-
-type Msg = enum
-  Save
-
-widget saveBar(msgs: var seq[Msg]):
-  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
-    # As a return value.
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
-      msgs.add Save
-
-    # As a query on the same id.
-    ui.button(ui.id("saveAlso"), "Save", width = fit(), height = fit())
-    if ui.clicked(ui.id("saveAlso")):
-      msgs.add Save
-#+end_src
-
-** Widgets That Report State
-
-Some widgets draw a value and report what the user did to it. The model stays
-the source of truth.
+A widget declares its own event type with ~emits~ and reports one with ~emit~.
+The events it emitted are its return value, so its caller sees exactly what
+happened inside it and nothing else.
 
 #+begin_src nim
 import nest
 
 type
-  MsgKind = enum
-    ToggleSubscribed
-    SetVolume
-    SelectStyle
+  ToolbarEvent = enum
+    NewPressed
+    OpenPressed
+    SavePressed
 
-  Msg = object
-    case kind: MsgKind
-    of SetVolume:
-      value: float64
-    of SelectStyle:
-      index: int
-    of ToggleSubscribed:
+widget toolbar(modified: bool) emits ToolbarEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
+      padding = 6)):
+    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+      emit NewPressed
+    if ui.button(ui.id("open"), "Open", width = fit(), height = fit()):
+      emit OpenPressed
+    if ui.button(ui.id("save"), "Save" & (if modified: " *" else: ""),
+        width = fit(), height = fit()):
+      emit SavePressed
+#+end_src
+
+** Handling A Child's Events
+
+A parent reads the events where the call returns them.
+
+#+begin_src nim
+import nest
+
+type
+  ToolbarEvent = enum
+    NewPressed
+    SavePressed
+
+  Document = object
+    text: string
+    modified: bool
+
+widget toolbar(modified: bool) emits ToolbarEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6)):
+    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+      emit NewPressed
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      emit SavePressed
+
+widget editorPane(model: var Document):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    for event in ui.toolbar(model.modified):
+      case event
+      of NewPressed:
+        model.text = ""
+        model.modified = false
+      of SavePressed:
+        model.modified = false
+    ui.label(ui.id("text"), model.text, width = fill(), height = fill())
+#+end_src
+
+** Raising An Event Further Up
+
+A parent that cannot answer a child's event emits one of its own in its place.
+The child's type stays private to the child; each level speaks its own
+vocabulary.
+
+#+begin_src nim
+import nest
+
+type
+  ToolbarEvent = enum
+    NewPressed
+    SavePressed
+
+  PaneEvent = enum
+    SaveRequested
+    TitleChanged
+
+widget toolbar() emits ToolbarEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6)):
+    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+      emit NewPressed
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      emit SavePressed
+
+widget pane(title: var string) emits PaneEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    for event in ui.toolbar():
+      case event
+      of NewPressed:
+        # Handled here: the shell above never hears about it.
+        title = "untitled"
+        emit TitleChanged
+      of SavePressed:
+        # Raised: saving is not this widget's business.
+        emit SaveRequested
+    ui.label(ui.id("title"), title, width = fill(), height = fit())
+
+widget shell(title: var string, log: var seq[string]) emits PaneEvent:
+  ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8)):
+    for event in ui.pane(title):
+      case event
+      of SaveRequested:
+        log.add "writing " & title
+      of TitleChanged:
+        # Not this level's business either: pass it on.
+        emit TitleChanged
+#+end_src
+
+** Events With Payloads
+
+An enumeration is enough while events carry nothing. An object variant carries
+what the parent needs, most often the identity of the row that produced it.
+
+#+begin_src nim
+import nest
+
+type
+  Task = object
+    id: int
+    title: string
+    done: bool
+
+  RowEventKind = enum
+    Toggled
+    Removed
+    Renamed
+
+  RowEvent = object
+    id: int
+    case kind: RowEventKind
+    of Renamed:
+      title: string
+    else:
       discard
 
-  Model = object
-    subscribed: bool
-    volume: float64
-    style: int
-
-const Styles = ["Solid", "Dashed", "Dotted"]
-
-widget settings(model: Model, msgs: var seq[Msg]):
-  ui.column(ui.id("root"), cfg(padding = 12, gap = 10)):
-    # A checkbox draws the flag it is given; the click is a separate query.
-    ui.checkbox(ui.id("subscribed"), "Subscribed", model.subscribed,
-        width = fit(), height = fit())
-    if ui.clicked(ui.id("subscribed")):
-      msgs.add Msg(kind: ToggleSubscribed)
-
-    # A slider reports the value under the pointer while it is dragged.
-    let volume = ui.slider(ui.id("volume"), model.volume, 0.0, 1.0,
-        width = fill(), height = fixed(24))
-    if volume.active:
-      msgs.add Msg(kind: SetVolume, value: volume.value)
-
-    # A combo box reports the index the user picked.
-    let picked = ui.combobox(ui.id("style"), model.style, Styles,
-        width = fixed(160), height = fixed(28))
-    if picked.changed:
-      msgs.add Msg(kind: SelectStyle, index: picked.index)
-#+end_src
-
-** Widgets That Write Through A Variable
-
-~ui.tabs~ and ~ui.colorInput~ write into a ~var~ parameter. Pass a copy and
-compare, so the model keeps its single writer.
-
-#+begin_src nim
-import nest
-
-type
-  MsgKind = enum
-    SelectTab
-    SetAccent
-
-  Msg = object
-    case kind: MsgKind
-    of SelectTab:
-      index: int
-    of SetAccent:
-      color: Color
-
-  Model = object
-    tab: int
-    accent: Color
-
-const TabLabels = ["Files", "Search", "Settings"]
-
-widget shell(model: Model, msgs: var seq[Msg]):
-  ui.column(ui.id("root"), cfg(padding = 8, gap = 8)):
-    var tab = model.tab
-    ui.tabs(ui.id("tabs"), TabLabels, tab, width = fill(), height = fit())
-    if tab != model.tab:
-      msgs.add Msg(kind: SelectTab, index: tab)
-
-    var accent = model.accent
-    if ui.colorInput(ui.id("accent"), "Accent", accent):
-      msgs.add Msg(kind: SetAccent, color: accent)
-#+end_src
-
-** Keyboard And Focus
-
-~ui.keyPressed~ names keys without case, spaces, dashes or underscores, and the
-~Key~ prefix is optional: ~Escape~, ~esc~ and ~KeyEsc~ all match. Focus is moved
-with ~ui.focus~ and read with ~ui.focused~.
-
-#+begin_src nim
-import nest
-
-type
-  Msg = enum
-    Cancel
-    Confirm
-    FocusSearch
-
-widget searchBox(state: LineInputState, msgs: var seq[Msg]):
-  ui.events:
-    if ui.keyPressed("Escape"):
-      msgs.add Cancel
-    if ui.keyPressed("F3"):
-      msgs.add FocusSearch
-
-  ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
-    ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
-    # Enter in a single-line input submits it.
-    if ui.submitted(ui.id("input")):
-      msgs.add Confirm
-
-    if ui.focused(ui.id("input")):
-      ui.label(ui.id("hint"), "Enter to search", width = fit(), height = fit())
-
-proc handle(ui: var UI, msg: Msg) =
-  case msg
-  of FocusSearch:
-    # Entering the widget's scope reaches the id it declared.
-    ui.scope("searchBox"):
-      ui.focus(ui.id("input"))
-  else:
-    discard
-#+end_src
-
-** Pointer Events Beyond Clicks
-
-#+begin_src nim
-import nest
-
-type
-  MsgKind = enum
-    OpenContextMenu
-    ScrubBy
-
-  Msg = object
-    case kind: MsgKind
-    of OpenContextMenu:
-      x, y: int
-    of ScrubBy:
-      pixels: int
-
-widget canvas(msgs: var seq[Msg]):
-  ui.panel(ui.id("root"), cfg(width = fill(), height = fill())):
-    ui.label(ui.id("hint"), "Right click or middle drag", width = fit(),
+widget taskRow(task: Task) emits RowEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8,
+      alignItems = AlignCenter)):
+    ui.checkbox(ui.id("done"), task.title, task.done, width = fill(),
         height = fit())
-
-  ui.events:
-    if ui.rightClicked(ui.id("root")):
-      msgs.add Msg(kind: OpenContextMenu, x: 0, y: 0)
-
-    let drag = ui.middleDragDelta(ui.id("root"))
-    if drag.active and not drag.started and drag.deltaX != 0:
-      msgs.add Msg(kind: ScrubBy, pixels: drag.deltaX)
+    if ui.clicked(ui.id("done")):
+      emit RowEvent(id: task.id, kind: Toggled)
+    if ui.button(ui.id("rename"), "Rename", width = fit(), height = fit()):
+      emit RowEvent(id: task.id, kind: Renamed, title: task.title & " (copy)")
+    if ui.button(ui.id("remove"), "x", width = fixed(24), height = fit()):
+      emit RowEvent(id: task.id, kind: Removed)
 #+end_src
 
-** Events That Are Not Widget Events
+** A List Of Children
 
-Quitting, timers and external state also belong in the event pass.
+Each row is scoped by its own identity, so the rows keep their widgets apart,
+and the parent handles the events of all of them in one loop.
+
+#+begin_src nim
+import std/sequtils
+
+import nest
+
+type
+  Task = object
+    id: int
+    title: string
+    done: bool
+
+  RowEvent = object
+    id: int
+    removed: bool
+
+  TaskList = object
+    tasks: seq[Task]
+
+widget taskRow(task: Task) emits RowEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8)):
+    ui.checkbox(ui.id("done"), task.title, task.done, width = fill(),
+        height = fit())
+    if ui.clicked(ui.id("done")):
+      emit RowEvent(id: task.id, removed: false)
+    if ui.button(ui.id("remove"), "x", width = fixed(24), height = fit()):
+      emit RowEvent(id: task.id, removed: true)
+
+widget taskList(model: var TaskList):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 4,
+      padding = 8)):
+    var emitted: seq[RowEvent]
+    for task in model.tasks:
+      # One scope per row, keyed by the task's own id.
+      ui.scope(task.id):
+        emitted.add ui.taskRow(task)
+
+    # The list is only edited after every row has been declared.
+    for event in emitted:
+      if event.removed:
+        model.tasks.keepItIf(it.id != event.id)
+      else:
+        for task in model.tasks.mitems:
+          if task.id == event.id:
+            task.done = not task.done
+#+end_src
+
+Collecting the rows' events first and editing afterwards keeps the sequence being
+iterated from changing underneath the loop.
+
+** Siblings
+
+A parent that owns two children is the place where they meet: it turns one
+child's event into the other child's state.
 
 #+begin_src nim
 import nest
 
 type
-  Msg = enum
-    Quit
+  SearchEvent = enum
+    QueryChanged
+    QueryCleared
 
-widget quitButton(msgs: var seq[Msg]):
-  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+  ResultsEvent = enum
+    ResultChosen
+
+  Browser = object
+    query: LineInputState
+    results: seq[string]
+    chosen: string
+
+widget searchBox(state: LineInputState) emits SearchEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6)):
+    ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
+    if ui.submitted(ui.id("input")):
+      emit QueryChanged
+    if ui.button(ui.id("clear"), "Clear", width = fit(), height = fit()):
+      emit QueryCleared
+
+widget resultList(items: seq[string]) emits ResultsEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 2)):
+    for index, item in items:
+      ui.scope(index):
+        if ui.button(ui.id("item"), item, width = fill(), height = fit()):
+          emit ResultChosen
+
+widget browser(model: var Browser):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    for event in ui.searchBox(model.query):
+      case event
+      of QueryChanged:
+        model.results = @["match for " & model.query.text]
+      of QueryCleared:
+        model.query.text = ""
+        model.results.setLen(0)
+
+    for event in ui.resultList(model.results):
+      case event
+      of ResultChosen:
+        model.chosen = "chosen"
+
+    ui.label(ui.id("chosen"), model.chosen, width = fill(), height = fit())
+#+end_src
+
+** Container Widgets
+
+A parameter of type ~untyped~ takes a block, so a widget can wrap children the
+caller supplies. A widget with such a parameter expands to a template.
+
+#+begin_src nim
+import nest
+
+widget titledCard(title: string, body: untyped):
+  ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 10,
+      gap = 6)):
+    ui.label(ui.id("title"), title, width = fill(), height = fit())
+    body
+
+widget settingsPage():
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    ui.titledCard("General"):
+      ui.label(ui.id("general"), "General settings", width = fill(),
+          height = fit())
+    ui.scope("advanced"):
+      ui.titledCard("Advanced"):
+        ui.label(ui.id("advanced"), "Advanced settings", width = fill(),
+            height = fit())
+#+end_src
+
+A container's children are declared by the caller, so their events belong to the
+caller too: they are collected in the caller's scope, not the container's.
+
+#+begin_src nim
+import nest
+
+type
+  Counter = object
+    count: int
+
+  CounterEvent = enum
+    Bumped
+
+widget counter(model: Counter) emits CounterEvent:
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
+    ui.label(ui.id("count"), $model.count, width = fixed(40), height = fit())
+    if ui.button(ui.id("inc"), "+", width = fixed(30), height = fit()):
+      emit Bumped
+
+widget titledCard(title: string, body: untyped):
+  ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 10)):
+    ui.label(ui.id("title"), title, width = fill(), height = fit())
+    body
+
+widget page(model: var Counter):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8)):
+    var emitted: seq[CounterEvent]
+    ui.titledCard("Counter"):
+      emitted.add ui.counter(model)
+    for event in emitted:
+      case event
+      of Bumped:
+        inc model.count
+#+end_src
+
+** Containers That Emit
+
+A container expands to a template, so it cannot use ~emits~. Give it an
+~emitted: var seq[E]~ parameter and append to that; the caller passes a sequence
+it owns, which also means nothing is lost across the two passes.
+
+#+begin_src nim
+import nest
+
+type
+  PanelEvent = enum
+    CloseRequested
+    Collapsed
+
+widget closablePanel(title: string, emitted: var seq[PanelEvent],
+    body: untyped):
+  ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 8,
+      gap = 6)):
+    ui.row(ui.id("head"), cfg(width = fill(), height = fit(), gap = 6,
+        alignItems = AlignCenter)):
+      ui.label(ui.id("title"), title, width = fill(), height = fit())
+      if ui.button(ui.id("collapse"), "-", width = fixed(24), height = fit()):
+        emitted.add Collapsed
+      if ui.button(ui.id("close"), "x", width = fixed(24), height = fit()):
+        emitted.add CloseRequested
+    body
+
+widget workspace(open: var bool):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    if open:
+      var emitted: seq[PanelEvent]
+      ui.closablePanel("Inspector", emitted):
+        ui.label(ui.id("body"), "Panel contents", width = fill(),
+            height = fit())
+      for event in emitted:
+        case event
+        of CloseRequested: open = false
+        of Collapsed: discard
+#+end_src
+
+** A Container That Reacts To Its Children
+
+A container can both host arbitrary children and report its own events. The tab
+strip below owns which tab is selected; the caller supplies the content.
+
+#+begin_src nim
+import nest
+
+type
+  TabsEvent = object
+    selected: int
+
+widget tabStrip(labels: openArray[string], current: int,
+    emitted: var seq[TabsEvent], body: untyped):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    var picked = current
+    ui.tabs(ui.id("tabs"), labels, picked, width = fill(), height = fit())
+    if picked != current:
+      emitted.add TabsEvent(selected: picked)
+    ui.panel(ui.id("content"), cfg(width = fill(), height = fill(),
+        padding = 8)):
+      body
+
+widget shell(tab: var int):
+  const Labels = ["Files", "Editor", "Settings"]
+  var emitted: seq[TabsEvent]
+  ui.tabStrip(Labels, tab, emitted):
+    case tab
+    of 0: ui.label(ui.id("files"), "Files", width = fill(), height = fit())
+    of 1: ui.label(ui.id("editor"), "Editor", width = fill(), height = fit())
+    else: ui.label(ui.id("settings"), "Settings", width = fill(),
+        height = fit())
+  for event in emitted:
+    tab = event.selected
+#+end_src
+
+** Batching
+
+Because a widget returns every event of the frame, a parent can look at them
+together before deciding anything.
+
+#+begin_src nim
+import nest
+
+type
+  CellEvent = object
+    row, column: int
+
+  Grid = object
+    selection: seq[CellEvent]
+
+widget cell(atRow, atColumn: int) emits CellEvent:
+  if ui.button(ui.id("button"), $atRow & "," & $atColumn, width = fixed(48),
+      height = fixed(24)):
+    emit CellEvent(row: atRow, column: atColumn)
+
+widget grid(model: var Grid):
+  ui.column(ui.id("root"), cfg(width = fit(), height = fit(), gap = 2)):
+    var clicks: seq[CellEvent]
+    # Named `rowIndex`, not `row`: a local called `row` would shadow `ui.row`.
+    for rowIndex in 0 ..< 3:
+      ui.row(ui.id("row", rowIndex), cfg(width = fit(), height = fit(),
+          gap = 2)):
+        for columnIndex in 0 ..< 3:
+          ui.scope(rowIndex * 3 + columnIndex):
+            clicks.add ui.cell(rowIndex, columnIndex)
+
+    # One frame can carry several clicks; decide once, with all of them in hand.
+    if clicks.len > 1:
+      model.selection = clicks
+    elif clicks.len == 1:
+      model.selection = @[clicks[0]]
+#+end_src
+
+* State
+
+Each widget owns the state it needs, and a parent holds its children's state as
+fields. There is no single application model: the root's state is whatever the
+composition adds up to.
+
+#+begin_src nim
+import nest
+
+type
+  # Each widget's own state and events.
+  Counter = object
+    count: int
+
+  CounterEvent = enum
+    Bumped
+
+  Notes = object
+    text: EditorState
+
+  NotesEvent = enum
+    Saved
+
+  # The parent holds its children's state, plus what belongs to it alone.
+  Workspace = object
+    counter: Counter
+    notes: Notes
+    status: string
+
+  WorkspaceEvent = enum
+    StatusChanged
+
+proc update(model: var Counter, event: CounterEvent) =
+  case event
+  of Bumped: inc model.count
+
+proc update(model: var Notes, event: NotesEvent) =
+  case event
+  of Saved: discard
+
+widget counter(model: Counter) emits CounterEvent:
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
+    ui.label(ui.id("count"), $model.count, width = fixed(40), height = fit())
+    if ui.button(ui.id("inc"), "+", width = fixed(30), height = fit()):
+      emit Bumped
+
+widget notes(model: Notes) emits NotesEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    ui.textEditor(ui.id("text"), model.text, width = fill(), height = fill())
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      emit Saved
+
+widget workspace(model: var Workspace) emits WorkspaceEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    for event in ui.counter(model.counter):
+      # Each child's state is updated by that child's own `update`.
+      model.counter.update(event)
+      model.status = "count " & $model.counter.count
+      emit StatusChanged
+
+    for event in ui.notes(model.notes):
+      model.notes.update(event)
+      model.status = "saved"
+      emit StatusChanged
+
+    ui.label(ui.id("status"), model.status, width = fill(), height = fit())
+#+end_src
+
+Two rules keep this straight as the tree grows:
+
+- A widget reads its own state and its children's; it writes only through the
+  ~update~ of whichever state it owns.
+- A widget never reaches into a sibling's state. Its parent is where two
+  children meet.
+
+** Read-Only Children
+
+A widget that only draws takes its state by value, which says in the signature
+that it changes nothing.
+
+#+begin_src nim
+import nest
+
+type Reading = object
+  label: string
+  value: float64
+
+widget gauge(reading: Reading):
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8,
+      alignItems = AlignCenter)):
+    ui.label(ui.id("label"), reading.label, width = fixed(90), height = fit())
+    discard ui.slider(ui.id("bar"), reading.value, 0.0, 1.0, width = fill(),
+        height = fixed(18))
+#+end_src
+
+** State That Outlives A Frame
+
+~LineInputState~, ~EditorState~ and ~Mesh2DState~ hold text, cursors, selection
+and scroll positions. They belong to the widget's own state and are mutated in
+place by the widget that draws them; they are not carried in events.
+
+#+begin_src nim
+import nest
+import std/sets
+
+type
+  Source = object
+    path: string
+    text: EditorState
+    breakpoints: HashSet[int]
+
+  SourceEvent = enum
+    SaveRequested
+
+widget sourceEditor(model: Source) emits SourceEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6,
+      padding = 8)):
+    ui.textEditor(
+      ui.id("text"),
+      model.text,
+      width = fill(),
+      height = fill(min = 120),
+      fontName = "editor",
+      lineNumbers = true,
+      syntax = "nim",
+      gutterMarkers = model.breakpoints,
+      activeLine = model.text.lineColumn.line,
+    )
+    ui.label(
+      ui.id("position"),
+      "line " & $model.text.lineColumn.line & ", column " &
+        $model.text.lineColumn.column,
+      width = fit(),
+      height = fit(),
+    )
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      emit SaveRequested
+#+end_src
+
+* The Application Loop
+
+~runApp~ takes the window configuration, the initial state, the ~update~ for
+that state, and the root widget.
+
+#+begin_src nim
+import nest
+
+type
+  Counter = object
+    count: int
+
+  CounterEvent = enum
+    Bumped
+
+proc update(model: var Counter, event: CounterEvent) =
+  case event
+  of Bumped: inc model.count
+
+widget counter(model: Counter) emits CounterEvent:
+  if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+    emit Bumped
+
+when isMainModule:
+  runApp(AppConfig.init(width = 240, height = 120, title = "Counter"),
+      Counter(), update, counter)
+#+end_src
+
+A trailing block runs at the end of every event pass, with ~ui~, ~model~,
+~msgs~ and ~running~ in scope. This is where an application quits, or reacts to
+something outside the widget tree.
+
+#+begin_src nim
+import nest
+
+type
+  App = object
+    count: int
+    quitting: bool
+
+  AppEvent = enum
+    Bumped
+    QuitRequested
+
+proc update(model: var App, event: AppEvent) =
+  case event
+  of Bumped: inc model.count
+  of QuitRequested: model.quitting = true
+
+widget root(model: App) emits AppEvent:
+  ui.row(ui.id("root"), cfg(padding = 8, gap = 8)):
+    if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+      emit Bumped
     if ui.button(ui.id("quit"), "Quit", width = fit(), height = fit()):
-      msgs.add Quit
+      emit QuitRequested
+
+when isMainModule:
+  runApp(AppConfig.init(width = 240, height = 120, title = "Counter"),
+      App(), update, root):
+    if model.quitting or ui.keyPressed("Escape"):
+      running = false
+#+end_src
+
+The root widget emits: ~runApp~ takes the type of its queue from what the root
+returns, and applies each event with ~update~. A widget that collects into a
+parameter can appear anywhere in the tree, but not at the root.
+
+Other window shapes are ordinary ~AppConfig~ values.
+
+#+begin_src nim
+import nest
+
+type
+  Bar = object
+    clock: string
+
+  BarEvent = enum
+    Ticked
+
+proc update(model: var Bar, event: BarEvent) =
+  case event
+  of Ticked: model.clock = "12:00"
+
+widget bar(model: Bar) emits BarEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fill(), padding = 6)):
+    ui.label(ui.id("clock"), model.clock, width = fit(), height = fit())
+    ui.events:
+      emit Ticked
+
+when isMainModule:
+  runApp(AppConfig.dockTop(32, title = "Bar", namespace = "nest-bar"),
+      Bar(), update, bar)
+#+end_src
+
+** Writing The Loop By Hand
+
+~runApp~ expands to the loop below. Write it out when a frame needs something
+the trailing block cannot reach.
+
+#+begin_src nim
+import nest
+
+type
+  App = object
+    count: int
+
+  AppEvent = enum
+    Bumped
+
+proc update(model: var App, event: AppEvent) =
+  case event
+  of Bumped: inc model.count
+
+widget root(model: App) emits AppEvent:
+  if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+    emit Bumped
 
 when isMainModule:
   var
     ui = UI.init()
-    msgs: seq[Msg]
+    model = App()
+    emitted: seq[AppEvent]
 
-  let appCfg = AppConfig.init(width = 240, height = 120, title = "Quit")
+  let appCfg = AppConfig.init(width = 240, height = 120, title = "Counter")
 
   application appCfg, ui:
     ui.layout:
       ui.events:
-        msgs.setLen(0)
+        emitted.setLen(0)
 
-      ui.quitButton(msgs)
+      emitted.add ui.root(model)
 
       ui.events:
-        for msg in msgs:
-          case msg
-          of Quit:
-            running = false
+        for event in emitted:
+          model.update(event)
+        if emitted.len > 0:
+          ui.markAllDirty()
 #+end_src
 
 * Widget Ids
@@ -792,7 +1031,7 @@ type File = object
   name: string
   hidden: bool
 
-widget fileList(files: seq[File], selected: string, msgs: var seq[string]):
+widget fileList(files: seq[File], emitted: var seq[string]):
   let visible = listItems(
     files,
     key = proc(file: File, index: int): string = listKey(index, file.name),
@@ -803,10 +1042,7 @@ widget fileList(files: seq[File], selected: string, msgs: var seq[string]):
     for item in visible:
       if ui.button(ui.id("file", item.key), item.value.name, width = fill(),
           height = fit()):
-        msgs.add item.value.name
-      if item.value.name == selected:
-        ui.label(ui.id("mark", item.key), "selected", width = fit(),
-            height = fit())
+        emitted.add item.value.name
 #+end_src
 
 ** Unnamed Widgets
@@ -835,8 +1071,8 @@ Constraint details are in [[file:layout.org][layout.org]].
 | Size policy      | Meaning                                             |
 |------------------+-----------------------------------------------------|
 | ~fixed(n)~       | exactly ~n~ pixels                                  |
-| ~fill(min, max)~ | take the available space, within bounds              |
-| ~fit(min, max)~  | shrink to the content's measured size                |
+| ~fill(min, max)~ | take the available space, within bounds             |
+| ~fit(min, max)~  | shrink to the content's measured size               |
 | ~prefer(n, ...)~ | ask for ~n~, yield when constraints require another |
 | ~hug(n, ...)~    | same as ~prefer~                                    |
 
@@ -962,79 +1198,11 @@ widget logView(lines: seq[string]):
       ui.label(ui.id("line", index), line, width = fill(), height = fit())
 #+end_src
 
-* Composing Widgets
-
-An interface is a tree of widgets, each declaring the next. Splitting one is the
-main tool for keeping a large window readable: each widget takes the state it
-needs and the message queue.
-
-#+begin_src nim
-import nest
-
-type
-  MsgKind = enum
-    SetName
-    SetEmail
-    Save
-
-  Msg = object
-    case kind: MsgKind
-    of SetName, SetEmail:
-      text: string
-    of Save:
-      discard
-
-  Model = object
-    name: LineInputState
-    email: LineInputState
-
-widget labelledInput(label: string, state: LineInputState) -> bool:
-  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8,
-      alignItems = AlignCenter)):
-    ui.label(ui.id("label"), label, width = fixed(80), height = fit())
-    ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
-  result = ui.submitted(ui.id("input"))
-
-widget form(model: Model, msgs: var seq[Msg]):
-  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
-    ui.scope("name"):
-      if ui.labelledInput("Name", model.name):
-        msgs.add Msg(kind: SetName, text: model.name.text)
-    ui.scope("email"):
-      if ui.labelledInput("Email", model.email):
-        msgs.add Msg(kind: SetEmail, text: model.email.text)
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
-      msgs.add Msg(kind: Save)
-#+end_src
-
-Two instances of ~labelledInput~ appear in one frame, so each call sits in its
-own scope. Without them both inputs would share one id and behave as a single
-field.
-
-A widget that takes no state is worth extracting too.
-
-#+begin_src nim
-import nest
-
-widget sectionTitle(text: string):
-  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 2)):
-    ui.label(ui.id("text"), text, width = fit(), height = fit())
-    ui.spacer(ui.id("rule"), width = fill(), height = fixed(1))
-
-widget settingsPage():
-  ui.column(ui.id("root"), cfg(padding = 12, gap = 10)):
-    ui.scope("general"):
-      ui.sectionTitle("General")
-    ui.scope("advanced"):
-      ui.sectionTitle("Advanced")
-#+end_src
-
 * Custom Components
 
 ~widget~ composes existing widgets. A component is the other extension point: a
 ~Component~ subclass that measures, updates and draws itself, attached to a
-widget with ~ui.component~. Write one when nothing built in draws what is
-needed.
+widget with ~ui.component~. Write one when nothing built in draws what is needed.
 
 | Method        | Called                          | Purpose                         |
 |---------------+---------------------------------+---------------------------------|
@@ -1083,15 +1251,19 @@ whose appearance depends on more than its size and alignment has to supply one,
 or a changed value will not be drawn.
 
 A component that reacts to the pointer derives from ~Interactive~, which also
-marks its frame as blocking pointer input. Wrapping it in a ~widget~ gives it
-the same call shape as a built-in helper.
+marks its frame as blocking pointer input. Wrapping it in a ~widget~ that emits
+gives it the same shape as any other widget in the tree.
 
 #+begin_src nim
 import nest
 import nest/[coords, resources]
 
-type Swatch = ref object of Interactive
-  value: Color
+type
+  Swatch = ref object of Interactive
+    value: Color
+
+  SwatchEvent = object
+    value: Color
 
 proc new(T: typedesc[Swatch], value: Color): T =
   T(value: value)
@@ -1117,17 +1289,18 @@ method draw(self: Swatch, widget: Widget, ctx: var DrawContext) =
   lineRect(box, if ctx.hot(widget.id): ctx.palette.primary
     else: ctx.palette.panelBorder)
 
-widget swatch(value: Color) -> bool:
+widget swatch(value: Color) emits SwatchEvent:
   discard ui.component(ui.id("swatch"), Swatch.new(value), fixed(24), fixed(24),
       renderKeyOverride = "swatch:" & $value)
-  result = ui.clicked(ui.id("swatch"))
+  if ui.clicked(ui.id("swatch")):
+    emit SwatchEvent(value: value)
 
-widget paletteRow(colors: seq[Color], msgs: var seq[Color]):
+widget palette(colors: seq[Color], chosen: var Color):
   ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 4)):
     for index, value in colors:
       ui.scope(index):
-        if ui.swatch(value):
-          msgs.add value
+        for event in ui.swatch(value):
+          chosen = event.value
 #+end_src
 
 ** Animation
@@ -1170,157 +1343,163 @@ widget statusLine(busy: bool):
         height = fit())
 #+end_src
 
-~ui.markRealtime~ keeps a widget in the set that is repainted every frame, which
-is what an animation needs when the rest of the frame is unchanged.
-
 * Growing The Application
 
-The architecture stays the same as an application grows; what changes is how it
-is divided. Each stage below is reached only when the previous one becomes
-awkward.
+Each stage below is reached only when the previous one becomes awkward. Nothing
+about the architecture changes: a widget is added, it owns its state, and it
+emits what its parent needs to know.
 
 ** Stage 1: One Widget
 
-A single ~Model~, a single ~Msg~, one ~widget~. This is the shape of the counter,
-and it stays readable for a window with a handful of children.
+State, events, ~update~, widget, ~runApp~. This is the counter, and it stays
+readable while the window has a handful of children.
 
-** Stage 2: One Widget Per Region
+** Stage 2: Children Without State
 
-Split by region. The model and the message type stay whole.
+Split by region as soon as one widget declares more than a screenful. A region
+that owns nothing takes what it draws and emits what it collects.
 
 #+begin_src nim
 import nest
 
 type
-  Msg = enum
-    NewFile
-    OpenFile
-
-  Model = object
+  App = object
     fileName: string
     modified: bool
 
-widget toolbar(msgs: var seq[Msg]):
+  ToolbarEvent = enum
+    NewPressed
+    SavePressed
+
+  AppEvent = enum
+    DocumentCleared
+    DocumentSaved
+
+proc update(model: var App, event: AppEvent) =
+  case event
+  of DocumentCleared:
+    model.fileName = "untitled"
+    model.modified = false
+  of DocumentSaved:
+    model.modified = false
+
+widget toolbar(modified: bool) emits ToolbarEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
       padding = 6)):
     if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
-      msgs.add NewFile
-    if ui.button(ui.id("open"), "Open", width = fit(), height = fit()):
-      msgs.add OpenFile
+      emit NewPressed
+    if ui.button(ui.id("save"), "Save" & (if modified: " *" else: ""),
+        width = fit(), height = fit()):
+      emit SavePressed
 
-widget statusBar(model: Model):
+widget statusBar(text: string):
   ui.dialogHeader(ui.id("root"), cfg(width = fill(), height = fit(),
       padding = 6)):
-    ui.label(
-      ui.id("text"),
-      model.fileName & (if model.modified: " *" else: ""),
-      width = fill(),
-      height = fit(),
-    )
+    ui.label(ui.id("text"), text, width = fill(), height = fit())
 
-widget shell(model: Model, msgs: var seq[Msg]):
+widget root(model: App) emits AppEvent:
   ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
-    ui.toolbar(msgs)
+    for event in ui.toolbar(model.modified):
+      case event
+      of NewPressed: emit DocumentCleared
+      of SavePressed: emit DocumentSaved
     ui.panel(ui.id("body"), cfg(width = fill(), height = fill(), padding = 8)):
-      ui.label(ui.id("bodyText"), "Body", width = fill(), height = fit())
-    ui.statusBar(model)
+      ui.label(ui.id("bodyText"), model.fileName, width = fill(),
+          height = fit())
+    ui.statusBar(if model.modified: "modified" else: "saved")
+
+when isMainModule:
+  runApp(AppConfig.init(title = "Editor"), App(fileName: "untitled"), update,
+      root)
 #+end_src
 
-** Stage 3: A Sub-Model Per Feature
+** Stage 3: A Feature Per Module
 
-When a region owns state that nothing else touches, give it its own ~Model~,
-~Msg~, ~update~ and ~widget~, and let the parent forward messages. Each feature
-becomes a module that only its parent knows about.
+When a region owns state, give it its own state type, event type, ~update~ and
+widget, and export the four. Its parent holds the state as a field and forwards
+what it cannot answer. Nothing else in the application knows the module exists.
+
+#+begin_example
+src/myapp.nim                main module: root state, root widget, runApp
+src/myapp/search.nim         Search, SearchEvent, update, widget search
+src/myapp/editor.nim         Editor, EditorEvent, update, widget editor
+#+end_example
 
 #+begin_src nim
 import nest
 
-# --- search feature -----------------------------------------------------
+# --- search.nim ---------------------------------------------------------
 
 type
-  SearchMsg = enum
-    SearchSubmitted
-    SearchCleared
+  Search* = object
+    query*: LineInputState
+    results*: seq[string]
 
-  SearchModel = object
-    query: LineInputState
-    results: seq[string]
+  SearchEvent* = enum
+    ResultChosen
+    Dismissed
 
-proc initSearch(): SearchModel =
-  SearchModel(query: LineInputState.new(""))
+proc initSearch*(): Search =
+  Search(query: LineInputState.new(""))
 
-proc update(model: var SearchModel, msg: SearchMsg) =
-  case msg
-  of SearchSubmitted:
-    model.results = @["result for " & model.query.text]
-  of SearchCleared:
+proc update*(model: var Search, event: SearchEvent) =
+  case event
+  of ResultChosen: discard
+  of Dismissed:
     model.query.text = ""
     model.results.setLen(0)
 
-widget search*(model: SearchModel, msgs: var seq[SearchMsg]):
+widget search*(model: var Search) emits SearchEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
       padding = 8)):
     ui.lineInput(ui.id("query"), model.query, width = fill(),
         height = fixed(30))
     if ui.submitted(ui.id("query")):
-      msgs.add SearchSubmitted
-    if ui.button(ui.id("clear"), "Clear", width = fit(), height = fit()):
-      msgs.add SearchCleared
+      model.results = @["result for " & model.query.text]
+    if ui.keyPressed("Escape"):
+      emit Dismissed
     for index, line in model.results:
-      ui.label(ui.id("result", index), line, width = fill(), height = fit())
+      ui.scope(index):
+        if ui.button(ui.id("result"), line, width = fill(), height = fit()):
+          emit ResultChosen
 
-# --- application --------------------------------------------------------
+# --- myapp.nim ----------------------------------------------------------
 
 type
-  MsgKind = enum
-    FromSearch
-    ToggleSidebar
-
-  Msg = object
-    case kind: MsgKind
-    of FromSearch:
-      search: SearchMsg
-    of ToggleSidebar:
-      discard
-
-  Model = object
+  App = object
+    search: Search
     sidebarOpen: bool
-    search: SearchModel
+    lastChoice: string
 
-proc update(model: var Model, msg: Msg) =
-  case msg.kind
-  of FromSearch:
-    model.search.update(msg.search)
-  of ToggleSidebar:
-    model.sidebarOpen = not model.sidebarOpen
+  AppEvent = enum
+    SidebarToggled
+    ChoiceMade
 
-widget root(model: Model, msgs: var seq[Msg]):
+proc update(model: var App, event: AppEvent) =
+  case event
+  of SidebarToggled: model.sidebarOpen = not model.sidebarOpen
+  of ChoiceMade: model.lastChoice = "chosen"
+
+widget root(model: var App) emits AppEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
       padding = 8)):
     if ui.button(ui.id("toggle"), "Sidebar", width = fit(), height = fit()):
-      msgs.add Msg(kind: ToggleSidebar)
+      emit SidebarToggled
 
     if model.sidebarOpen:
-      # The child collects its own messages; the parent wraps them.
-      var searchMsgs: seq[SearchMsg]
-      ui.search(model.search, searchMsgs)
-      for msg in searchMsgs:
-        msgs.add Msg(kind: FromSearch, search: msg)
+      for event in ui.search(model.search):
+        # Handled here, or translated into this level's vocabulary.
+        model.search.update(event)
+        if event == ResultChosen:
+          emit ChoiceMade
+
+    ui.label(ui.id("choice"), model.lastChoice, width = fill(), height = fit())
 #+end_src
-
-The child knows nothing about the parent. Moving it into its own module is a
-matter of moving the four declarations; the widget is already exported.
-
-#+begin_example
-src/myapp.nim                main loop and wiring
-src/myapp/model.nim          Model, Msg, update
-src/myapp/widgets/search.nim SearchModel, SearchMsg, update, widget search
-src/myapp/widgets/editor.nim EditorModel, EditorMsg, update, widget editor
-#+end_example
 
 ** Stage 4: Routing Between Screens
 
-A screen enumeration in the model, a ~case~ in the parent widget.
+A screen enumeration in the state, a ~case~ in the root widget. Each screen is a
+widget, so its ids and its events are its own.
 
 #+begin_src nim
 import nest
@@ -1328,156 +1507,101 @@ import nest
 type
   Screen = enum
     ScreenFiles
-    ScreenEditor
     ScreenSettings
 
-  MsgKind = enum
-    GoTo
+  FilesEvent = enum
+    FileOpened
 
-  Msg = object
-    case kind: MsgKind
-    of GoTo:
-      screen: Screen
+  SettingsEvent = enum
+    ThemeChanged
 
-  Model = object
+  App = object
     screen: Screen
+    opened: string
+    theme: string
 
-const ScreenLabels = ["Files", "Editor", "Settings"]
+  AppEvent = enum
+    ScreenSwitched
+    FileOpenedInApp
+    ThemeChangedInApp
 
-proc update(model: var Model, msg: Msg) =
-  case msg.kind
-  of GoTo:
-    model.screen = msg.screen
+const ScreenLabels = ["Files", "Settings"]
 
-widget filesScreen():
-  ui.label(ui.id("text"), "Files", width = fill(), height = fit())
+proc update(model: var App, event: AppEvent) =
+  case event
+  of ScreenSwitched: discard
+  of FileOpenedInApp: model.opened = "opened"
+  of ThemeChangedInApp: model.theme = "dark"
 
-widget editorScreen():
-  ui.label(ui.id("text"), "Editor", width = fill(), height = fit())
+widget filesScreen(opened: string) emits FilesEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    if ui.button(ui.id("open"), "Open", width = fit(), height = fit()):
+      emit FileOpened
+    ui.label(ui.id("state"), opened, width = fill(), height = fit())
 
-widget settingsScreen():
-  ui.label(ui.id("text"), "Settings", width = fill(), height = fit())
+widget settingsScreen(theme: string) emits SettingsEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    if ui.button(ui.id("theme"), "Dark theme", width = fit(), height = fit()):
+      emit ThemeChanged
+    ui.label(ui.id("state"), theme, width = fill(), height = fit())
 
-widget root(model: Model, msgs: var seq[Msg]):
+widget root(model: var App) emits AppEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
       padding = 8)):
     var selected = model.screen.ord
     ui.tabs(ui.id("tabs"), ScreenLabels, selected, width = fill(),
         height = fit())
     if selected != model.screen.ord:
-      msgs.add Msg(kind: GoTo, screen: Screen(selected))
+      model.screen = Screen(selected)
+      emit ScreenSwitched
 
     case model.screen
-    of ScreenFiles: ui.filesScreen()
-    of ScreenEditor: ui.editorScreen()
-    of ScreenSettings: ui.settingsScreen()
+    of ScreenFiles:
+      for event in ui.filesScreen(model.opened):
+        case event
+        of FileOpened: emit FileOpenedInApp
+    of ScreenSettings:
+      for event in ui.settingsScreen(model.theme):
+        case event
+        of ThemeChanged: emit ThemeChangedInApp
 #+end_src
 
-Each screen is a widget, so its ids are scoped by its name and two screens can
-use the same names for their children.
+** Stage 5: Events From Outside The Frame
 
-** Stage 5: Widget State That Lives Longer Than A Frame
-
-~LineInputState~, ~EditorState~ and ~Mesh2DState~ hold text, cursors, selection
-and scroll positions. They belong to the model, and the widget mutates them in
-place; they are not carried in messages. Everything else stays a value in the
-model.
-
-#+begin_src nim
-import nest
-import std/sets
-
-type
-  Msg = enum
-    Save
-
-  Model = object
-    path: string
-    source: EditorState
-    breakpoints: HashSet[int]
-
-proc initModel(path, text: string): Model =
-  Model(
-    path: path,
-    source: EditorState.new(text),
-    breakpoints: toHashSet([3]),
-  )
-
-widget sourceEditor(model: Model, msgs: var seq[Msg]):
-  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6,
-      padding = 8)):
-    ui.textEditor(
-      ui.id("source"),
-      model.source,
-      width = fill(),
-      height = fill(min = 120),
-      fontName = "editor",
-      lineNumbers = true,
-      syntax = "nim",
-      gutterMarkers = model.breakpoints,
-      activeLine = model.source.lineColumn.line,
-    )
-    ui.label(
-      ui.id("position"),
-      "line " & $model.source.lineColumn.line & ", column " &
-        $model.source.lineColumn.column,
-      width = fit(),
-      height = fit(),
-    )
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
-      msgs.add Save
-#+end_src
-
-Because the editor writes into ~model.source~, the position label in the same
-frame already reflects the new cursor.
-
-** Stage 6: Messages From Outside The Frame
-
-Work that finishes between frames also arrives as a message. Push onto the same
-queue during the event pass.
+Work that finishes between frames enters the tree the same way: a widget emits
+it during the event pass.
 
 #+begin_src nim
 import nest
 
 type
-  MsgKind = enum
-    StartBuild
-    BuildFinished
-
-  Msg = object
-    case kind: MsgKind
-    of BuildFinished:
-      output: string
-    of StartBuild:
-      discard
-
-  Model = object
-    building: bool
+  Build = object
+    running: bool
     output: string
 
-proc update(model: var Model, msg: Msg) =
-  case msg.kind
-  of StartBuild:
-    model.building = true
-  of BuildFinished:
-    model.building = false
-    model.output = msg.output
+  BuildEvent = enum
+    BuildStarted
+    BuildFinished
 
-proc pollBuild(model: Model): string =
+proc update(model: var Build, event: BuildEvent) =
+  case event
+  of BuildStarted: model.running = true
+  of BuildFinished: model.running = false
+
+proc pollBuild(model: Build): string =
   ## Returns the build output once it is ready, or an empty string.
-  if model.building: "build finished" else: ""
+  if model.running: "build finished" else: ""
 
-widget buildPanel(model: Model, msgs: var seq[Msg]):
+widget buildPanel(model: Build) emits BuildEvent:
   ui.events:
-    let output = model.pollBuild()
-    if output.len > 0:
-      msgs.add Msg(kind: BuildFinished, output: output)
+    if model.pollBuild().len > 0:
+      emit BuildFinished
 
   ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
     if ui.button(ui.id("build"), "Build", width = fit(), height = fit()):
-      msgs.add Msg(kind: StartBuild)
+      emit BuildStarted
     ui.label(ui.id("output"), model.output, width = fill(), height = fit())
-    if model.building:
+    if model.running:
       # Ask for another frame so the poll runs again.
       ui.requestRedrawAfter(50)
 #+end_src
@@ -1494,31 +1618,29 @@ that.
 | ~ui.markAllDirty()~         | repaint the whole frame                    |
 | ~ui.markRealtime(id)~       | repaint this widget every frame            |
 
-An application that changes its own state, rather than reacting to input, marks
-the frame dirty when it does.
+~runApp~ marks the frame dirty whenever an event was applied, so a widget only
+asks for redraws that input does not already cause.
 
 #+begin_src nim
 import nest
 
 type
-  Msg = enum
-    Tick
-
-  Model = object
+  Clock = object
     seconds: int
 
-proc update(model: var Model, msg: Msg) =
-  case msg
-  of Tick:
-    inc model.seconds
+  ClockEvent = enum
+    Ticked
 
-widget uptime(model: Model, msgs: var seq[Msg]):
+proc update(model: var Clock, event: ClockEvent) =
+  case event
+  of Ticked: inc model.seconds
+
+widget clock(model: Clock) emits ClockEvent:
   ui.column(ui.id("root"), cfg(padding = 12, gap = 6)):
-    ui.label(ui.id("clock"), "uptime " & $model.seconds & "s", width = fit(),
+    ui.label(ui.id("uptime"), "uptime " & $model.seconds & "s", width = fit(),
         height = fit())
     ui.events:
-      msgs.add Tick
-      ui.markDirty(ui.id("clock"))
+      emit Ticked
     # One frame per second is enough for this label.
     ui.requestRedrawAfter(1000)
 #+end_src
@@ -1537,92 +1659,75 @@ let appCfg = AppConfig.init(width = 640, height = 480, title = "Animated",
 
 ** Modal Dialogs
 
-A modal is declared like any other container, gated on a flag in the model.
+A dialog is a widget like any other, gated on a flag and declared outside the
+root container so it is laid out over the whole frame.
 
 #+begin_src nim
 import nest
 
 type
-  MsgKind = enum
-    OpenConfirm
+  ConfirmEvent = enum
     Confirmed
     Cancelled
 
-  Msg = object
-    kind: MsgKind
-
-  Model = object
+  App = object
     confirmOpen: bool
     deleted: bool
 
-proc update(model: var Model, msg: Msg) =
-  case msg.kind
-  of OpenConfirm:
-    model.confirmOpen = true
-  of Confirmed:
+  AppEvent = enum
+    DeleteRequested
+    DeleteDone
+    DeleteCancelled
+
+proc update(model: var App, event: AppEvent) =
+  case event
+  of DeleteRequested: model.confirmOpen = true
+  of DeleteDone:
     model.confirmOpen = false
     model.deleted = true
-  of Cancelled:
-    model.confirmOpen = false
+  of DeleteCancelled: model.confirmOpen = false
 
-widget confirmDialog(open: bool, msgs: var seq[Msg]):
+widget confirmDialog(open: bool) emits ConfirmEvent:
   ui.modalDialog(ui.id("root"), open, cfg(width = fixed(320), height = fit(),
       padding = 12, gap = 10)):
     ui.label(ui.id("text"), "Delete the file?", width = fill(), height = fit())
     ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8,
         justifyContent = JustifyEnd)):
       if ui.button(ui.id("cancel"), "Cancel", width = fit(), height = fit()):
-        msgs.add Msg(kind: Cancelled)
+        emit Cancelled
       if ui.button(ui.id("ok"), "Delete", width = fit(), height = fit()):
-        msgs.add Msg(kind: Confirmed)
+        emit Confirmed
 
-widget root(model: Model, msgs: var seq[Msg]):
+widget root(model: App) emits AppEvent:
   ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
     if ui.button(ui.id("delete"), "Delete", width = fit(), height = fit()):
-      msgs.add Msg(kind: OpenConfirm)
+      emit DeleteRequested
     ui.label(ui.id("state"), if model.deleted: "deleted" else: "not deleted",
         width = fit(), height = fit())
 
-  ui.confirmDialog(model.confirmOpen, msgs)
+  for event in ui.confirmDialog(model.confirmOpen):
+    case event
+    of Confirmed: emit DeleteDone
+    of Cancelled: emit DeleteCancelled
 #+end_src
-
-The dialog is declared outside the root container, so it is laid out over the
-whole frame rather than inside the layout that opened it.
 
 ** Menus
 
-A menu is an entry in a ~menuBar~ plus a floating card anchored under it. The
-anchor is an id from the same widget, which is why both live in one declaration.
+A menu is an entry in a ~menuBar~ plus a floating card anchored under it. Both
+ids belong to the same widget, which is why they are declared together.
 
 #+begin_src nim
 import nest
 
 type
-  MsgKind = enum
-    ToggleMenu
-    Command
+  MenuEvent = object
+    command: string
+    toggled: bool
 
-  Msg = object
-    case kind: MsgKind
-    of ToggleMenu, Command:
-      name: string
-
-  Model = object
-    openMenu: string
-    lastCommand: string
-
-proc update(model: var Model, msg: Msg) =
-  case msg.kind
-  of ToggleMenu:
-    model.openMenu = if model.openMenu == msg.name: "" else: msg.name
-  of Command:
-    model.lastCommand = msg.name
-    model.openMenu = ""
-
-widget fileMenu(open: bool, msgs: var seq[Msg]):
+widget fileMenu(open: bool) emits MenuEvent:
   ui.menuBar(ui.id("bar"), cfg(width = fill(), height = fit(), gap = 4)):
     if ui.menu(ui.id("file"), "File", width = fit(), height = fit()):
-      msgs.add Msg(kind: ToggleMenu, name: "File")
+      emit MenuEvent(toggled: true)
 
   if open:
     ui.floatingCardBelow(ui.id("popover"), ui.id("file"),
@@ -1631,45 +1736,23 @@ widget fileMenu(open: bool, msgs: var seq[Msg]):
         ui.menuItem(ui.id("item", item), cfg(width = fill(), height = fit())):
           ui.label(ui.id("itemText", item), item, width = fit(), height = fit())
         if ui.clicked(ui.id("item", item)):
-          msgs.add Msg(kind: Command, name: item)
+          emit MenuEvent(command: item)
       ui.menuDivider(ui.id("divider"), width = fill(), height = fixed(9))
       ui.menuItem(ui.id("quit"), cfg(width = fill(), height = fit())):
         ui.label(ui.id("quitText"), "Quit", width = fit(), height = fit())
       if ui.clicked(ui.id("quit")):
-        msgs.add Msg(kind: Command, name: "Quit")
+        emit MenuEvent(command: "Quit")
 
-widget root(model: Model, msgs: var seq[Msg]):
+widget shell(menuOpen: var bool, lastCommand: var string):
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
-    ui.fileMenu(model.openMenu == "File", msgs)
-    ui.label(ui.id("last"), "last: " & model.lastCommand, width = fill(),
+    for event in ui.fileMenu(menuOpen):
+      if event.toggled:
+        menuOpen = not menuOpen
+      elif event.command.len > 0:
+        lastCommand = event.command
+        menuOpen = false
+    ui.label(ui.id("last"), "last: " & lastCommand, width = fill(),
         height = fit())
-#+end_src
-
-** Dialog Results
-
-For a dialog whose answer is a string, ~ui.returnDialog~ stores the answer and
-closes the dialog in one call, and ~ui.dialogResult~ reads it back.
-
-#+begin_src nim
-import nest
-
-type Model = object
-  renameOpen: bool
-  name: LineInputState
-
-widget renameDialog(model: var Model):
-  ui.modalDialog(ui.id("root"), model.renameOpen, cfg(width = fixed(320),
-      height = fit(), padding = 12, gap = 8)):
-    ui.lineInput(ui.id("input"), model.name, width = fill(), height = fixed(30))
-    if ui.button(ui.id("ok"), "Rename", width = fit(), height = fit()):
-      discard ui.returnDialog("rename", model.name.text, model.renameOpen)
-
-  ui.events:
-    if ui.hasDialogResult("rename"):
-      let answer = ui.dialogResult("rename")
-      ui.clearDialogResult("rename")
-      ui.markAllDirty()
-      discard answer
 #+end_src
 
 ** File Pickers
@@ -1680,7 +1763,10 @@ one, then read its result on a later frame.
 #+begin_src nim
 import nest
 
-widget filePicker(path: var string):
+type PickerEvent = object
+  path: string
+
+widget filePicker(current: string) emits PickerEvent:
   ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
     if ui.button(ui.id("browse"), "Browse", width = fit(), height = fit()):
       ui.io.files.pick(ui.id("browse"))
@@ -1688,17 +1774,17 @@ widget filePicker(path: var string):
     ui.events:
       let picked = ui.io.files.value(ui.id("browse"))
       if picked.len > 0:
-        path = picked
         ui.io.files.clear(ui.id("browse"))
+        emit PickerEvent(path: picked)
 
-    ui.label(ui.id("path"), path, width = fill(), height = fit())
+    ui.label(ui.id("path"), current, width = fill(), height = fit())
 #+end_src
 
 * Testing A Widget
 
-A widget can be driven without a window. Replace the font relays with stubs,
-build frames by hand, and assert on what was drawn. Entering the widget's scope
-gives a test the ids it declared.
+A widget can be driven without a window: replace the font relays with stubs,
+build frames by hand, and assert on the events it emitted and the text it drew.
+Entering the widget's scope gives a test the ids it declared.
 
 #+begin_src nim
 import std/strutils
@@ -1707,22 +1793,22 @@ import nest
 import nest/screen
 
 type
-  Msg = enum
-    Increment
-
-  Model = object
+  Counter = object
     count: int
 
-proc update(model: var Model, msg: Msg) =
-  case msg
-  of Increment: inc model.count
+  CounterEvent = enum
+    Bumped
 
-widget counter(model: Model, msgs: var seq[Msg]):
+proc update(model: var Counter, event: CounterEvent) =
+  case event
+  of Bumped: inc model.count
+
+widget counter(model: Counter) emits CounterEvent:
   ui.row(ui.id("root"), cfg(padding = 8, gap = 8)):
     ui.label(ui.id("count"), $model.count, width = fixed(60),
         height = fixed(24))
     if ui.button(ui.id("inc"), "+", width = fixed(40), height = fixed(24)):
-      msgs.add Increment
+      emit Bumped
 
 when isMainModule:
   var drawn: seq[string]
@@ -1743,8 +1829,8 @@ when isMainModule:
 
   var
     ui = UI.init()
-    model = Model()
-    msgs: seq[Msg]
+    model = Counter()
+    emitted: seq[CounterEvent]
 
   ui.initContext(320, 200)
   ui.loadFont("font", "", 18)
@@ -1754,17 +1840,19 @@ when isMainModule:
     ui.markAllDirty()
     ui.layout:
       ui.events:
-        msgs.setLen(0)
-      ui.counter(model, msgs)
+        emitted.setLen(0)
+      # Accumulated, never assigned: the layout pass emits nothing.
+      emitted.add ui.counter(model)
       ui.events:
-        for msg in msgs:
-          model.update(msg)
+        for event in emitted:
+          model.update(event)
     ui.finishInputFrame()
 
-  # First frame: the initial state is drawn.
+  # First frame: the initial state is drawn, nothing is emitted.
   ui.beginInputFrame()
   frame()
   doAssert "0" in drawn
+  doAssert emitted.len == 0
 
   # The button's id belongs to the widget, so the lookup enters its scope.
   var plusID: WidgetID
@@ -1780,24 +1868,24 @@ when isMainModule:
   ui.mouseDown()
   frame()
 
-  # Next frame: the click is observed, applied, and drawn.
+  # Next frame: the click is observed, emitted, applied, and drawn.
   ui.beginInputFrame()
   frame()
+  doAssert emitted == @[Bumped]
   doAssert model.count == 1
   doAssert "1" in drawn
 
   echo "widget test passed"
 #+end_src
 
-~ui.widgetFrame~ returns the solved frame of a widget, which is how a test finds
-where to click. ~tests/test_widget.nim~ drives the ~widget~ macro itself the same
-way.
+~tests/test_events.nim~ drives the same machinery through a parent and a
+grandparent, and ~tests/test_widget.nim~ covers the macro and ~runApp~.
 
 * The Gallery
 
 ~apps/gallery/gallery.nim~ is a Nim application that shows every built-in widget,
-grouped in tabs. Each tab is a ~widget~ declaration, and the application is
-written in the style described here.
+grouped in tabs. Every portion of it is a ~widget~, each tab owns its own state
+and event type, and the root composes them.
 
 #+begin_example
 nimble gallery
@@ -1816,16 +1904,22 @@ nimble gallery
 * Conventions
 
 - Declare every portion of the interface with ~widget~.
-- One ~Model~. All state, no widgets.
-- One ~Msg~ per event, named after the event.
-- ~update~ is the only writer of the model.
-- A widget takes the model by value and appends to a message queue.
-- Clear the queue at the start of the event pass, fold it at the end.
+- Give a widget its own event type with ~emits~, named after what happened, not
+  after what the parent should do about it.
+- Handle a child's event, or emit one of your own in its place. Never reach past
+  a parent to a grandchild's state.
+- A widget owns its state; a parent holds its children's state as fields and
+  calls their ~update~.
+- Consume events where they are returned, or accumulate them with ~add~. Never
+  assign them to something that outlives the call.
+- Collect a list's events first, edit the list afterwards.
 - Mutate nothing outside ~ui.events~.
 - Wrap a repeated widget in ~ui.scope~ at the call site.
 - Build ids from data, not from a loop index.
-- Keep ~LineInputState~, ~EditorState~ and ~Mesh2DState~ on the model.
-- Write a plain procedure when the ~ui~ parameter or the id scope is unwanted.
+- A container takes a ~body: untyped~ parameter, which makes it a template: it
+  cannot use ~emits~, so give it ~emitted: var seq[E]~, and avoid parameter names
+  that also appear as field names in its body.
+- Keep ~LineInputState~, ~EditorState~ and ~Mesh2DState~ in the widget's state.
 - Reach for a ~Component~ subclass only when nothing built in draws what is
   needed, and give it a ~renderKeyOverride~ when its appearance depends on more
   than its size.

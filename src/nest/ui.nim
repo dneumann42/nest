@@ -726,23 +726,45 @@ template autoScoped*(self: var UI, body: untyped) =
     self.scope(autoID):
       body
 
+proc peelSignature(node: NimNode, returnType, eventType: var NimNode): NimNode =
+  ## Strip `emits E` and `-> T` off a widget signature, in any order, including
+  ## when an export marker encloses them.
+  if node.kind == nnkCommand and node.len == 2 and node[1].kind == nnkCommand and
+      node[1][0].eqIdent("emits"):
+    eventType = node[1][1]
+    return node[0].peelSignature(returnType, eventType)
+  if node.kind == nnkInfix and node.len == 3 and node[0].eqIdent("->"):
+    returnType = node[2]
+    return node[1].peelSignature(returnType, eventType)
+  if node.kind == nnkInfix and node.len == 3 and node[0].eqIdent("*"):
+    return nnkInfix.newTree(
+      node[0], node[1], node[2].peelSignature(returnType, eventType)
+    )
+  node
+
+proc emitToResult(node: NimNode): NimNode =
+  ## Rewrite every `emit x` in a widget body into `result.add x`.
+  if node.kind in {nnkCall, nnkCommand} and node.len == 2 and
+      node[0].eqIdent("emit"):
+    return newCall(newDotExpr(ident"result", ident"add"), node[1])
+  result = node.copyNimNode
+  for child in node:
+    result.add child.emitToResult
+
 macro widget*(signature, body: untyped): untyped =
-  ## Declare a portion of a user interface as a named procedure.
+  ## Declare a portion of a user interface as a named routine.
   ##
-  ## `widget name(params): body` expands to a procedure that takes the `UI` as
-  ## its first parameter and runs `body` inside `ui.scope("name")`:
+  ## `widget name(params): body` expands to a routine that takes the `UI` as its
+  ## first parameter and runs `body` inside `ui.scope("name")`:
   ##
   ## ```nim
-  ## widget counter(model: Model, msgs: var seq[Msg]):
-  ##   ui.row(ui.id("row"), cfg(gap = 8)):
-  ##     if ui.button(ui.id("dec"), "-", fit(), fit()):
-  ##       msgs.add Decrement
+  ## widget counter(model: CounterModel):
+  ##   ui.label(ui.id("count"), $model.count, fit(), fit())
   ##
   ## # becomes
-  ## proc counter(ui: var UI, model: Model, msgs: var seq[Msg]) =
+  ## proc counter(ui: var UI, model: CounterModel) =
   ##   ui.scope("counter"):
-  ##     ui.row(ui.id("row"), cfg(gap = 8)):
-  ##       ...
+  ##     ui.label(ui.id("count"), $model.count, fit(), fit())
   ## ```
   ##
   ## The body is ordinary Nim and keeps the `ui.` prefix on every call, so a
@@ -755,33 +777,56 @@ macro widget*(signature, body: untyped): untyped =
   ## widget twice in one frame still needs a `ui.scope` at the call site, so the
   ## two instances differ.
   ##
-  ## Parameters take the usual forms, including a shared type and a default:
+  ## **Events.** `emits E` gives the widget its own event type. Inside the body,
+  ## `emit` reports one; the widget returns the events it emitted, and its caller
+  ## either handles them or raises its own in their place:
   ##
   ## ```nim
-  ## widget field(label, value: string, width = fill()):
-  ##   ui.row(ui.id("row"), cfg(width = width, height = fit(), gap = 8)):
-  ##     ui.label(ui.id("label"), label, fit(), fit())
-  ##     ui.label(ui.id("value"), value, fill(), fit())
+  ## widget counter(model: CounterModel) emits CounterEvent:
+  ##   if ui.button(ui.id("inc"), "+", fit(), fit()):
+  ##     emit Incremented
+  ##
+  ## widget page(model: PageModel) emits PageEvent:
+  ##   for event in ui.counter(model.counter):
+  ##     case event
+  ##     of Incremented: emit CountChanged
   ## ```
   ##
-  ## Export a widget by marking its name, as in `widget counter*(...)`. A widget
-  ## reports an event by declaring a return type with `->`, and the result is
-  ## discardable, as it is for the built-in widgets:
+  ## Events are produced during the event pass, so a caller consumes them where
+  ## they are returned, or accumulates them with `add`. Assigning them to a
+  ## variable that outlives the call loses them: the layout pass runs the widget
+  ## a second time and returns nothing.
+  ##
+  ## **Containers.** A parameter of type `untyped` takes a block, which lets a
+  ## widget wrap children the caller supplies. Such a widget expands to a
+  ## template rather than a procedure, so it cannot use `emits`; take an
+  ## `events: var seq[E]` parameter and append to it instead. Its parameter
+  ## names are substituted textually, so a name that also appears as a field
+  ## name inside the body will replace that too:
   ##
   ## ```nim
-  ## widget swatch(value: Color) -> bool:
-  ##   ui.colorSwatch(ui.id("swatch"), value, fixed(24), fixed(24))
-  ##   result = ui.clicked(ui.id("swatch"))
+  ## widget titledCard(title: string, body: untyped):
+  ##   ui.card(ui.id("root"), cfg(padding = 10, gap = 6)):
+  ##     ui.label(ui.id("title"), title, fill(), fit())
+  ##     body
+  ##
+  ## ui.titledCard("Details"):
+  ##   ui.label(ui.id("line"), "inside the card", fill(), fit())
   ## ```
+  ##
+  ## Parameters otherwise take the usual forms, including a shared type and a
+  ## default. Export a widget by marking its name, as in `widget counter*(...)`.
+  ## A return type can also be given directly with `->`, in which case `result`
+  ## is used as in any procedure and the result is discardable.
   var
-    node = signature
     returnType = newEmptyNode()
+    eventType = newEmptyNode()
+    node = signature.peelSignature(returnType, eventType)
 
-  if node.kind == nnkInfix and node[0].eqIdent("->"):
-    if node.len != 3:
-      error("widget expects `name(params) -> ReturnType`", signature)
-    returnType = node[2]
-    node = node[1]
+  if returnType.kind != nnkEmpty and eventType.kind != nnkEmpty:
+    error("a widget declares either `emits E` or `-> T`, not both", signature)
+  if eventType.kind != nnkEmpty:
+    returnType = nnkBracketExpr.newTree(ident"seq", eventType)
 
   var
     nameNode: NimNode
@@ -817,6 +862,7 @@ macro widget*(signature, body: untyped): untyped =
     parameters = @[returnType,
       newIdentDefs(ident"ui", nnkVarTy.newTree(ident"UI"))]
     pending: seq[NimNode]
+    takesBlock = false
 
   if argumentList != nil:
     for index in firstArgument ..< argumentList.len:
@@ -832,6 +878,8 @@ macro widget*(signature, body: untyped): untyped =
         if parameterType.kind == nnkAsgn:
           default = parameterType[1]
           parameterType = parameterType[0]
+        if parameterType.eqIdent("untyped") or parameterType.eqIdent("typed"):
+          takesBlock = true
         pending.add argument[0]
         for name in pending:
           parameters.add newIdentDefs(name, parameterType, default)
@@ -848,12 +896,29 @@ macro widget*(signature, body: untyped): untyped =
   if pending.len > 0:
     error("widget parameter `" & pending[^1].repr & "` has no type", signature)
 
-  let scoped = newStmtList(
-    newCall(newDotExpr(ident"ui", ident"scope"), newLit($bareName), body)
+  if eventType.kind != nnkEmpty and takesBlock:
+    error(
+      "a widget that takes a block cannot use `emits`, because it expands to " &
+        "a template: give it an `events: var seq[" & eventType.repr &
+        "]` parameter and append to that instead",
+      signature,
+    )
+
+  var rewritten = body
+  if eventType.kind != nnkEmpty:
+    rewritten = body.emitToResult
+
+  let scopeCall = newCall(
+    newDotExpr(ident"ui", ident"scope"), newLit($bareName), rewritten
   )
 
-  result = newProc(name = nameNode, params = parameters, body = scoped)
-  if returnType.kind != nnkEmpty:
+  result = newProc(
+    name = nameNode,
+    params = parameters,
+    body = newStmtList(scopeCall),
+    procType = if takesBlock: nnkTemplateDef else: nnkProcDef,
+  )
+  if returnType.kind != nnkEmpty and eventType.kind == nnkEmpty:
     result.addPragma ident"discardable"
 
 proc beginEvents(self: var UI, context: DrawContext) =

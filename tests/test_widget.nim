@@ -143,3 +143,42 @@ suite "widget macro":
     check a.ok
     check b.ok
     check a.frame == b.frame
+
+proc update(model: var Model, msg: Msg) =
+  case msg
+  of Decrement: dec model.count
+  of Increment: inc model.count
+
+widget rootView(model: Model) emits Msg:
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
+    ui.label(ui.id("count"), $model.count, fixed(60), fixed(24))
+    if ui.button(ui.id("inc"), "+", fixed(40), fixed(24)):
+      emit Increment
+
+suite "runApp":
+  test "the loop runs frames and stops when running is cleared":
+    var frames = 0
+    runApp(AppConfig.init(width = 120, height = 80), Model(), update, rootView):
+      inc frames
+      ui.requestRedrawAfter(1)
+      if frames >= 3:
+        running = false
+    check frames == 3
+
+  test "the queue takes its type from the root widget":
+    var seen = 0
+    runApp(AppConfig.init(width = 120, height = 80), Model(), update, rootView):
+      inc seen
+      # `msgs` is a seq of the root widget's event type.
+      check msgs is seq[Msg]
+      ui.requestRedrawAfter(1)
+      if seen >= 2:
+        running = false
+    check seen == 2
+
+  test "a root widget must emit its own events":
+    proc wrongArity(ui: var UI) = discard
+    check not compiles(runApp(AppConfig.init(), Model(), update, wrongArity))
+    # `counter` collects into a parameter instead of emitting, so it cannot be
+    # a root widget.
+    check not compiles(runApp(AppConfig.init(), Model(), update, counter))

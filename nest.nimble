@@ -14,6 +14,7 @@ task test, "Run the Nest test suite":
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_ui.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_owldsl.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_widget.nim"
+  exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_events.nim"
 
 task bench, "Run Nest benchmarks":
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/bench_network_dialog.nim"

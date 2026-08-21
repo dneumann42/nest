@@ -1,4 +1,4 @@
-import std/sets
+import std/[macros, sets]
 
 import nest/[appConfig, palette, resources, ui]
 import nest/[input, screen]
@@ -284,3 +284,72 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
     if ui.redrewFrame():
       refresh()
   shutdown()
+
+proc appLoop(cfg, initial, update, view, blk: NimNode): NimNode =
+  ## Build the frame loop `runApp` expands to.
+  ##
+  ## `ui`, `model` and `msgs` are spliced as plain identifiers, so the caller's
+  ## block can name them.
+  let
+    uiSym = ident"ui"
+    modelSym = ident"model"
+    msgsSym = ident"msgs"
+    msgSym = ident"msg"
+    cfgSym = genSym(nskLet, "appCfg")
+  quote do:
+    block:
+      let `cfgSym` = `cfg`
+      var `uiSym` = UI.init()
+      var `modelSym` = `initial`
+      # The root widget's own event type, taken from what it returns.
+      var `msgsSym`: typeof(`view`(`uiSym`, `modelSym`))
+      application `cfgSym`, `uiSym`:
+        `uiSym`.layout:
+          `uiSym`.events:
+            `msgsSym`.setLen(0)
+
+          `msgsSym`.add `view`(`uiSym`, `modelSym`)
+
+          `uiSym`.events:
+            for `msgSym` in `msgsSym`:
+              `update`(`modelSym`, `msgSym`)
+            if `msgsSym`.len > 0:
+              `uiSym`.markAllDirty()
+            `blk`
+
+macro runApp*(cfg, initial, update, view, blk: untyped): untyped =
+  ## Run a Model/Msg/update/view application until its window closes.
+  ##
+  ## Opens the window described by `cfg`, holds `initial` as the model, and runs
+  ## one frame at a time: the message queue is cleared, `view` declares the
+  ## interface, then every message it collected is applied with `update`.
+  ##
+  ## `view` is a widget that emits its own events: it is called as
+  ## `view(ui, model)`, and what it returns is the frame's queue. `update` is
+  ## called as `update(model, event)` for every event in it, which resolves
+  ## among as many `update` overloads as the application has state types.
+  ##
+  ## `blk` runs at the end of every event pass, with `ui`, `model`, `msgs` and
+  ## `running` in scope. Setting `running` to false leaves the loop.
+  ##
+  ## ```nim
+  ## runApp(AppConfig.init(title = "Counter"), Model(), update, counter):
+  ##   if ui.keyPressed("Escape"):
+  ##     running = false
+  ## ```
+  appLoop(cfg, initial, update, view, blk)
+
+macro runApp*(cfg, initial, update, view: untyped): untyped =
+  ## Run a Model/Msg/update/view application until its window closes.
+  ##
+  ## This is the whole main module of a typical application:
+  ##
+  ## ```nim
+  ## when isMainModule:
+  ##   runApp(AppConfig.init(width = 320, height = 160, title = "Counter"),
+  ##       Model(), update, counter)
+  ## ```
+  ##
+  ## Use the overload taking a trailing block to reach `ui`, `model`, `msgs` and
+  ## `running` once per frame.
+  appLoop(cfg, initial, update, view, newStmtList(nnkDiscardStmt.newTree(newEmptyNode())))

@@ -11,6 +11,7 @@ tests/test_layout
 /nest
 /tests/test_ui
 /tests/test_widget
+/tests/test_events
 /tests/test_dsl_reader
 /src/example/pathEditor/pathEditor
 /src/example/layerShellBar/layerShellBar

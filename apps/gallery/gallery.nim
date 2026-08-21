@@ -1,9 +1,8 @@
 ## Component gallery: every widget Nest ships, in one Nim application.
 ##
-## Run it with `nimble gallery` from the repository root. Every portion of the
-## interface is a `widget` declaration and the state follows
-## Model/Msg/update/view, so the application doubles as a worked example: see
-## docs/ui.org.
+## Run it with `nimble gallery` from the repository root. Each tab is a widget
+## with its own state and its own event type; the root holds those states as
+## fields and turns what the tabs report into the status line. See docs/ui.org.
 
 import std/[os, sets, strutils]
 
@@ -18,62 +17,104 @@ const
   ]
   ComboOptions = ["Solid", "Dashed", "Dotted"]
 
-type
-  MsgKind* = enum
-    SelectTab
-    ToggleCheckbox
-    SetVolume
-    SetBalance
-    SetAccent
-    SelectOption
-    OpenMenu
-    CloseMenu
-    OpenModal
-    CloseModal
-    Bump
-    Note
+# --- text tab: no state of its own --------------------------------------
 
-  Msg* = object
-    case kind*: MsgKind
-    of SelectTab, SelectOption:
-      index*: int
-    of SetVolume, SetBalance:
-      value*: float64
-    of SetAccent:
-      color*: Color
-    of OpenMenu, Note:
-      text*: string
-    else:
+type TextEvent* = enum
+  DiagnosticClicked
+
+# --- buttons tab --------------------------------------------------------
+
+type
+  Buttons* = object
+    clicks*: int
+
+  ButtonsEventKind* = enum
+    ButtonBumped
+    ButtonNoted
+
+  ButtonsEvent* = object
+    case kind*: ButtonsEventKind
+    of ButtonNoted:
+      what*: string
+    of ButtonBumped:
       discard
 
-  Model* = object
-    tab*: int
-    subscribed: bool
-    volume: float64
-    balance: float64
-    accent: Color
-    option: int
-    clicks: int
-    openMenu*: string
-    modalOpen*: bool
-    lastEvent*: string
-    name: LineInputState
-    source: EditorState
-    mesh: Mesh2DState
+proc update*(model: var Buttons, event: ButtonsEvent) =
+  case event.kind
+  of ButtonBumped: inc model.clicks
+  of ButtonNoted: discard
 
-proc initModel*(): Model =
-  result = Model(
+# --- inputs tab ---------------------------------------------------------
+
+type
+  Inputs* = object
+    subscribed*: bool
+    volume*: float64
+    balance*: float64
+    accent*: Color
+    option*: int
+    name*: LineInputState
+
+  InputsEventKind* = enum
+    SubscriptionToggled
+    VolumeMoved
+    BalanceMoved
+    AccentPicked
+    OptionPicked
+    NameSubmitted
+
+  InputsEvent* = object
+    case kind*: InputsEventKind
+    of VolumeMoved, BalanceMoved:
+      value*: float64
+    of AccentPicked:
+      color*: Color
+    of OptionPicked:
+      index*: int
+    of NameSubmitted:
+      text*: string
+    of SubscriptionToggled:
+      discard
+
+proc initInputs*(): Inputs =
+  Inputs(
     volume: 0.65,
     balance: 0.5,
     accent: color(79, 185, 154),
     option: 1,
-    lastEvent: "ready",
     name: LineInputState.new("nest"),
-    source: EditorState.new(
-      "proc main() =\n  var ui = UI.init()\n  echo ui.windowWidth\n"
-    ),
   )
-  result.mesh = Mesh2DState(
+
+proc update*(model: var Inputs, event: InputsEvent) =
+  case event.kind
+  of SubscriptionToggled: model.subscribed = not model.subscribed
+  of VolumeMoved: model.volume = event.value
+  of BalanceMoved: model.balance = event.value
+  of AccentPicked: model.accent = event.color
+  of OptionPicked: model.option = event.index
+  of NameSubmitted: discard
+
+# --- editors tab --------------------------------------------------------
+
+type Editors* = object
+  source*: EditorState
+
+proc initEditors*(): Editors =
+  Editors(source: EditorState.new(
+    "proc main() =\n  var ui = UI.init()\n  echo ui.windowWidth\n"
+  ))
+
+# --- mesh tab -----------------------------------------------------------
+
+type
+  Mesh* = object
+    state*: Mesh2DState
+
+  MeshEvent* = enum
+    MeshEdited
+
+proc initMesh*(): Mesh =
+  Mesh(state: Mesh2DState(
     points:
       @[
         Mesh2DPoint(x: 0.25, y: 0.25),
@@ -87,50 +128,70 @@ proc initModel*(): Model =
     viewCenterY: 0.5,
     altDragSensitivity: 0.25,
     altDragSnapStep: 0.05,
+  ))
+
+# --- overlays tab -------------------------------------------------------
+
+type
+  Overlays* = object
+    openMenu*: string
+    modalOpen*: bool
+
+  OverlaysEventKind* = enum
+    MenuToggled
+    MenuCommand
+    ModalOpened
+    ModalClosed
+
+  OverlaysEvent* = object
+    case kind*: OverlaysEventKind
+    of MenuToggled, MenuCommand:
+      name*: string
+    else:
+      discard
+
+proc update*(model: var Overlays, event: OverlaysEvent) =
+  case event.kind
+  of MenuToggled:
+    model.openMenu = if model.openMenu == event.name: "" else: event.name
+  of MenuCommand:
+    model.openMenu = ""
+  of ModalOpened:
+    model.modalOpen = true
+  of ModalClosed:
+    model.modalOpen = false
+
+# --- the application ----------------------------------------------------
+
+type
+  Gallery* = object
+    tab*: int
+    status*: string
+    buttons*: Buttons
+    inputs*: Inputs
+    editors*: Editors
+    mesh*: Mesh
+    overlays*: Overlays
+
+  GalleryEvent* = object
+    status*: string
+
+proc initGallery*(): Gallery =
+  Gallery(
+    status: "ready",
+    inputs: initInputs(),
+    editors: initEditors(),
+    mesh: initMesh(),
   )
 
-proc update*(model: var Model, msg: Msg) =
-  case msg.kind
-  of SelectTab:
-    model.tab = msg.index
-    model.lastEvent = "tab " & TabLabels[msg.index]
-  of ToggleCheckbox:
-    model.subscribed = not model.subscribed
-    model.lastEvent = "subscribed " & $model.subscribed
-  of SetVolume:
-    model.volume = msg.value
-    model.lastEvent = "volume " & formatFloat(msg.value, ffDecimal, 2)
-  of SetBalance:
-    model.balance = msg.value
-    model.lastEvent = "balance " & formatFloat(msg.value, ffDecimal, 2)
-  of SetAccent:
-    model.accent = msg.color
-    model.lastEvent = "accent changed"
-  of SelectOption:
-    model.option = msg.index
-    model.lastEvent = "option " & ComboOptions[msg.index]
-  of OpenMenu:
-    model.openMenu = msg.text
-    model.lastEvent = "menu " & msg.text
-  of CloseMenu:
-    model.openMenu = ""
-  of OpenModal:
-    model.modalOpen = true
-    model.lastEvent = "modal opened"
-  of CloseModal:
-    model.modalOpen = false
-    model.lastEvent = "modal closed"
-  of Bump:
-    inc model.clicks
-    model.lastEvent = "clicks " & $model.clicks
-  of Note:
-    model.lastEvent = msg.text
+proc update*(model: var Gallery, event: GalleryEvent) =
+  model.status = event.status
 
 widget heading(key, text: string):
   ui.scope(key):
     ui.label(ui.id("text"), text, width = fit(), height = fit())
 
-widget textTab(msgs: var seq[Msg]):
+widget textTab() emits TextEvent:
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12, height = fit())):
     ui.heading("labelHeading", "label")
     ui.label(ui.id("plain"), "Plain label", width = fit(), height = fit())
@@ -148,7 +209,7 @@ widget textTab(msgs: var seq[Msg]):
       height = fit(),
       clickable = true,
     ):
-      msgs.add Msg(kind: Note, text: "diagnostic clicked")
+      emit DiagnosticClicked
 
     ui.heading("scrollHeading", "label with textScroll")
     ui.label(
@@ -159,23 +220,23 @@ widget textTab(msgs: var seq[Msg]):
       textScroll = true,
     )
 
-widget buttonsTab(model: Model, msgs: var seq[Msg]):
+widget buttonsTab(model: Buttons, accent: Color) emits ButtonsEvent:
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12, height = fit())):
     ui.heading("buttonHeading", "button")
     ui.row(ui.id("row"), cfg(gap = 8, width = fit(), height = fit())):
       if ui.button(ui.id("bump"), "Click me", width = fit(), height = fit()):
-        msgs.add Msg(kind: Bump)
+        emit ButtonsEvent(kind: ButtonBumped)
       if ui.button(ui.id("padded"), "Extra padding", width = fit(),
           height = fit(), buttonPadding = 14.0):
-        msgs.add Msg(kind: Note, text: "padded button")
+        emit ButtonsEvent(kind: ButtonNoted, what: "padded button")
       if ui.button(
         ui.id("styled"),
         "Styled",
         width = fit(),
         height = fit(),
-        style = ComponentStyle(hasBackground: true, background: model.accent),
+        style = ComponentStyle(hasBackground: true, background: accent),
       ):
-        msgs.add Msg(kind: Note, text: "styled button")
+        emit ButtonsEvent(kind: ButtonNoted, what: "styled button")
 
     ui.label(ui.id("count"), "clicks: " & $model.clicks, width = fit(),
         height = fit())
@@ -193,21 +254,21 @@ widget buttonsTab(model: Model, msgs: var seq[Msg]):
           width = fixed(48), height = fixed(48))
       if ui.imageButton(ui.id("imagebutton"), AssetPath, width = fixed(48),
           height = fixed(48)):
-        msgs.add Msg(kind: Note, text: "image button clicked")
+        emit ButtonsEvent(kind: ButtonNoted, what: "image button clicked")
 
-widget inputsTab(model: Model, msgs: var seq[Msg]):
+widget inputsTab(model: Inputs) emits InputsEvent:
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12, height = fit())):
     ui.heading("checkboxHeading", "checkbox")
     ui.checkbox(ui.id("subscribe"), "Subscribed", model.subscribed,
         width = fit(), height = fit())
     if ui.clicked(ui.id("subscribe")):
-      msgs.add Msg(kind: ToggleCheckbox)
+      emit InputsEvent(kind: SubscriptionToggled)
 
     ui.heading("sliderHeading", "slider")
     let volume = ui.slider(ui.id("volume"), model.volume, 0.0, 1.0,
         width = fill(), height = fixed(24))
     if volume.active:
-      msgs.add Msg(kind: SetVolume, value: volume.value)
+      emit InputsEvent(kind: VolumeMoved, value: volume.value)
 
     ui.row(ui.id("vertical"), cfg(gap = 8, width = fit(), height = fit())):
       let balance = ui.slider(
@@ -220,7 +281,7 @@ widget inputsTab(model: Model, msgs: var seq[Msg]):
         orientation = SliderVertical,
       )
       if balance.active:
-        msgs.add Msg(kind: SetBalance, value: balance.value)
+        emit InputsEvent(kind: BalanceMoved, value: balance.value)
       ui.label(
         ui.id("balanceValue"),
         "balance " & formatFloat(model.balance, ffDecimal, 2),
@@ -233,21 +294,21 @@ widget inputsTab(model: Model, msgs: var seq[Msg]):
         height = fixed(32))
     var accent = model.accent
     if ui.colorInput(ui.id("accent"), "Accent", accent):
-      msgs.add Msg(kind: SetAccent, color: accent)
+      emit InputsEvent(kind: AccentPicked, color: accent)
 
     ui.heading("comboHeading", "combobox")
     let picked = ui.combobox(ui.id("style"), model.option, ComboOptions,
         width = fixed(180), height = fixed(28))
     if picked.changed:
-      msgs.add Msg(kind: SelectOption, index: picked.index)
+      emit InputsEvent(kind: OptionPicked, index: picked.index)
 
     ui.heading("lineInputHeading", "lineInput")
     ui.lineInput(ui.id("name"), model.name, width = fixed(220),
         height = fixed(30))
     if ui.submitted(ui.id("name")):
-      msgs.add Msg(kind: Note, text: "name submitted: " & model.name.text)
+      emit InputsEvent(kind: NameSubmitted, text: model.name.text)
 
-widget editorsTab(model: Model):
+widget editorsTab(model: Editors):
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12)):
     ui.heading("editorHeading", "textEditor")
     ui.textEditor(
@@ -269,7 +330,7 @@ widget editorsTab(model: Model):
       height = fit(),
     )
 
-widget tablesTab(model: Model):
+widget tablesTab(clicks: int, subscribed: bool):
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12, height = fit())):
     ui.heading("tableHeading", "table, tableHeader, tableRow, tableCell")
     ui.table(ui.id("table"), cfg(width = fill(), height = fit())):
@@ -279,19 +340,20 @@ widget tablesTab(model: Model):
               height = fit())):
             ui.label(ui.id("headText", column), title, width = fit(),
                 height = fit())
-      for row, entry in [
-        ["button", "interactive", "clicks " & $model.clicks],
-        ["checkbox", "interactive", $model.subscribed],
+      for rowIndex, entry in [
+        ["button", "interactive", "clicks " & $clicks],
+        ["checkbox", "interactive", $subscribed],
         ["label", "static", "-"],
       ]:
-        ui.tableRow(ui.id("row", row), cfg(width = fill(), height = fit())):
+        ui.tableRow(ui.id("row", rowIndex), cfg(width = fill(),
+            height = fit())):
           for column, cell in entry:
-            ui.tableCell(ui.id("cell", row, column), cfg(width = fill(),
+            ui.tableCell(ui.id("cell", rowIndex, column), cfg(width = fill(),
                 height = fit())):
-              ui.label(ui.id("cellText", row, column), cell, width = fit(),
-                  height = fit())
+              ui.label(ui.id("cellText", rowIndex, column), cell,
+                  width = fit(), height = fit())
 
-widget meshTab(model: var Model, msgs: var seq[Msg]):
+widget meshTab(model: var Mesh) emits MeshEvent:
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12)):
     ui.heading("meshHeading", "mesh2d")
     ui.label(
@@ -300,24 +362,18 @@ widget meshTab(model: var Model, msgs: var seq[Msg]):
       width = fill(),
       height = fit(),
     )
-    if ui.mesh2d(ui.id("editor"), model.mesh, AssetPath, width = fill(),
+    if ui.mesh2d(ui.id("editor"), model.state, AssetPath, width = fill(),
         height = fill(min = 200)):
-      msgs.add Msg(kind: Note, text: "mesh edited")
+      emit MeshEdited
 
-widget menuBarRow(openMenu: string, msgs: var seq[Msg]):
+widget menuBarRow(openMenu: string) emits OverlaysEvent:
   ## The bar and its popover share one scope, so the popover can anchor itself
   ## to the entry that opened it.
   ui.menuBar(ui.id("bar"), cfg(width = fill(), height = fit(), gap = 4)):
     if ui.menu(ui.id("file"), "File", width = fit(), height = fit()):
-      if openMenu == "File":
-        msgs.add Msg(kind: CloseMenu)
-      else:
-        msgs.add Msg(kind: OpenMenu, text: "File")
+      emit OverlaysEvent(kind: MenuToggled, name: "File")
     if ui.menu(ui.id("help"), "Help", width = fit(), height = fit()):
-      if openMenu == "Help":
-        msgs.add Msg(kind: CloseMenu)
-      else:
-        msgs.add Msg(kind: OpenMenu, text: "Help")
+      emit OverlaysEvent(kind: MenuToggled, name: "Help")
 
   if openMenu == "File":
     ui.floatingCardBelow(ui.id("popover"), ui.id("file"),
@@ -326,17 +382,19 @@ widget menuBarRow(openMenu: string, msgs: var seq[Msg]):
         ui.menuItem(ui.id("item", item), cfg(width = fill(), height = fit())):
           ui.label(ui.id("itemText", item), item, width = fit(), height = fit())
         if ui.clicked(ui.id("item", item)):
-          msgs.add Msg(kind: Note, text: "File / " & item)
+          emit OverlaysEvent(kind: MenuCommand, name: "File / " & item)
       ui.menuDivider(ui.id("divider"), width = fill(), height = fixed(9))
       ui.menuItem(ui.id("quit"), cfg(width = fill(), height = fit())):
         ui.label(ui.id("quitText"), "Quit", width = fit(), height = fit())
       if ui.clicked(ui.id("quit")):
-        msgs.add Msg(kind: Note, text: "File / Quit")
+        emit OverlaysEvent(kind: MenuCommand, name: "File / Quit")
 
-widget overlaysTab(model: Model, msgs: var seq[Msg]):
+widget overlaysTab(model: Overlays) emits OverlaysEvent:
   ui.column(ui.id("root"), cfg(gap = 10, padding = 12, height = fit())):
     ui.heading("menubarHeading", "menuBar, menu, menuItem, menuDivider")
-    ui.menuBarRow(model.openMenu, msgs)
+    for event in ui.menuBarRow(model.openMenu):
+      # Nothing to add at this level: the tab passes them straight on.
+      emit event
 
     ui.heading("cardHeading", "card and dialogHeader")
     ui.card(ui.id("card"), cfg(width = fill(), height = fit(), padding = 8,
@@ -358,16 +416,16 @@ widget overlaysTab(model: Model, msgs: var seq[Msg]):
     ui.heading("modalHeading", "modalDialog")
     if ui.button(ui.id("openModal"), "Open modal", width = fit(),
         height = fit()):
-      msgs.add Msg(kind: OpenModal)
+      emit OverlaysEvent(kind: ModalOpened)
 
-widget modal(open: bool, msgs: var seq[Msg]):
+widget modal(open: bool) emits OverlaysEvent:
   ui.modalDialog(ui.id("root"), open, cfg(width = fixed(320), height = fit(),
       padding = 12, gap = 10)):
     ui.label(ui.id("text"), "A modal dialog.", width = fill(), height = fit())
     ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8,
         justifyContent = JustifyEnd)):
       if ui.button(ui.id("close"), "Close", width = fit(), height = fit()):
-        msgs.add Msg(kind: CloseModal)
+        emit OverlaysEvent(kind: ModalClosed)
 
 widget statusBar(text: string):
   ui.dialogHeader(ui.id("root"), cfg(width = fill(), height = fit(),
@@ -375,45 +433,78 @@ widget statusBar(text: string):
     ui.label(ui.id("text"), "last event: " & text, width = fill(),
         height = fit())
 
-widget view*(model: var Model, msgs: var seq[Msg]):
+widget view*(model: var Gallery) emits GalleryEvent:
   ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8,
       gap = 8)):
     var tab = model.tab
     ui.tabs(ui.id("tabs"), TabLabels, tab, width = fill(), height = fit(),
         gap = 4)
     if tab != model.tab:
-      msgs.add Msg(kind: SelectTab, index: tab)
+      model.tab = tab
+      emit GalleryEvent(status: "tab " & TabLabels[tab])
 
+    # Every tab reports in its own vocabulary; this is where those become the
+    # status line, and where each tab's own state is updated.
     case model.tab
-    of 0: ui.textTab(msgs)
-    of 1: ui.buttonsTab(model, msgs)
-    of 2: ui.inputsTab(model, msgs)
-    of 3: ui.editorsTab(model)
-    of 4: ui.tablesTab(model)
-    of 5: ui.meshTab(model, msgs)
-    else: ui.overlaysTab(model, msgs)
+    of 0:
+      for event in ui.textTab():
+        case event
+        of DiagnosticClicked:
+          emit GalleryEvent(status: "diagnostic clicked")
+    of 1:
+      for event in ui.buttonsTab(model.buttons, model.inputs.accent):
+        model.buttons.update(event)
+        case event.kind
+        of ButtonBumped:
+          emit GalleryEvent(status: "clicks " & $model.buttons.clicks)
+        of ButtonNoted:
+          emit GalleryEvent(status: event.what)
+    of 2:
+      for event in ui.inputsTab(model.inputs):
+        model.inputs.update(event)
+        case event.kind
+        of SubscriptionToggled:
+          emit GalleryEvent(status: "subscribed " & $model.inputs.subscribed)
+        of VolumeMoved:
+          emit GalleryEvent(
+            status: "volume " & formatFloat(event.value, ffDecimal, 2))
+        of BalanceMoved:
+          emit GalleryEvent(
+            status: "balance " & formatFloat(event.value, ffDecimal, 2))
+        of AccentPicked:
+          emit GalleryEvent(status: "accent changed")
+        of OptionPicked:
+          emit GalleryEvent(status: "option " & ComboOptions[event.index])
+        of NameSubmitted:
+          emit GalleryEvent(status: "name submitted: " & event.text)
+    of 3:
+      ui.editorsTab(model.editors)
+    of 4:
+      ui.tablesTab(model.buttons.clicks, model.inputs.subscribed)
+    of 5:
+      for event in ui.meshTab(model.mesh):
+        case event
+        of MeshEdited:
+          emit GalleryEvent(status: "mesh edited")
+    else:
+      for event in ui.overlaysTab(model.overlays):
+        model.overlays.update(event)
+        case event.kind
+        of MenuToggled:
+          emit GalleryEvent(status: "menu " & event.name)
+        of MenuCommand:
+          emit GalleryEvent(status: event.name)
+        of ModalOpened:
+          emit GalleryEvent(status: "modal opened")
+        of ModalClosed:
+          emit GalleryEvent(status: "modal closed")
 
-    ui.statusBar(model.lastEvent)
+    ui.statusBar(model.status)
 
-  ui.modal(model.modalOpen, msgs)
+  for event in ui.modal(model.overlays.modalOpen):
+    model.overlays.update(event)
+    emit GalleryEvent(status: "modal closed")
 
 when isMainModule:
-  var
-    ui = UI.init()
-    model = initModel()
-    msgs: seq[Msg]
-
-  let appCfg = AppConfig.init(width = 900, height = 640, title = "Nest Gallery")
-
-  application appCfg, ui:
-    ui.layout:
-      ui.events:
-        msgs.setLen(0)
-
-      ui.view(model, msgs)
-
-      ui.events:
-        for msg in msgs:
-          model.update(msg)
-        if msgs.len > 0:
-          ui.markAllDirty()
+  runApp(AppConfig.init(width = 900, height = 640, title = "Nest Gallery"),
+      initGallery(), update, view)
