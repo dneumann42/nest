@@ -1,5 +1,3 @@
-import std/sets
-
 import ../widgets2
 import component
 import nest/[coords, screen]
@@ -48,32 +46,16 @@ proc new*(T: typedesc[Panel]): T =
   T()
 
 proc new*(T: typedesc[Card]): T =
-  ## Create a card: a raised, bordered surface that also swallows pointer
-  ## presses that land on it.
+  ## Create a card: a raised, bordered surface.
+  ##
+  ## A floating card takes the pointer for itself while it is under it, which
+  ## the UI arranges for every covering surface; see `UI.update`.
   T()
 
 proc new*(T: typedesc[DialogHeader]): T =
   ## Create a dialog header: a titled strip with a left slot and a slot of
   ## trailing controls.
   T()
-
-method update*(self: Card, widget: Widget, ctx: var UpdateContext) =
-  ## Swallow a left-button press that lands anywhere on the card.
-  ##
-  ## Floating cards, menu popovers included, are opaque input surfaces, so
-  ## any widget that had claimed the press underneath the card loses it. The
-  ## card's own children update afterwards and can claim the press again.
-  discard self
-  let frame = widget.frame
-  let containsPointer =
-    ctx.mouseX.toFloat >= frame.x and
-    ctx.mouseX.toFloat < frame.x + frame.width and
-    ctx.mouseY.toFloat >= frame.y and
-    ctx.mouseY.toFloat < frame.y + frame.height
-  if containsPointer and ctx.mouseLeftPressed:
-    # Floating cards, including menu popovers, are opaque input surfaces.
-    # Their children are updated after the card and may claim the press.
-    ctx.activeWidgets.clear()
 
 proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)

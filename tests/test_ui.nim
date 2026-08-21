@@ -164,9 +164,10 @@ suite "ui layout nesting":
       ui.applyIntrinsicSizes(resources)
       ui.endLayout()
 
-      checkFrame(ui.widget(HeaderRow), 0, 0, 500, 24)
+      # A `fit` button is one standard control tall, and the row fits it.
+      checkFrame(ui.widget(HeaderRow), 0, 0, 500, ControlHeight.toFloat)
       checkFrame(ui.widget(HeaderLabel), 0, 0, 460, 18)
-      checkFrame(ui.widget(HeaderNewButton), 460, 0, 40, 24)
+      checkFrame(ui.widget(HeaderNewButton), 460, 0, 40, ControlHeight.toFloat)
     finally:
       fontRelays = originalFontRelays
 
@@ -1549,3 +1550,291 @@ Stack trace:
             edit.beginEdit(row.key, row.value)
 
     check edit.editing(listKey(1, "beta"))
+
+  test "a slider drag stays with the slider the press landed on":
+    var ui = UI.init()
+    ui.initContext(200, 200)
+    ui.loadFont("font", "", 18)
+
+    var
+      first = 0.0
+      second = 0.0
+
+    template scene() =
+      ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 10)):
+        let a = ui.slider(ui.id("first"), first, 0, 100, fill(), fixed(30))
+        if a.active:
+          first = a.value
+        let b = ui.slider(ui.id("second"), second, 0, 100, fill(), fixed(30))
+        if b.active:
+          second = b.value
+
+    template frame() =
+      ui.beginInputFrame()
+      ui.markAllDirty()
+      ui.layout:
+        scene()
+      ui.finishInputFrame()
+
+    frame()
+    let
+      firstFrame = ui.widgetFrame(ui.id("first"))
+      secondFrame = ui.widgetFrame(ui.id("second"))
+    check firstFrame.ok
+    check secondFrame.ok
+
+    # Press near the left of the first slider, so its value is low.
+    ui.mouseMove((firstFrame.frame.x + firstFrame.frame.width * 0.2).int,
+        (firstFrame.frame.y + firstFrame.frame.height / 2).int)
+    ui.mouseDown()
+    frame()
+    check first > 10.0
+    check first < 30.0
+    check second == 0.0
+
+    # Drag onto the second slider: only the first one follows the pointer.
+    ui.mouseMove((secondFrame.frame.x + secondFrame.frame.width * 0.8).int,
+        (secondFrame.frame.y + secondFrame.frame.height / 2).int)
+    frame()
+    check first > 70.0
+    check second == 0.0
+
+    # After the release the drag is over, so moving alone changes nothing.
+    ui.mouseUp()
+    frame()
+    let settled = first
+    ui.mouseMove((firstFrame.frame.x + firstFrame.frame.width * 0.1).int,
+        (firstFrame.frame.y + firstFrame.frame.height / 2).int)
+    frame()
+    check first == settled
+    check second == 0.0
+
+  test "controls fit to one standard height":
+    var ui = UI.init()
+    ui.initContext(400, 300)
+    ui.loadFont("font", "", 18)
+    var
+      selected = 0
+      text = LineInputState.new("nest")
+
+    ui.beginInputFrame()
+    ui.markAllDirty()
+    ui.layout:
+      ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 4)):
+        ui.button(ui.id("button"), "Save", fit(), fit())
+        ui.checkbox(ui.id("checkbox"), "On", true, fit(), fit())
+        ui.slider(ui.id("slider"), 0.5, 0, 1, fill(), fit())
+        ui.combobox(ui.id("combobox"), 0, ["One", "Two"], fit(), fit())
+        ui.lineInput(ui.id("lineInput"), text, fixed(120), fit())
+        ui.tabs(ui.id("tabs"), ["First", "Second"], selected)
+    ui.finishInputFrame()
+
+    for name in ["button", "checkbox", "slider", "combobox", "lineInput"]:
+      let located = ui.widgetFrame(ui.id(name))
+      check located.ok
+      check located.frame.height == ControlHeight.toFloat
+    let tab = ui.widgetFrame(ui.id(ui.id("tabs"), "tab", 0))
+    check tab.ok
+    check tab.frame.height == ControlHeight.toFloat
+
+  test "tab labels sit at the same height whether or not the tab is selected":
+    let originalFontRelays = fontRelays
+    var drawnLabels: seq[tuple[text: string, y: int]]
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      drawnLabels.add (text, y)
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    )
+    try:
+      var ui = UI.init()
+      ui.initContext(400, 200)
+      ui.loadFont("font", "", 18)
+      var tops: seq[int]
+      for selectedTab in 0 .. 2:
+        var selected = selectedTab
+        drawnLabels.setLen(0)
+        ui.beginInputFrame()
+        ui.markAllDirty()
+        ui.layout:
+          ui.tabs(ui.id("tabs"), ["One", "Two", "Three"], selected)
+        ui.finishInputFrame()
+        for drawn in drawnLabels:
+          if drawn.text in ["One", "Two", "Three"]:
+            tops.add drawn.y
+      check tops.len == 9
+      for top in tops:
+        check top == tops[0]
+    finally:
+      fontRelays = originalFontRelays
+
+  test "an open dropdown owns the pointer and closes on a pick":
+    var ui = UI.init()
+    ui.initContext(300, 400)
+    ui.loadFont("font", "", 18)
+    var
+      picked = 0
+      behind = 0
+      closeOnSelect = true
+
+    template scene() =
+      ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 4)):
+        let choice = ui.combobox(ui.id("combo"), picked, ["One", "Two",
+            "Three"], fixed(160), fit(), closeOnSelect = closeOnSelect)
+        if choice.changed:
+          picked = choice.index
+        # Directly under the list, so a click that leaks through lands here.
+        if ui.button(ui.id("behind"), "Behind", fixed(160), fixed(32)):
+          behind.inc
+
+    template frame() =
+      ui.beginInputFrame()
+      ui.markAllDirty()
+      ui.layout:
+        scene()
+      ui.finishInputFrame()
+
+    template clickAt(x, y: int) =
+      ui.mouseMove(x, y)
+      ui.mouseDown()
+      frame()
+      ui.mouseUp()
+      frame()
+
+    frame()
+    let field = ui.widgetFrame(ui.id("combo")).frame
+    let behindFrame = ui.widgetFrame(ui.id("behind")).frame
+    check field.height == ControlHeight.toFloat
+    # The list is drawn over the button below it.
+    check behindFrame.y < field.y + field.height * 3.0
+
+    clickAt((field.x + 20).int, (field.y + field.height / 2).int)
+    check ui.wantsTextInput
+
+    # Third row of the list, which covers the button.
+    clickAt((field.x + 20).int, (field.y + field.height * 2.5).int)
+    check picked == 1
+    check behind == 0
+    check not ui.wantsTextInput
+
+    closeOnSelect = false
+    frame()
+    clickAt((field.x + 20).int, (field.y + field.height / 2).int)
+    check ui.wantsTextInput
+    clickAt((field.x + 20).int, (field.y + field.height * 3.5).int)
+    check picked == 2
+    check behind == 0
+    check ui.wantsTextInput
+
+  test "a floating card owns the pointer over what it covers":
+    var ui = UI.init()
+    ui.initContext(300, 200)
+    ui.loadFont("font", "", 18)
+    var
+      cardOpen = false
+      inside = 0
+      behind = 0
+
+    template scene() =
+      ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 0)):
+        if ui.button(ui.id("open"), "Open", fixed(80), fixed(32)):
+          cardOpen = true
+        if ui.button(ui.id("behind"), "Behind", fill(), fixed(60)):
+          behind.inc
+        if cardOpen:
+          ui.floatingCardBelow(ui.id("card"), ui.id("open"),
+              cfg(width = fixed(120), height = fit(), padding = 4)):
+            if ui.button(ui.id("item"), "Item", fill(), fixed(32)):
+              inside.inc
+
+    template frame() =
+      ui.beginInputFrame()
+      ui.markAllDirty()
+      ui.layout:
+        scene()
+      ui.finishInputFrame()
+
+    frame()
+    let openFrame = ui.widgetFrame(ui.id("open")).frame
+    ui.mouseMove((openFrame.x + 10).int, (openFrame.y + 10).int)
+    ui.mouseDown()
+    frame()
+    ui.mouseUp()
+    frame()
+    check cardOpen
+
+    frame()
+    let itemFrame = ui.widgetFrame(ui.id("item"))
+    let behindFrame = ui.widgetFrame(ui.id("behind"))
+    check itemFrame.ok
+    check behindFrame.ok
+    # The item sits on top of the button behind it.
+    check itemFrame.frame.y >= behindFrame.frame.y
+    check itemFrame.frame.y < behindFrame.frame.y + behindFrame.frame.height
+
+    ui.mouseMove((itemFrame.frame.x + 10).int,
+        (itemFrame.frame.y + itemFrame.frame.height / 2).int)
+    ui.mouseDown()
+    frame()
+    ui.mouseUp()
+    frame()
+    check inside == 1
+    check behind == 0
+
+  test "a modal dialog owns the pointer everywhere it is open":
+    var ui = UI.init()
+    ui.initContext(300, 200)
+    ui.loadFont("font", "", 18)
+    var
+      modalOpen = false
+      behind = 0
+      closed = 0
+
+    template scene() =
+      ui.column(ui.id("root"), cfg(width = fill(), height = fill())):
+        if ui.button(ui.id("behind"), "Behind", fill(), fixed(60)):
+          behind.inc
+      ui.modalDialog(ui.id("modal"), modalOpen, cfg(width = fixed(120),
+          height = fit(), padding = 8)):
+        if ui.button(ui.id("close"), "Close", fill(), fixed(32)):
+          closed.inc
+
+    template frame() =
+      ui.beginInputFrame()
+      ui.markAllDirty()
+      ui.layout:
+        scene()
+      ui.finishInputFrame()
+
+    template clickAt(x, y: int) =
+      ui.mouseMove(x, y)
+      ui.mouseDown()
+      frame()
+      ui.mouseUp()
+      frame()
+
+    frame()
+    let behindFrame = ui.widgetFrame(ui.id("behind")).frame
+    clickAt((behindFrame.x + 10).int, (behindFrame.y + 10).int)
+    check behind == 1
+
+    modalOpen = true
+    frame()
+    frame()
+    # The dialog covers only its own box, but nothing outside it reacts.
+    clickAt((behindFrame.x + 10).int, (behindFrame.y + 4).int)
+    check behind == 1
+
+    let closeFrame = ui.widgetFrame(ui.id("close")).frame
+    clickAt((closeFrame.x + 10).int, (closeFrame.y + closeFrame.height / 2).int)
+    check closed == 1
+    check behind == 1

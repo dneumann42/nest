@@ -102,6 +102,10 @@ type
     eventActiveWidgets: HashSet[WidgetID]
     eventSubmittedWidgets: HashSet[WidgetID]
     eventFocusedWidget: WidgetID
+    pointerSurfaceWidget: WidgetID
+    pointerSurfaceIDs: HashSet[WidgetID]
+    modalWidgets: HashSet[WidgetID]
+    retainedModalWidgets: HashSet[WidgetID]
     windowDragHandle: WidgetID
     windowDragLastX, windowDragLastY: int
     scheduledRedrawTicks: int
@@ -921,12 +925,76 @@ macro widget*(signature, body: untyped): untyped =
   if returnType.kind != nnkEmpty and eventType.kind == nnkEmpty:
     result.addPragma ident"discardable"
 
+proc pointerContains(frame: Frame, x, y: int): bool =
+  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
+    y.toFloat >= frame.y and y.toFloat < frame.y + frame.height
+
+proc collectSubtree(
+    self: UI,
+    id: WidgetID,
+    children: Table[WidgetID, seq[Widget]],
+    into: var HashSet[WidgetID],
+) =
+  into.incl id
+  for child in children.getOrDefault(id):
+    self.collectSubtree(child.id, children, into)
+
+proc takePointerSurface(self: var UI, x, y, windowWidth, windowHeight: int) =
+  ## Decide which surface owns the pointer for this frame.
+  ##
+  ## A surface that covers other widgets owns the pointer while the pointer is
+  ## inside it: a floating card, a dialog, a menu popover, or the area a
+  ## component reports from `pointerShield`, such as an open dropdown list.
+  ## The topmost one wins, which is the last one declared, and a component's
+  ## overlay comes above the floating widgets because that is the order they
+  ## draw in.
+  ##
+  ## It is decided once, from the frame on screen, and holds for the whole
+  ## frame: the click that closes a popover therefore belongs to the popover
+  ## and not to what it covered.
+  self.pointerSurfaceWidget = InvalidWidgetID
+  self.pointerSurfaceIDs.clear()
+  for widget in self.retainedFloatingWidgets:
+    if widget.id in self.retainedModalWidgets:
+      # A modal dialog takes the whole window, which is what makes it modal.
+      self.pointerSurfaceWidget = widget.id
+      continue
+    let located = self.widgetFrame(widget.id)
+    if located.ok and located.frame.pointerContains(x, y):
+      self.pointerSurfaceWidget = widget.id
+  for (component, widget) in self.retainedComponents:
+    let shield = component.pointerShield(widget, windowWidth, windowHeight)
+    if shield.has and shield.frame.pointerContains(x, y):
+      self.pointerSurfaceWidget = widget.id
+  if self.pointerSurfaceWidget != InvalidWidgetID:
+    self.collectSubtree(
+      self.pointerSurfaceWidget, self.retainedLayoutChildren,
+      self.pointerSurfaceIDs,
+    )
+
+proc pointerSurface*(self: UI): WidgetID =
+  ## Return the widget that owns the pointer this frame, or `InvalidWidgetID`
+  ## when the pointer is over ordinary content.
+  self.pointerSurfaceWidget
+
+proc pointerReaches*(self: UI, id: WidgetID): bool =
+  ## Test whether the pointer is available to the widget `id` this frame.
+  ##
+  ## False for everything outside the surface that owns the pointer, which is
+  ## how one click lands on one surface only. Widgets that read a press
+  ## directly, rather than through `clicked`, ask this first.
+  self.pointerSurfaceWidget == InvalidWidgetID or
+    id in self.pointerSurfaceIDs
+
 proc beginEvents(self: var UI, context: DrawContext) =
   self.phase = EventPhase
   self.autoIDCounter = 0
   self.eventActiveWidgets = context.activeWidgets
   self.eventSubmittedWidgets = context.submittedWidgets
   self.eventFocusedWidget = context.focusedWidget
+  self.takePointerSurface(
+    context.mouseX, context.mouseY, context.windowWidth, context.windowHeight
+  )
 
 proc active*(self: UI, id: WidgetID): bool =
   ## Test whether the widget `id` is being pressed.
@@ -935,14 +1003,18 @@ proc active*(self: UI, id: WidgetID): bool =
 proc clicked*(self: UI, id: WidgetID): bool =
   ## Test whether the widget `id` was clicked.
   ##
-  ## True while the widget is held pressed, which is what the widget helpers
-  ## return from the event phase.
-  self.active(id)
+  ## True on the frame the press lands, which is what the widget helpers
+  ## return from the event phase. Like them, it answers only while events are
+  ## being dispatched, so a handler built on it runs once a frame rather than
+  ## again as the widget tree is built.
+  self.phase == EventPhase and self.active(id)
 
 proc dragWindow*(self: var UI, id: WidgetID) =
   ## Makes this widget a drag handle for the application window.
   ## Call this from a popup or dialog title region to opt into dragging.
   if self.phase != EventPhase:
+    return
+  if not self.pointerReaches(id):
     return
   let located = self.widgetFrame(id)
   if self.context.update.mouseLeftPressed and located.ok:
@@ -1021,7 +1093,11 @@ proc middleDragDelta*(self: var UI, id: WidgetID):
 proc submitted*(self: UI, id: WidgetID): bool =
   ## Test whether the widget `id` was submitted, as a line input is by the
   ## Enter key.
-  id in self.eventSubmittedWidgets
+  ##
+  ## Answers only while events are being dispatched, like the widget helpers
+  ## themselves, so a handler built on it runs once a frame rather than again
+  ## as the widget tree is built.
+  self.phase == EventPhase and id in self.eventSubmittedWidgets
 
 proc sliderValue*(self: UI, id: WidgetID): tuple[active: bool, value: float64] =
   ## Report the value of the slider `id` while it is being dragged.
@@ -1042,6 +1118,20 @@ proc focus*(self: var UI, id: WidgetID) =
   self.context.update.focusedWidget = id
   self.context.draw.focusedWidget = id
   self.eventFocusedWidget = id
+
+proc closeFocus*(self: var UI, id: WidgetID) =
+  ## Take keyboard focus away from the widget `id`, if it holds it.
+  ##
+  ## Focus is tracked in three places, and all three are cleared here: an
+  ## event handler that cleared only one of them would find the layout pass
+  ## putting the focus back, which is what keeps a dropdown open after a
+  ## pick.
+  if self.context.update.focusedWidget == id:
+    self.context.update.focusedWidget = InvalidWidgetID
+  if self.context.draw.focusedWidget == id:
+    self.context.draw.focusedWidget = InvalidWidgetID
+  if self.eventFocusedWidget == id:
+    self.eventFocusedWidget = InvalidWidgetID
 
 proc liveWidget*(self: UI, id: WidgetID): bool =
   ## Test whether the widget `id` was declared in the current frame.
@@ -1144,6 +1234,7 @@ proc reset*(self: var UI) =
   self.childrenWidgets.setLen(0)
   self.components.setLen(0)
   self.floatingWidgets.setLen(0)
+  self.modalWidgets.clear()
   self.floatingBelowAnchors.clear()
   self.componentByID.clear()
   if self.intrinsicByID.isNil:
@@ -1267,9 +1358,7 @@ proc verticalThumb(parent: Widget, state: ScrollState): Frame =
   )
 
 proc contains(frame: Frame, x, y: int): bool =
-  x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and y.toFloat >=
-      frame.y and
-    y.toFloat < frame.y + frame.height
+  frame.pointerContains(x, y)
 
 proc shiftDescendants(
     self: UI, parent: Widget, dx, dy: float64, visited: var HashSet[WidgetID]
@@ -1791,6 +1880,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
     self.retainedComponentByID = self.componentByID
     self.retainedLayoutChildren = self.layoutChildren
     self.retainedFloatingWidgets = self.floatingWidgets
+    self.retainedModalWidgets = self.modalWidgets
     self.retainedScrollContainers = self.scrollContainers
     self.retainedFrameValid = true
 
@@ -1815,6 +1905,14 @@ proc currentWidget(self: UI, id: WidgetID): tuple[ok: bool, widget: Widget] =
     if box.id == id:
       return (true, box)
   (false, Widget())
+
+proc peekChildren(self: UI): seq[Widget] =
+  ## Return the children collected for the current parent, leaving them in
+  ## place for the arrangement that follows.
+  if self.frames.len == 0:
+    self.childrenWidgets
+  else:
+    self.frames[^1].children
 
 proc takeChildren(self: var UI): seq[Widget] =
   if self.frames.len == 0:
@@ -2155,16 +2253,67 @@ proc updateScrollbarDrag(self: var UI, parent: Widget,
     self.markDirty(parent.id)
     self.requestRedrawAfterSafe(16)
 
+const PointerAway = -1_000_000
+  ## A pointer position no widget can contain, which is how a widget under a
+  ## shielded surface is updated: it sees a pointer that is nowhere near it.
+
+template withoutPointer(context: var UpdateContext, body: untyped) =
+  ## Run `body` with the pointer moved out of reach and its buttons up.
+  ##
+  ## Keyboard state is left alone, so a focused widget keeps taking keys.
+  let
+    mouseX {.gensym.} = context.mouseX
+    mouseY {.gensym.} = context.mouseY
+    leftDown {.gensym.} = context.mouseLeftDown
+    leftPressed {.gensym.} = context.mouseLeftPressed
+    middleDown {.gensym.} = context.mouseMiddleDown
+    middlePressed {.gensym.} = context.mouseMiddlePressed
+    rightPressed {.gensym.} = context.mouseRightPressed
+    wheelX {.gensym.} = context.mouseWheelX
+    wheelY {.gensym.} = context.mouseWheelY
+  context.mouseX = PointerAway
+  context.mouseY = PointerAway
+  context.mouseLeftDown = false
+  context.mouseLeftPressed = false
+  context.mouseMiddleDown = false
+  context.mouseMiddlePressed = false
+  context.mouseRightPressed = false
+  context.mouseWheelX = 0
+  context.mouseWheelY = 0
+  try:
+    body
+  finally:
+    context.mouseX = mouseX
+    context.mouseY = mouseY
+    context.mouseLeftDown = leftDown
+    context.mouseLeftPressed = leftPressed
+    context.mouseMiddleDown = middleDown
+    context.mouseMiddlePressed = middlePressed
+    context.mouseRightPressed = rightPressed
+    context.mouseWheelX = wheelX
+    context.mouseWheelY = wheelY
+
 proc updateWidgetTree(
     self: var UI,
     widget: Widget,
     components: Table[WidgetID, Component],
     context: var UpdateContext,
     clipped = false,
+    shieldOwner = InvalidWidgetID,
+    blocked = false,
 ) =
-  self.updateScrollbarDrag(widget, context)
-  if components.hasKey(widget.id):
-    components[widget.id].update(widget, context)
+  # Once the walk reaches the widget that owns the pointer, it and everything
+  # inside it see the pointer again.
+  let widgetBlocked = blocked and widget.id != shieldOwner
+  if widgetBlocked:
+    withoutPointer(context):
+      self.updateScrollbarDrag(widget, context)
+      if components.hasKey(widget.id):
+        components[widget.id].update(widget, context)
+  else:
+    self.updateScrollbarDrag(widget, context)
+    if components.hasKey(widget.id):
+      components[widget.id].update(widget, context)
 
   let insideClip =
     (not clipped) or widget.frame.contains(context.mouseX, context.mouseY) or
@@ -2174,14 +2323,27 @@ proc updateWidgetTree(
   if not insideClip and childClipped:
     return
   for child in self.layoutChildren.getOrDefault(widget.id):
-    self.updateWidgetTree(child, components, context, childClipped)
+    self.updateWidgetTree(
+      child, components, context, childClipped, shieldOwner, widgetBlocked
+    )
 
 proc update*(self: var UI, context: var UpdateContext) =
   ## Update every component in the tree against `context`, floating widgets
   ## included.
-  self.updateWidgetTree(self.root, self.componentByID, context)
+  ##
+  ## A surface that covers other widgets takes the pointer for itself: while
+  ## the pointer is over a floating card, a menu popover or an open dropdown
+  ## list, every widget outside it is updated as though the pointer were
+  ## nowhere near, so a click cannot land on two surfaces at once.
+  let shieldOwner = self.pointerSurfaceWidget
+  let blocked = shieldOwner != InvalidWidgetID
+  self.updateWidgetTree(
+    self.root, self.componentByID, context, false, shieldOwner, blocked
+  )
   for widget in self.floatingWidgets:
-    self.updateWidgetTree(widget, self.componentByID, context)
+    self.updateWidgetTree(
+      widget, self.componentByID, context, false, shieldOwner, blocked
+    )
 
 proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
   ## Draw the widget tree into `context` and report whether anything was
@@ -2555,18 +2717,16 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
       self.pushLayout(layoutParent)
       body
       discard
-      let captured = self.takeChildren()
+      let captured = self.peekChildren()
       if captured.len != 1:
         raise newException(
           ValueError, "expected exactly one centered widget, got " & $captured.len
         )
-      let child = captured[0]
-      discard self.layout.constrain(child.left >= layoutParent.left)
-      discard self.layout.constrain(child.top >= layoutParent.top)
-      discard self.layout.constrain(child.right <= layoutParent.right)
-      discard self.layout.constrain(child.bottom <= layoutParent.bottom)
-      self.layout.alignCenterX(child, layoutParent)
-      self.layout.alignCenterY(child, layoutParent)
+      # An arrangement rather than bare constraints, so a centred box works
+      # inside a scroll container too, where children are placed directly
+      # instead of being solved.
+      self.overlay(cfg(width = w, height = h, alignItems = AlignCenter,
+          justifyContent = JustifyCenter))
       discard self.popLayout()
 
 template center*(self: var UI, w = fill(), h = fill(), body: untyped) =
@@ -2701,8 +2861,10 @@ template modalDialog*(
   ## Declare a modal dialog with the id `id`, shown while `open` is true.
   ##
   ## The dialog is laid out over the rest of the frame and centred in the
-  ## window, holding the widgets declared in `body` as a column. Nothing is
-  ## declared at all while `open` is false.
+  ## window, holding the widgets declared in `body` as a column. While it is
+  ## open it owns the pointer everywhere, so nothing behind it reacts, which
+  ## is what makes it modal. Nothing is declared at all while `open` is
+  ## false.
   block:
     if open:
       if self.phase == EventPhase:
@@ -2724,6 +2886,7 @@ template modalDialog*(
         self.layout.alignCenterX(layoutParent, self.root)
         self.layout.alignCenterY(layoutParent, self.root)
         self.floatingWidgets.add layoutParent
+        self.modalWidgets.incl id
         self.pushLayout(layoutParent)
         body
         discard
@@ -2874,7 +3037,8 @@ template tableCell*(self: var UI, config: BoxConfig, body: untyped) =
       body
 
 proc box*(
-    self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
+    self: var UI, id: WidgetID, width = fill(),
+    height = fill(), alignSelf = AlignAuto
 ): Widget =
   ## Create a box widget with the id `id` and mark it live for this frame.
   ##
@@ -2887,7 +3051,8 @@ proc container*(
     self: var UI,
     id: WidgetID,
     component: Container,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): Widget {.discardable, layoutOnly.} =
   ## Declare a container widget with the id `id` and `component` attached, and
@@ -2903,7 +3068,8 @@ proc component*(
     self: var UI,
     id: WidgetID,
     component: Component,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
@@ -2923,7 +3089,8 @@ proc component*(
   self.addChild(result)
 
 proc spacer*(
-    self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
+    self: var UI, id: WidgetID, width = fill(),
+    height = fill(), alignSelf = AlignAuto
 ): Widget {.discardable, layoutOnly.} =
   ## Declare an empty box that only takes up space.
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -2934,7 +3101,8 @@ proc button*(
     ui: var UI,
     id: WidgetID,
     label: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     textScroll = false,
     fontName = "font",
@@ -2968,7 +3136,8 @@ proc button*(
     ui: var UI,
     id: WidgetID,
     label: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     textScroll = false,
     fontName = "font",
@@ -2992,7 +3161,8 @@ proc menu*(
     ui: var UI,
     id: WidgetID,
     label: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
   ## Declare a menu bar entry with the id `id` labelled `label`.
@@ -3030,7 +3200,8 @@ template menuItem*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 proc menuDivider*(
-    ui: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
+    ui: var UI, id: WidgetID, width = fill(),
+    height = fit(), alignSelf = AlignAuto
 ) {.layoutOnly.} =
   ## Declare a divider between two groups of menu items.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -3042,7 +3213,8 @@ proc button*(
     ui: var UI,
     key: string,
     label: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
   ## Declare a button whose id is built from the name `key`.
@@ -3090,11 +3262,12 @@ proc tabs*(
   panel.style = style
   ui.attach(layoutParent, Component(panel))
   ui.pushLayout(layoutParent)
+  let tabHeight = fixed(ControlHeight.toFloat)
   for i, label in labels:
     let tabID = ui.id(id, "tab", i)
-    let box = ui.box(tabID, width = fit(), height = fixed(30))
+    let box = ui.box(tabID, width = fit(), height = tabHeight)
     ui.setRenderKey(tabID, renderKey("tab:" & label & ":" & $(i == selected),
-        fit(), fixed(30), AlignAuto))
+        fit(), tabHeight, AlignAuto))
     ui.attach(box, Component(TabButton.new(label, i == selected, tabStyle)))
     ui.addChild(box)
   ui.row(cfg(
@@ -3112,7 +3285,8 @@ proc label*(
     ui: var UI,
     id: WidgetID,
     text: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
     textScroll = false,
@@ -3137,7 +3311,8 @@ proc checkbox*(
     id: WidgetID,
     label: string,
     checked: bool,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
@@ -3163,7 +3338,8 @@ proc coloredLabel*(
     id: WidgetID,
     text: string,
     color: Color,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
@@ -3184,7 +3360,8 @@ proc diagnosticLabel*(
     id: WidgetID,
     text: string,
     color: Color,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     clickable = false,
     fontName = "font",
     alignSelf = AlignAuto,
@@ -3214,7 +3391,8 @@ proc image*(
     ui: var UI,
     id: WidgetID,
     path: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   ## Declare an image widget with the id `id` showing the image at `path`.
@@ -3229,7 +3407,8 @@ proc image*(
     id: WidgetID,
     path: string,
     source: Rect,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   ## Declare an image widget with the id `id` showing the `source` region of
@@ -3244,7 +3423,8 @@ proc imageButton*(
     ui: var UI,
     id: WidgetID,
     path: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
@@ -3271,7 +3451,8 @@ proc imageButton*(
     id: WidgetID,
     path: string,
     source: Rect,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
@@ -3298,7 +3479,8 @@ proc mesh2d*(
     id: WidgetID,
     state: var Mesh2DState,
     imagePath: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
   ## Declare a 2D mesh editor with the id `id` over `state`, drawn on top of
@@ -3322,7 +3504,8 @@ proc slider*(
     ui: var UI,
     id: WidgetID,
     value, minimum, maximum: float64,
-    width, height: SizePolicy,
+    width = fill(min = 120),
+    height = fit(),
     orientation = SliderHorizontal,
     alignSelf = AlignAuto,
 ): tuple[active: bool, value: float64] {.discardable.} =
@@ -3332,7 +3515,18 @@ proc slider*(
   ## `active` is true while the slider is being dragged, and `value` is the
   ## value under the pointer; the caller owns the value and decides whether
   ## to keep it.
+  ##
+  ## A drag belongs to the slider the press landed on until the button comes
+  ## up: while one slider is being dragged the others report nothing, so
+  ## dragging the pointer over them leaves their values alone.
   if ui.phase == EventPhase:
+    if not ui.pointerReaches(id):
+      return (false, 0.0)
+    let
+      dragOwner = ui.context.draw.sliderDragging
+      dragging = dragOwner == id
+    if dragOwner != InvalidWidgetID and not dragging:
+      return (false, 0.0)
     let located = ui.widgetFrame(id)
     if located.ok:
       let
@@ -3342,18 +3536,21 @@ proc slider*(
           ui.context.update.mouseX.toFloat < f.x + f.width and
           ui.context.update.mouseY.toFloat >= f.y and
           ui.context.update.mouseY.toFloat < f.y + f.height
-        dragging = ui.context.draw.sliderDragging == id
-      if (ui.context.update.mouseLeftDown and (hot or ui.active(id) or
-          dragging)) or ((not ui.context.update.mouseLeftDown) and dragging):
+        starting =
+          (not dragging) and hot and ui.context.update.mouseLeftPressed
+        continuing = dragging and ui.context.update.mouseLeftDown
+        ending = dragging and not ui.context.update.mouseLeftDown
+      if starting or continuing or ending:
         let value = sliderValueFromMouse(
           f, ui.context.update.mouseX, ui.context.update.mouseY, minimum,
           maximum,
           orientation,
         )
         ui.context.draw.sliderValues[id] = value
-        ui.context.draw.sliderDragging = id
         ui.context.update.sliderValues[id] = value
-        ui.context.update.sliderDragging = id
+        let owner = if ending: InvalidWidgetID else: id
+        ui.context.draw.sliderDragging = owner
+        ui.context.update.sliderDragging = owner
         ui.markDirty(id)
         return (true, value)
     return ui.sliderValue(id)
@@ -3381,7 +3578,8 @@ proc colorSwatch*(
     ui: var UI,
     id: WidgetID,
     value: Color,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   ## Declare a colour swatch with the id `id` showing `value`.
@@ -3454,6 +3652,9 @@ proc comboboxPopupIndex(
     optionHeight: float64,
     windowHeight, mouseX, mouseY: int,
 ): int =
+  ## Return the index of the option under the pointer, or -1 when the pointer
+  ## is not over the open list. `optionHeight` is the height of one row, which
+  ## is the height of the field itself.
   if optionCount <= 0 or optionHeight <= 0.0:
     return -1
   let
@@ -3480,16 +3681,20 @@ proc combobox*(
     id: WidgetID,
     selected: int,
     options: openArray[string],
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
+    closeOnSelect = true,
 ): tuple[changed: bool, index: int] {.discardable.} =
   ## Declare a combo box with the id `id` offering `options`, with `selected`
   ## as the current index.
   ##
   ## Returns the index the user picked and whether it differs from
-  ## `selected`; the caller owns the selection. The list opens on a click and
-  ## closes on the next one, and `index` stays at `selected` for empty
-  ## `options`.
+  ## `selected`; the caller owns the selection. The list opens on a click,
+  ## closes when the pointer goes elsewhere, and `index` stays at `selected`
+  ## for empty `options`. Picking an option closes the list too, unless
+  ## `closeOnSelect` is false, which suits a list the user picks from more
+  ## than once.
   result.index = selected
   if options.len == 0:
     return
@@ -3497,6 +3702,8 @@ proc combobox*(
   let clampedSelected = selected.clamp(0, options.len - 1)
 
   if ui.phase == EventPhase:
+    if not ui.pointerReaches(id):
+      return
     let open = ui.context.draw.focusedWidget == id
     if open:
       let located = ui.widgetFrame(id)
@@ -3509,7 +3716,7 @@ proc combobox*(
             ui.context.update.mouseY.float64 >= f.y and
             ui.context.update.mouseY.float64 < f.y + f.height
           optionIndex = comboboxPopupIndex(
-            f, options.len, height.value, ui.windowHeight,
+            f, options.len, f.height, ui.windowHeight,
             ui.context.update.mouseX,
             ui.context.update.mouseY,
           )
@@ -3518,12 +3725,11 @@ proc combobox*(
         ui.context.draw.activeWidgets.clear()
         ui.context.draw.submittedWidgets.clear()
         if optionIndex >= 0:
-          ui.context.draw.focusedWidget = InvalidWidgetID
-          ui.eventFocusedWidget = InvalidWidgetID
+          if closeOnSelect:
+            ui.closeFocus(id)
           return (optionIndex != clampedSelected, optionIndex)
         elif not inField:
-          ui.context.draw.focusedWidget = InvalidWidgetID
-          ui.eventFocusedWidget = InvalidWidgetID
+          ui.closeFocus(id)
     return
 
   let open = ui.context.draw.focusedWidget == id
@@ -3537,12 +3743,21 @@ proc combobox*(
       alignSelf,
     ),
   )
+  # One option is as tall as the field, which is only known once the frame is
+  # solved; until then the standard control height stands in.
+  let solved = ui.widgetFrame(id)
+  let optionHeight =
+    if solved.ok and solved.frame.height > 0.0:
+      solved.frame.height.int
+    elif height.value > 0.0:
+      height.value.int
+    else:
+      ControlHeight
   ui.attach(
     box,
     Component(
       ComboBox.new(
-        options[clampedSelected], options, clampedSelected, open,
-            height.value.int
+        options[clampedSelected], options, clampedSelected, open, optionHeight
     )
   ),
   )
@@ -3555,7 +3770,8 @@ proc lineInput*(
     ui: var UI,
     id: WidgetID,
     state: LineInputState,
-    width, height: SizePolicy,
+    width = fill(min = 160),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
 ) =
@@ -3577,7 +3793,8 @@ proc textEditor*(
     ui: var UI,
     id: WidgetID,
     state: EditorState,
-    width, height: SizePolicy,
+    width = fill(min = 240),
+    height = fill(min = 160),
     fontName = "font",
     alignSelf = AlignAuto,
     lineNumbers = false,
@@ -3621,7 +3838,8 @@ proc textEditor*(
 proc container*(
     self: var UI,
     component: Container,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): Widget {.discardable, layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -3630,7 +3848,8 @@ proc container*(
 proc component*(
     self: var UI,
     component: Component,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
@@ -3640,7 +3859,8 @@ proc component*(
   )
 
 proc spacer*(
-    self: var UI, width, height: SizePolicy, alignSelf = AlignAuto
+    self: var UI, width = fill(),
+    height = fill(), alignSelf = AlignAuto
 ): Widget {.discardable, layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   self.spacer(self.nextAutoID(), width, height, alignSelf)
@@ -3648,7 +3868,8 @@ proc spacer*(
 proc button*(
     ui: var UI,
     label: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     textScroll = false,
     style = ComponentStyle(),
@@ -3662,14 +3883,16 @@ proc button*(
 proc menu*(
     ui: var UI,
     label: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.menu(ui.nextAutoID(), label, width, height, alignSelf)
 
 proc menuDivider*(
-    ui: var UI, width, height: SizePolicy, alignSelf = AlignAuto
+    ui: var UI, width = fill(),
+    height = fit(), alignSelf = AlignAuto
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.menuDivider(ui.nextAutoID(), width, height, alignSelf)
@@ -3695,7 +3918,8 @@ proc tabs*(
 proc label*(
     ui: var UI,
     text: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
     textScroll = false,
@@ -3707,7 +3931,8 @@ proc checkbox*(
     ui: var UI,
     label: string,
     checked: bool,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
@@ -3718,7 +3943,8 @@ proc coloredLabel*(
     ui: var UI,
     text: string,
     color: Color,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
@@ -3729,7 +3955,8 @@ proc diagnosticLabel*(
     ui: var UI,
     text: string,
     color: Color,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     clickable = false,
     fontName = "font",
     alignSelf = AlignAuto,
@@ -3742,7 +3969,8 @@ proc diagnosticLabel*(
 proc image*(
     ui: var UI,
     path: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -3752,7 +3980,8 @@ proc image*(
     ui: var UI,
     path: string,
     source: Rect,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -3761,7 +3990,8 @@ proc image*(
 proc imageButton*(
     ui: var UI,
     path: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
@@ -3772,7 +4002,8 @@ proc imageButton*(
     ui: var UI,
     path: string,
     source: Rect,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
@@ -3783,7 +4014,8 @@ proc mesh2d*(
     ui: var UI,
     state: var Mesh2DState,
     imagePath: string,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -3792,7 +4024,8 @@ proc mesh2d*(
 proc slider*(
     ui: var UI,
     value, minimum, maximum: float64,
-    width, height: SizePolicy,
+    width = fill(min = 120),
+    height = fit(),
     orientation = SliderHorizontal,
     alignSelf = AlignAuto,
 ): tuple[active: bool, value: float64] {.discardable.} =
@@ -3804,7 +4037,8 @@ proc slider*(
 proc colorSwatch*(
     ui: var UI,
     value: Color,
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -3825,7 +4059,8 @@ proc combobox*(
     ui: var UI,
     selected: int,
     options: openArray[string],
-    width, height: SizePolicy,
+    width = fit(),
+    height = fit(),
     alignSelf = AlignAuto,
 ): tuple[changed: bool, index: int] {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -3834,7 +4069,8 @@ proc combobox*(
 proc lineInput*(
     ui: var UI,
     state: LineInputState,
-    width, height: SizePolicy,
+    width = fill(min = 160),
+    height = fit(),
     fontName = "font",
     alignSelf = AlignAuto,
 ) =
@@ -3844,7 +4080,8 @@ proc lineInput*(
 proc textEditor*(
     ui: var UI,
     state: EditorState,
-    width, height: SizePolicy,
+    width = fill(min = 240),
+    height = fill(min = 160),
     fontName = "font",
     alignSelf = AlignAuto,
     lineNumbers = false,

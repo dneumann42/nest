@@ -6,7 +6,7 @@ const
   ComboPaddingX = 8
   ComboPaddingY = 4
   ComboArrowWidth = 18
-  ComboMinHeight = 28
+  ComboMinHeight = ControlHeight
 
 type
   ComboBox* = ref object of Interactive
@@ -94,6 +94,19 @@ proc drawTextClipped(ctx: var DrawContext, f: Frame, text: string, selected = fa
   restoreState()
   if selected:
     fillRect(rect(f.x.toInt + 3, f.y.toInt + 3, 3, max(f.height.toInt - 6, 1)), ctx.palette.cardAccent)
+
+method pointerShield*(
+    self: ComboBox, widget: Widget, windowWidth, windowHeight: int
+): tuple[has: bool, frame: Frame] =
+  ## Shield the open list, so a click on an option cannot also reach whatever
+  ## the list covers. Shields nothing while the list is closed.
+  if not self.open:
+    return (false, Frame())
+  (
+    true,
+    popupFrame(widget.frame, self.options.len, self.optionHeight,
+        windowHeight),
+  )
 
 method draw*(self: ComboBox, widget: Widget, ctx: var DrawContext) =
   ## Draw the closed field: its background, label and arrow.

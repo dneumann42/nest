@@ -5,7 +5,7 @@ import nest/[coords, screen]
 const
   ButtonPaddingX = 8
   ButtonPaddingY = 3
-  ButtonMinHeight = 24
+  ButtonMinHeight = ControlHeight
 
 proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)

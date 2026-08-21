@@ -20,3 +20,4 @@ tests/test_layout
 example/layerShellBar/layerShellBar
 *.out
 docs/api/
+/tests/test_owldsl

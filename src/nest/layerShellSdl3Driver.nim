@@ -2,8 +2,9 @@
 
 import sdl3
 import sdl3_ttf
-import std/[atomics, hashes, os, tables]
+import std/[atomics, hashes, os, strutils, tables]
 import nest/[coords, input, screen]
+import nest/fallbackfonts
 
 {.compile: "wayland/wlr-layer-shell-unstable-v1-protocol.c".}
 {.compile: "wayland/xdg-shell-protocol.c".}
@@ -13,6 +14,16 @@ import nest/[coords, input, screen]
 proc imgLoad(
   file: cstring
 ): ptr Surface {.importc: "IMG_Load", cdecl, dynlib: "libSDL3_image.so".}
+
+proc ttfOpenFontIO(
+  src: sdl3.IOStream, closeio: bool, ptsize: cfloat
+): sdl3_ttf.Font {.importc: "TTF_OpenFontIO", cdecl, dynlib: sdl3_ttf.TtfLibName.}
+
+# Kept alive for the process, since a font opened from memory reads from it
+# for as long as it is open.
+let
+  embeddedSansFont = fallbackSansFont
+  embeddedMonoFont = fallbackMonoFont
 
 # --- Font handle management ---
 
@@ -328,7 +339,75 @@ proc evictTextCacheIfNeeded() =
 
 # --- Screen hook implementations ---
 
+proc fontDirectories(): seq[string] =
+  ## Return the directories a font file is looked for in, application fonts
+  ## first, so a font the user installed wins over a system one.
+  when defined(windows):
+    @[getHomeDir() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts",
+      getEnv("WINDIR", r"C:\Windows") / "Fonts"]
+  elif defined(macosx):
+    @[getHomeDir() / "Library" / "Fonts", "/Library/Fonts",
+      "/System/Library/Fonts"]
+  else:
+    @[getHomeDir() / ".local" / "share" / "fonts", getHomeDir() / ".fonts",
+      "/usr/local/share/fonts", "/usr/share/fonts"]
+
+const
+  FontFileExtensions = [".ttf", ".otf", ".ttc"]
+  # Faces that are the wrong weight or slant for body text, or that carry no
+  # usable Latin text at all.
+  UnwantedFaces = [
+    "italic", "oblique", "bold", "black", "heavy", "thin", "light", "medium",
+    "semibold", "extra", "ultra", "emoji", "symbol", "math", "icon",
+  ]
+
+var scannedFonts: Table[string, string]
+
+proc scanForFont(needles, avoid: openArray[string]): string =
+  ## Return the most regular-looking font file whose name contains every
+  ## needle and none of `avoid`, or an empty string when there is none.
+  ##
+  ## Results are remembered, since the scan walks the font directories.
+  let key = needles.join(",") & "|" & avoid.join(",")
+  if scannedFonts.hasKey(key):
+    return scannedFonts[key]
+  var
+    best = ""
+    bestScore = -1
+  for directory in fontDirectories():
+    if not dirExists(directory):
+      continue
+    for path in walkDirRec(directory):
+      let name = path.extractFilename.toLowerAscii
+      if name.splitFile.ext notin FontFileExtensions:
+        continue
+      var wanted = true
+      for needle in needles:
+        if needle notin name:
+          wanted = false
+          break
+      for word in avoid:
+        if word in name:
+          wanted = false
+          break
+      if not wanted:
+        continue
+      let score =
+        (if "regular" in name: 2 else: 0) + (if "nerd" in name: 1 else: 0)
+      if score > bestScore or (score == bestScore and (best.len == 0 or path < best)):
+        best = path
+        bestScore = score
+  scannedFonts[key] = best
+  best
+
 proc resolveFontPath(path: string): string =
+  ## Return the file to open for the font named `path`.
+  ##
+  ## A path is taken as it stands. The name `nerd-monospace` asks for a
+  ## monospaced font and an empty name for a proportional one: both are looked
+  ## for among the usual system files first and then by scanning the font
+  ## directories. An empty result means nothing was found, and the caller
+  ## falls back to the font compiled into the binary.
   if path.len > 0 and path != "nerd-monospace":
     return path
 
@@ -340,14 +419,14 @@ proc resolveFontPath(path: string): string =
 
   if path == "nerd-monospace":
     when defined(windows):
-      return firstExisting(
+      result = firstExisting(
         [
           r"C:\Windows\Fonts\CaskaydiaCoveNerdFont-Regular.ttf",
           r"C:\Windows\Fonts\DejaVuSansMono.ttf", r"C:\Windows\Fonts\consola.ttf",
         ]
       )
     elif defined(macosx):
-      return firstExisting(
+      result = firstExisting(
         [
           "/Library/Fonts/MesloLGS NF Regular.ttf",
           "/Library/Fonts/SauceCodeProNerdFont-Regular.ttf",
@@ -355,7 +434,7 @@ proc resolveFontPath(path: string): string =
         ]
       )
     else:
-      return firstExisting(
+      result = firstExisting(
         [
           "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
           "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Regular.ttf",
@@ -363,15 +442,22 @@ proc resolveFontPath(path: string): string =
           "/usr/share/fonts/TTF/MesloLGS NF Regular.ttf",
           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
           "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+          "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
           "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
           "/usr/share/fonts/liberation-fonts/LiberationMono-Regular.ttf",
+          "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf",
+          "/usr/share/fonts/google-noto/NotoSansMono-Regular.ttf",
         ]
       )
-  elif defined(windows):
+    if result.len == 0:
+      result = scanForFont(["mono"], UnwantedFaces)
     return
+
+  when defined(windows):
+    result =
       firstExisting([r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf"])
   elif defined(macosx):
-    return firstExisting(
+    result = firstExisting(
       [
         "/System/Library/Fonts/SFNS.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -379,16 +465,20 @@ proc resolveFontPath(path: string): string =
       ]
     )
   else:
-    return firstExisting(
+    result = firstExisting(
       [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/share/fonts/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/google-noto-vf/NotoSans[wght].ttf",
         "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
         "/usr/share/fonts/abattis-cantarell-vf-fonts/Cantarell-VF.otf",
       ]
     )
+  if result.len == 0:
+    result = scanForFont(["sans"], @UnwantedFaces & @["mono", "serif", "cjk"])
 
 proc createNormalWindow(layout: var ScreenLayout) =
   let flags = WINDOW_RESIZABLE
@@ -520,11 +610,28 @@ proc sdlSetClipRect(r: coords.Rect) =
   )
   applyClipState()
 
+proc openEmbeddedFont(mono: bool, size: int): sdl3_ttf.Font =
+  ## Open the font compiled into the binary, so text renders even on a host
+  ## with no usable font file.
+  let stream =
+    if mono:
+      sdl3.ioFromConstMem(embeddedMonoFont[0].unsafeAddr,
+          embeddedMonoFont.len.csize_t)
+    else:
+      sdl3.ioFromConstMem(embeddedSansFont[0].unsafeAddr,
+          embeddedSansFont.len.csize_t)
+  if stream == nil:
+    return nil
+  # The stream is closed with the font; it borrows memory that outlives both.
+  ttfOpenFontIO(stream, true, size.cfloat)
+
 proc sdlOpenFont(path: string, size: int, metrics: var FontMetrics): screen.Font =
   let resolvedPath = resolveFontPath(path)
-  if resolvedPath.len == 0:
-    return screen.Font(0)
-  let f = sdl3_ttf.openFont(cstring(resolvedPath), size.cfloat)
+  var f: sdl3_ttf.Font = nil
+  if resolvedPath.len > 0:
+    f = sdl3_ttf.openFont(cstring(resolvedPath), size.cfloat)
+  if f == nil:
+    f = openEmbeddedFont(path == "nerd-monospace", size)
   if f == nil:
     return screen.Font(0)
   sdl3_ttf.setFontHinting(f, sdl3_ttf.hintingLightSubpixel)

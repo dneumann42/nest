@@ -40,13 +40,13 @@ proc update(model: var Counter, event: CounterEvent) =
 widget counter(model: Counter) emits CounterEvent:
   ui.panel(ui.id("root"), cfg(padding = 16, gap = 12, alignItems = AlignCenter,
       justifyContent = JustifyCenter)):
-    ui.label(ui.id("title"), "Counter", width = fit(), height = fit())
+    ui.label(ui.id("title"), "Counter")
     ui.row(ui.id("controls"), cfg(width = fit(), height = fit(), gap = 8,
         alignItems = AlignCenter)):
-      if ui.button(ui.id("dec"), "-", width = fixed(32), height = fit()):
+      if ui.button(ui.id("dec"), "-", width = fixed(32)):
         emit Decremented
-      ui.label(ui.id("count"), $model.count, width = fixed(80), height = fit())
-      if ui.button(ui.id("inc"), "+", width = fixed(32), height = fit()):
+      ui.label(ui.id("count"), $model.count, width = fixed(80))
+      if ui.button(ui.id("inc"), "+", width = fixed(32)):
         emit Incremented
 
 when isMainModule:
@@ -70,12 +70,12 @@ type Counter = object
   count: int
 
 widget counterLabel(model: Counter):
-  ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
+  ui.label(ui.id("count"), $model.count)
 
 # The same declaration written by hand:
 proc counterLabelByHand(ui: var UI, model: Counter) =
   ui.scope("counterLabelByHand"):
-    ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
+    ui.label(ui.id("count"), $model.count)
 #+end_src
 
 The two declarations above are equivalent. The body is ordinary Nim, every call
@@ -92,12 +92,12 @@ import nest
 
 widget header(title: string):
   ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
-    ui.label(ui.id("text"), title, width = fill(), height = fit())
+    ui.label(ui.id("text"), title, width = fill())
 
 widget footer(text: string):
   # `ui.id("row")` here is a different id from the one in `header`.
   ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
-    ui.label(ui.id("text"), text, width = fill(), height = fit())
+    ui.label(ui.id("text"), text, width = fill())
 
 widget page():
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
@@ -113,7 +113,7 @@ import nest
 
 widget pane(title: string):
   ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8)):
-    ui.label(ui.id("title"), title, width = fill(), height = fit())
+    ui.label(ui.id("title"), title, width = fill())
 
 widget splitView():
   ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8)):
@@ -130,7 +130,7 @@ caller finds a widget it did not declare itself.
 import nest
 
 widget searchBox(state: LineInputState):
-  ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
+  ui.lineInput(ui.id("input"), state, width = fill())
 
 proc focusSearch(ui: var UI) =
   ui.scope("searchBox"):
@@ -147,8 +147,8 @@ import nest
 widget field(label, value: string, labelWidth = fixed(90)):
   ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8,
       alignItems = AlignCenter)):
-    ui.label(ui.id("label"), label, width = labelWidth, height = fit())
-    ui.label(ui.id("value"), value, width = fill(), height = fit())
+    ui.label(ui.id("label"), label, width = labelWidth)
+    ui.label(ui.id("value"), value, width = fill())
 
 widget details():
   ui.column(ui.id("root"), cfg(padding = 12, gap = 6)):
@@ -166,7 +166,7 @@ import nest
 widget statusBar*(text: string):
   ui.dialogHeader(ui.id("root"), cfg(width = fill(), height = fit(),
       padding = 6)):
-    ui.label(ui.id("text"), text, width = fill(), height = fit())
+    ui.label(ui.id("text"), text, width = fill())
 #+end_src
 
 ** When To Write A Plain Procedure
@@ -193,11 +193,11 @@ proc summary(tasks: seq[Task]): string =
 # Declares, but deliberately shares the caller's scope, so the ids it builds
 # belong to whichever widget called it.
 proc rowLabel(ui: var UI, key, text: string) =
-  ui.label(ui.id(key, "label"), text, width = fill(), height = fit())
+  ui.label(ui.id(key, "label"), text, width = fill())
 
 widget taskList(tasks: seq[Task]):
   ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
-    ui.label(ui.id("summary"), tasks.summary, width = fill(), height = fit())
+    ui.label(ui.id("summary"), tasks.summary, width = fill())
     for task in tasks:
       ui.rowLabel(task.title, task.title)
 #+end_src
@@ -223,7 +223,7 @@ widget passProbe(log: var seq[string]):
     log.add "event pass"
   else:
     log.add "layout pass"
-  ui.label(ui.id("hello"), "hello", width = fit(), height = fit())
+  ui.label(ui.id("hello"), "hello")
 #+end_src
 
 Three rules follow from the double pass:
@@ -251,7 +251,7 @@ widget quitHint(quitRequested: var bool):
     if ui.keyPressed("Escape"):
       quitRequested = true
 
-  ui.label(ui.id("hint"), "Press Escape to quit", width = fit(), height = fit())
+  ui.label(ui.id("hint"), "Press Escape to quit")
 #+end_src
 
 Interaction is recorded when a frame updates its widgets, and observed on the
@@ -286,13 +286,55 @@ type
 widget toolbar(modified: bool) emits ToolbarEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
       padding = 6)):
-    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+    if ui.button(ui.id("new"), "New"):
       emit NewPressed
-    if ui.button(ui.id("open"), "Open", width = fit(), height = fit()):
+    if ui.button(ui.id("open"), "Open"):
       emit OpenPressed
-    if ui.button(ui.id("save"), "Save" & (if modified: " *" else: ""),
-        width = fit(), height = fit()):
+    if ui.button(ui.id("save"), "Save" & (if modified: " *" else: "")):
       emit SavePressed
+#+end_src
+
+** Changing State In A Handler
+
+A widget's body runs twice a frame, once to dispatch events and once to build
+the widget tree, so a handler that changes state has to say when it applies.
+~ui.events~ is that guard: it runs only on the event pass. ~emit~ needs no
+guard, because the loop applies what it collected once.
+
+Widget helpers report only on the event pass, and so do ~ui.clicked~ and
+~ui.submitted~, so a handler written against those runs once by itself. The
+guard is what makes a change that goes through anything else, such as a value
+read out of a widget, safe.
+
+#+begin_src nim
+import nest
+
+type
+  Filters = object
+    caseSensitive: bool
+    matches: int
+
+  FiltersEvent = enum
+    CaseToggled
+
+proc update(model: var Filters, event: FiltersEvent) =
+  case event
+  of CaseToggled: model.caseSensitive = not model.caseSensitive
+
+widget filters(model: Filters) emits FiltersEvent:
+  ui.column(ui.id("root"), cfg(width = fit(), height = fit(), gap = 4)):
+    ui.checkbox(ui.id("case"), "Case sensitive", model.caseSensitive)
+    if ui.clicked(ui.id("case")):
+      emit CaseToggled
+
+widget search(model: var Filters) emits FiltersEvent:
+  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
+      padding = 8)):
+    for event in ui.filters(model):
+      # Applied once a frame, not once a pass.
+      ui.events:
+        model.update(event)
+      emit event
 #+end_src
 
 ** Handling A Child's Events
@@ -313,9 +355,9 @@ type
 
 widget toolbar(modified: bool) emits ToolbarEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6)):
-    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+    if ui.button(ui.id("new"), "New"):
       emit NewPressed
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+    if ui.button(ui.id("save"), "Save"):
       emit SavePressed
 
 widget editorPane(model: var Document):
@@ -350,9 +392,9 @@ type
 
 widget toolbar() emits ToolbarEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6)):
-    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+    if ui.button(ui.id("new"), "New"):
       emit NewPressed
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+    if ui.button(ui.id("save"), "Save"):
       emit SavePressed
 
 widget pane(title: var string) emits PaneEvent:
@@ -366,7 +408,7 @@ widget pane(title: var string) emits PaneEvent:
       of SavePressed:
         # Raised: saving is not this widget's business.
         emit SaveRequested
-    ui.label(ui.id("title"), title, width = fill(), height = fit())
+    ui.label(ui.id("title"), title, width = fill())
 
 widget shell(title: var string, log: var seq[string]) emits PaneEvent:
   ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8)):
@@ -409,13 +451,12 @@ type
 widget taskRow(task: Task) emits RowEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8,
       alignItems = AlignCenter)):
-    ui.checkbox(ui.id("done"), task.title, task.done, width = fill(),
-        height = fit())
+    ui.checkbox(ui.id("done"), task.title, task.done, width = fill())
     if ui.clicked(ui.id("done")):
       emit RowEvent(id: task.id, kind: Toggled)
-    if ui.button(ui.id("rename"), "Rename", width = fit(), height = fit()):
+    if ui.button(ui.id("rename"), "Rename"):
       emit RowEvent(id: task.id, kind: Renamed, title: task.title & " (copy)")
-    if ui.button(ui.id("remove"), "x", width = fixed(24), height = fit()):
+    if ui.button(ui.id("remove"), "x", width = fixed(24)):
       emit RowEvent(id: task.id, kind: Removed)
 #+end_src
 
@@ -444,11 +485,10 @@ type
 
 widget taskRow(task: Task) emits RowEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8)):
-    ui.checkbox(ui.id("done"), task.title, task.done, width = fill(),
-        height = fit())
+    ui.checkbox(ui.id("done"), task.title, task.done, width = fill())
     if ui.clicked(ui.id("done")):
       emit RowEvent(id: task.id, removed: false)
-    if ui.button(ui.id("remove"), "x", width = fixed(24), height = fit()):
+    if ui.button(ui.id("remove"), "x", width = fixed(24)):
       emit RowEvent(id: task.id, removed: true)
 
 widget taskList(model: var TaskList):
@@ -496,17 +536,17 @@ type
 
 widget searchBox(state: LineInputState) emits SearchEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6)):
-    ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
+    ui.lineInput(ui.id("input"), state, width = fill())
     if ui.submitted(ui.id("input")):
       emit QueryChanged
-    if ui.button(ui.id("clear"), "Clear", width = fit(), height = fit()):
+    if ui.button(ui.id("clear"), "Clear"):
       emit QueryCleared
 
 widget resultList(items: seq[string]) emits ResultsEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 2)):
     for index, item in items:
       ui.scope(index):
-        if ui.button(ui.id("item"), item, width = fill(), height = fit()):
+        if ui.button(ui.id("item"), item, width = fill()):
           emit ResultChosen
 
 widget browser(model: var Browser):
@@ -525,7 +565,7 @@ widget browser(model: var Browser):
       of ResultChosen:
         model.chosen = "chosen"
 
-    ui.label(ui.id("chosen"), model.chosen, width = fill(), height = fit())
+    ui.label(ui.id("chosen"), model.chosen, width = fill())
 #+end_src
 
 ** Container Widgets
@@ -539,19 +579,17 @@ import nest
 widget titledCard(title: string, body: untyped):
   ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 10,
       gap = 6)):
-    ui.label(ui.id("title"), title, width = fill(), height = fit())
+    ui.label(ui.id("title"), title, width = fill())
     body
 
 widget settingsPage():
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
       padding = 8)):
     ui.titledCard("General"):
-      ui.label(ui.id("general"), "General settings", width = fill(),
-          height = fit())
+      ui.label(ui.id("general"), "General settings", width = fill())
     ui.scope("advanced"):
       ui.titledCard("Advanced"):
-        ui.label(ui.id("advanced"), "Advanced settings", width = fill(),
-            height = fit())
+        ui.label(ui.id("advanced"), "Advanced settings", width = fill())
 #+end_src
 
 A container's children are declared by the caller, so their events belong to the
@@ -569,13 +607,13 @@ type
 
 widget counter(model: Counter) emits CounterEvent:
   ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
-    ui.label(ui.id("count"), $model.count, width = fixed(40), height = fit())
-    if ui.button(ui.id("inc"), "+", width = fixed(30), height = fit()):
+    ui.label(ui.id("count"), $model.count, width = fixed(40))
+    if ui.button(ui.id("inc"), "+", width = fixed(30)):
       emit Bumped
 
 widget titledCard(title: string, body: untyped):
   ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 10)):
-    ui.label(ui.id("title"), title, width = fill(), height = fit())
+    ui.label(ui.id("title"), title, width = fill())
     body
 
 widget page(model: var Counter):
@@ -609,10 +647,10 @@ widget closablePanel(title: string, emitted: var seq[PanelEvent],
       gap = 6)):
     ui.row(ui.id("head"), cfg(width = fill(), height = fit(), gap = 6,
         alignItems = AlignCenter)):
-      ui.label(ui.id("title"), title, width = fill(), height = fit())
-      if ui.button(ui.id("collapse"), "-", width = fixed(24), height = fit()):
+      ui.label(ui.id("title"), title, width = fill())
+      if ui.button(ui.id("collapse"), "-", width = fixed(24)):
         emitted.add Collapsed
-      if ui.button(ui.id("close"), "x", width = fixed(24), height = fit()):
+      if ui.button(ui.id("close"), "x", width = fixed(24)):
         emitted.add CloseRequested
     body
 
@@ -622,8 +660,7 @@ widget workspace(open: var bool):
     if open:
       var emitted: seq[PanelEvent]
       ui.closablePanel("Inspector", emitted):
-        ui.label(ui.id("body"), "Panel contents", width = fill(),
-            height = fit())
+        ui.label(ui.id("body"), "Panel contents", width = fill())
       for event in emitted:
         case event
         of CloseRequested: open = false
@@ -658,10 +695,9 @@ widget shell(tab: var int):
   var emitted: seq[TabsEvent]
   ui.tabStrip(Labels, tab, emitted):
     case tab
-    of 0: ui.label(ui.id("files"), "Files", width = fill(), height = fit())
-    of 1: ui.label(ui.id("editor"), "Editor", width = fill(), height = fit())
-    else: ui.label(ui.id("settings"), "Settings", width = fill(),
-        height = fit())
+    of 0: ui.label(ui.id("files"), "Files", width = fill())
+    of 1: ui.label(ui.id("editor"), "Editor", width = fill())
+    else: ui.label(ui.id("settings"), "Settings", width = fill())
   for event in emitted:
     tab = event.selected
 #+end_src
@@ -746,14 +782,14 @@ proc update(model: var Notes, event: NotesEvent) =
 
 widget counter(model: Counter) emits CounterEvent:
   ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
-    ui.label(ui.id("count"), $model.count, width = fixed(40), height = fit())
-    if ui.button(ui.id("inc"), "+", width = fixed(30), height = fit()):
+    ui.label(ui.id("count"), $model.count, width = fixed(40))
+    if ui.button(ui.id("inc"), "+", width = fixed(30)):
       emit Bumped
 
 widget notes(model: Notes) emits NotesEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
-    ui.textEditor(ui.id("text"), model.text, width = fill(), height = fill())
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+    ui.textEditor(ui.id("text"), model.text, height = fill())
+    if ui.button(ui.id("save"), "Save"):
       emit Saved
 
 widget workspace(model: var Workspace) emits WorkspaceEvent:
@@ -770,7 +806,7 @@ widget workspace(model: var Workspace) emits WorkspaceEvent:
       model.status = "saved"
       emit StatusChanged
 
-    ui.label(ui.id("status"), model.status, width = fill(), height = fit())
+    ui.label(ui.id("status"), model.status, width = fill())
 #+end_src
 
 Two rules keep this straight as the tree grows:
@@ -795,9 +831,8 @@ type Reading = object
 widget gauge(reading: Reading):
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8,
       alignItems = AlignCenter)):
-    ui.label(ui.id("label"), reading.label, width = fixed(90), height = fit())
-    discard ui.slider(ui.id("bar"), reading.value, 0.0, 1.0, width = fill(),
-        height = fixed(18))
+    ui.label(ui.id("label"), reading.label, width = fixed(90))
+    discard ui.slider(ui.id("bar"), reading.value, 0.0, 1.0)
 #+end_src
 
 ** State That Outlives A Frame
@@ -822,25 +857,14 @@ type
 widget sourceEditor(model: Source) emits SourceEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6,
       padding = 8)):
-    ui.textEditor(
-      ui.id("text"),
-      model.text,
-      width = fill(),
-      height = fill(min = 120),
-      fontName = "editor",
-      lineNumbers = true,
-      syntax = "nim",
-      gutterMarkers = model.breakpoints,
-      activeLine = model.text.lineColumn.line,
-    )
-    ui.label(
-      ui.id("position"),
-      "line " & $model.text.lineColumn.line & ", column " &
-        $model.text.lineColumn.column,
-      width = fit(),
-      height = fit(),
-    )
-    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+    ui.textEditor(ui.id("text"), model.text, height = fill(min = 120),
+        fontName = "editor", lineNumbers = true, syntax = "nim",
+        gutterMarkers = model.breakpoints,
+        activeLine = model.text.lineColumn.line)
+    ui.label(ui.id("position"),
+        "line " & $model.text.lineColumn.line & ", column " &
+          $model.text.lineColumn.column)
+    if ui.button(ui.id("save"), "Save"):
       emit SaveRequested
 #+end_src
 
@@ -864,7 +888,7 @@ proc update(model: var Counter, event: CounterEvent) =
   of Bumped: inc model.count
 
 widget counter(model: Counter) emits CounterEvent:
-  if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+  if ui.button(ui.id("inc"), $model.count):
     emit Bumped
 
 when isMainModule:
@@ -895,9 +919,9 @@ proc update(model: var App, event: AppEvent) =
 
 widget root(model: App) emits AppEvent:
   ui.row(ui.id("root"), cfg(padding = 8, gap = 8)):
-    if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+    if ui.button(ui.id("inc"), $model.count):
       emit Bumped
-    if ui.button(ui.id("quit"), "Quit", width = fit(), height = fit()):
+    if ui.button(ui.id("quit"), "Quit"):
       emit QuitRequested
 
 when isMainModule:
@@ -925,7 +949,7 @@ proc update(model: var App, event: AppEvent) =
   of Bumped: inc model.count
 
 widget root(model: App, emitted: var seq[AppEvent]):
-  if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+  if ui.button(ui.id("inc"), $model.count):
     emitted.add Bumped
 
 when isMainModule:
@@ -950,7 +974,7 @@ proc update(model: var Bar, event: BarEvent) =
 
 widget bar(model: Bar) emits BarEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fill(), padding = 6)):
-    ui.label(ui.id("clock"), model.clock, width = fit(), height = fit())
+    ui.label(ui.id("clock"), model.clock)
     ui.events:
       emit Ticked
 
@@ -979,7 +1003,7 @@ proc update(model: var App, event: AppEvent) =
   of Bumped: inc model.count
 
 widget root(model: App) emits AppEvent:
-  if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+  if ui.button(ui.id("inc"), $model.count):
     emit Bumped
 
 when isMainModule:
@@ -1017,7 +1041,7 @@ widget rowList(rows: seq[string]):
   # Names may be strings, numbers, or a mix.
   ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
     for index, row in rows:
-      ui.label(ui.id("row", index), row, width = fill(), height = fit())
+      ui.label(ui.id("row", index), row, width = fill())
 #+end_src
 
 Ids must be stable, not merely unique. An id built from a loop index changes
@@ -1036,8 +1060,8 @@ widget taskList(tasks: seq[Task]):
   ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
     for task in tasks:
       # Keyed by the task's own id, so reordering keeps each row's state.
-      ui.checkbox(ui.id("task", task.id), task.title, task.done, width = fill(),
-          height = fit())
+      ui.checkbox(ui.id("task", task.id), task.title, task.done,
+          width = fill())
 #+end_src
 
 ** List Keys
@@ -1061,8 +1085,7 @@ widget fileList(files: seq[File], emitted: var seq[string]):
 
   ui.column(ui.id("root"), cfg(padding = 8, gap = 2)):
     for item in visible:
-      if ui.button(ui.id("file", item.key), item.value.name, width = fill(),
-          height = fit()):
+      if ui.button(ui.id("file", item.key), item.value.name, width = fill()):
         emitted.add item.value.name
 #+end_src
 
@@ -1078,10 +1101,10 @@ import nest
 widget sourceView(editor: EditorState):
   ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
     # Fine: a static label.
-    ui.label("Source", width = fit(), height = fit())
+    ui.label("Source")
 
     # Not fine as an unnamed widget: it owns focus and a cursor.
-    ui.textEditor(ui.id("source"), editor, width = fill(), height = fill())
+    ui.textEditor(ui.id("source"), editor, height = fill())
 #+end_src
 
 * Layout
@@ -1106,19 +1129,145 @@ widget threePane():
     # A sidebar that stays near 240px but can shrink.
     ui.panel(ui.id("sidebar"), cfg(width = prefer(240, min = 180, max = 320),
         height = fill(), padding = 8)):
-      ui.label(ui.id("sidebarTitle"), "Files", width = fill(), height = fit())
+      ui.label(ui.id("sidebarTitle"), "Files", width = fill())
 
     # Content absorbs what is left.
     ui.panel(ui.id("content"), cfg(width = fill(min = 300), height = fill(),
         padding = 8)):
-      ui.label(ui.id("contentTitle"), "Editor", width = fill(), height = fit())
+      ui.label(ui.id("contentTitle"), "Editor", width = fill())
 
     # An inspector sized to its content.
     ui.panel(ui.id("inspector"), cfg(width = fit(), height = fill(),
         padding = 8)):
-      ui.label(ui.id("inspectorTitle"), "Inspector", width = fit(),
-          height = fit())
+      ui.label(ui.id("inspectorTitle"), "Inspector")
 #+end_src
+
+** Sizes Have Defaults
+
+Every widget already has a size. Name one only to change it: a widget that
+draws its own content fits that content, a field or a pane takes the space it
+is given, and a container fills its parent.
+
+| Widget                                      | width           | height          |
+|---------------------------------------------+-----------------+-----------------|
+| ~label~, ~coloredLabel~, ~diagnosticLabel~  | ~fit~           | ~fit~           |
+| ~button~, ~imageButton~, ~image~            | ~fit~           | ~fit~           |
+| ~checkbox~, ~combobox~, ~colorSwatch~       | ~fit~           | ~fit~           |
+| ~menu~, ~mesh2d~, ~component~, ~container~  | ~fit~           | ~fit~           |
+| ~slider~                                    | ~fill(min 120)~ | ~fit~           |
+| ~lineInput~                                 | ~fill(min 160)~ | ~fit~           |
+| ~textEditor~                                | ~fill(min 240)~ | ~fill(min 160)~ |
+| ~tabs~, ~menuDivider~                       | ~fill~          | ~fit~           |
+| ~spacer~                                    | ~fill~          | ~fill~          |
+| containers, through ~cfg~                   | ~fill~          | ~fill~          |
+
+#+begin_src nim
+import nest
+
+widget contactForm(name, email: LineInputState) emits string:
+  # No sizes anywhere: the labels fit their text, the fields span the column,
+  # and the buttons fit their labels.
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8, height = fit())):
+    ui.label(ui.id("nameLabel"), "Name")
+    ui.lineInput(ui.id("name"), name)
+    ui.label(ui.id("emailLabel"), "Email")
+    ui.lineInput(ui.id("email"), email)
+    ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8)):
+      if ui.button(ui.id("save"), "Save"):
+        emit "save"
+      if ui.button(ui.id("cancel"), "Cancel"):
+        emit "cancel"
+#+end_src
+
+The defaults that fill carry a minimum on purpose. A ~fill~ child inside a
+~fit~ parent has no space to take and collapses to nothing, so a bare ~fill~
+would make a field vanish in a ~fit~ row; the minimum keeps it visible.
+
+#+begin_src nim
+import nest
+
+widget nameRow(name: LineInputState):
+  # The row fits its content, and the field is still 160px wide.
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
+    ui.label(ui.id("label"), "Name")
+    ui.lineInput(ui.id("name"), name)
+#+end_src
+
+A vertical slider is the one widget whose default is usually wrong: the
+default width suits a horizontal track, so give a vertical one both sizes.
+
+#+begin_src nim
+import nest
+
+widget balanceSlider(balance: float64) emits float64:
+  let moved = ui.slider(ui.id("balance"), balance, 0.0, 1.0,
+      width = fixed(24), height = fixed(120), orientation = SliderVertical)
+  if moved.active:
+    emit moved.value
+#+end_src
+
+** Control Heights
+
+A control's default height is ~fit~, which resolves to ~ControlHeight~, the
+standard height of a single-line control. Buttons, checkboxes, sliders, tabs,
+combo boxes and line inputs all measure at least that tall, so a row of mixed
+controls lines up on its own.
+
+#+begin_src nim
+import nest
+
+type
+  FilterEventKind = enum
+    StyleChanged
+    CaseToggled
+    Applied
+
+  FilterEvent = object
+    kind: FilterEventKind
+    index: int
+
+widget filterBar(query: LineInputState, style: int,
+    caseSensitive: bool) emits FilterEvent:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8,
+      alignItems = AlignCenter)):
+    # Every control here is one standard height tall, and none says so.
+    ui.lineInput(ui.id("query"), query)
+    let picked = ui.combobox(ui.id("style"), style, ["Any", "Exact"])
+    if picked.changed:
+      emit FilterEvent(kind: StyleChanged, index: picked.index)
+    ui.checkbox(ui.id("case"), "Aa", caseSensitive)
+    if ui.clicked(ui.id("case")):
+      emit FilterEvent(kind: CaseToggled)
+    if ui.button(ui.id("apply"), "Apply"):
+      emit FilterEvent(kind: Applied)
+#+end_src
+
+A combo box closes its list when the user picks from it. Pass
+~closeOnSelect = false~ for a list that stays open, which suits one the user
+picks from more than once.
+
+Name a height only when the control is deliberately not standard size: a tall
+vertical slider, a compact toolbar, a text editor that fills its pane.
+
+#+begin_src nim
+import nest
+
+type MixerEvent = object
+  value: float64
+
+widget mixer(balance: float64) emits MixerEvent:
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+    let moved = ui.slider(ui.id("balance"), balance, 0.0, 1.0,
+        width = fixed(24), height = fixed(120),
+        orientation = SliderVertical)
+    if moved.active:
+      emit MixerEvent(value: moved.value)
+    ui.label(ui.id("value"), "balance")
+#+end_src
+
+A drag belongs to the slider the press landed on until the button comes up.
+Dragging the pointer across a neighbouring slider leaves that one alone: it
+reports ~active = false~ for the whole drag.
 
 ** Containers
 
@@ -1146,17 +1295,16 @@ widget cardExample():
         gap = 6)):
       ui.dialogHeader(ui.id("head"), cfg(width = fill(), height = fit(),
           padding = 6)):
-        ui.label(ui.id("title"), "Details", width = fit(), height = fit())
-      ui.label(ui.id("body"), "One card, one header.", width = fill(),
-          height = fit())
+        ui.label(ui.id("title"), "Details")
+      ui.label(ui.id("body"), "One card, one header.", width = fill())
 
     ui.center(ui.id("center"), fill(), fixed(80)):
-      ui.label(ui.id("centered"), "centred", width = fit(), height = fit())
+      ui.label(ui.id("centered"), "centred")
 
     ui.row(ui.id("footer"), cfg(width = fill(), height = fit(), gap = 8)):
-      ui.label(ui.id("left"), "left", width = fit(), height = fit())
+      ui.label(ui.id("left"), "left")
       ui.spacer(ui.id("spacer"), width = fill(), height = fixed(1))
-      ui.label(ui.id("right"), "right", width = fit(), height = fit())
+      ui.label(ui.id("right"), "right")
 #+end_src
 
 ** Alignment And Justification
@@ -1171,10 +1319,9 @@ import nest
 widget toolbar():
   ui.row(ui.id("root"), cfg(width = fill(), height = fixed(40), gap = 6,
       padding = 6, alignItems = AlignCenter, justifyContent = JustifyEnd)):
-    ui.label(ui.id("title"), "Title", width = fit(), height = fit(),
-        alignSelf = AlignStart)
-    ui.button(ui.id("ok"), "OK", width = fit(), height = fit())
-    ui.button(ui.id("cancel"), "Cancel", width = fit(), height = fit())
+    ui.label(ui.id("title"), "Title", alignSelf = AlignStart)
+    ui.button(ui.id("ok"), "OK")
+    ui.button(ui.id("cancel"), "Cancel")
 #+end_src
 
 ** Tables
@@ -1192,16 +1339,14 @@ widget fileTable(rows: seq[Row]):
       for column, title in ["Name", "Size"]:
         ui.tableCell(ui.id("head", column), cfg(width = fill(),
             height = fit())):
-          ui.label(ui.id("headText", column), title, width = fit(),
-              height = fit())
+          ui.label(ui.id("headText", column), title)
 
     for row in rows:
       ui.tableRow(ui.id("row", row.name), cfg(width = fill(), height = fit())):
         for column, text in [row.name, row.size]:
           ui.tableCell(ui.id("cell", row.name, column), cfg(width = fill(),
               height = fit())):
-            ui.label(ui.id("cellText", row.name, column), text, width = fit(),
-                height = fit())
+            ui.label(ui.id("cellText", row.name, column), text)
 #+end_src
 
 ** Scrolling
@@ -1216,7 +1361,7 @@ widget logView(lines: seq[string]):
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8,
       gap = 2, scrollY = true)):
     for index, line in lines:
-      ui.label(ui.id("line", index), line, width = fill(), height = fit())
+      ui.label(ui.id("line", index), line, width = fill())
 #+end_src
 
 * Custom Components
@@ -1263,7 +1408,7 @@ widget progressBar(fraction: float64, width = fill(), height = fixed(10)):
 
 widget download(progress: float64):
   ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
-    ui.label(ui.id("label"), "Downloading", width = fit(), height = fit())
+    ui.label(ui.id("label"), "Downloading")
     ui.progressBar(progress)
 #+end_src
 
@@ -1360,8 +1505,7 @@ widget statusLine(busy: bool):
   ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
     if busy:
       ui.spinner()
-    ui.label(ui.id("text"), if busy: "Working" else: "Idle", width = fit(),
-        height = fit())
+    ui.label(ui.id("text"), if busy: "Working" else: "Idle")
 #+end_src
 
 * Growing The Application
@@ -1407,16 +1551,15 @@ proc update(model: var App, event: AppEvent) =
 widget toolbar(modified: bool) emits ToolbarEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
       padding = 6)):
-    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+    if ui.button(ui.id("new"), "New"):
       emit NewPressed
-    if ui.button(ui.id("save"), "Save" & (if modified: " *" else: ""),
-        width = fit(), height = fit()):
+    if ui.button(ui.id("save"), "Save" & (if modified: " *" else: "")):
       emit SavePressed
 
 widget statusBar(text: string):
   ui.dialogHeader(ui.id("root"), cfg(width = fill(), height = fit(),
       padding = 6)):
-    ui.label(ui.id("text"), text, width = fill(), height = fit())
+    ui.label(ui.id("text"), text, width = fill())
 
 widget root(model: App) emits AppEvent:
   ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
@@ -1425,8 +1568,7 @@ widget root(model: App) emits AppEvent:
       of NewPressed: emit DocumentCleared
       of SavePressed: emit DocumentSaved
     ui.panel(ui.id("body"), cfg(width = fill(), height = fill(), padding = 8)):
-      ui.label(ui.id("bodyText"), model.fileName, width = fill(),
-          height = fit())
+      ui.label(ui.id("bodyText"), model.fileName, width = fill())
     ui.statusBar(if model.modified: "modified" else: "saved")
 
 when isMainModule:
@@ -1481,7 +1623,7 @@ widget search*(model: var Search) emits SearchEvent:
       emit Dismissed
     for index, line in model.results:
       ui.scope(index):
-        if ui.button(ui.id("result"), line, width = fill(), height = fit()):
+        if ui.button(ui.id("result"), line, width = fill()):
           emit ResultChosen
 
 # --- myapp.nim ----------------------------------------------------------
@@ -1504,7 +1646,7 @@ proc update(model: var App, event: AppEvent) =
 widget root(model: var App) emits AppEvent:
   ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
       padding = 8)):
-    if ui.button(ui.id("toggle"), "Sidebar", width = fit(), height = fit()):
+    if ui.button(ui.id("toggle"), "Sidebar"):
       emit SidebarToggled
 
     if model.sidebarOpen:
@@ -1514,7 +1656,7 @@ widget root(model: var App) emits AppEvent:
         if event == ResultChosen:
           emit ChoiceMade
 
-    ui.label(ui.id("choice"), model.lastChoice, width = fill(), height = fit())
+    ui.label(ui.id("choice"), model.lastChoice, width = fill())
 #+end_src
 
 ** Stage 4: Routing Between Screens
@@ -1556,15 +1698,15 @@ proc update(model: var App, event: AppEvent) =
 
 widget filesScreen(opened: string) emits FilesEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
-    if ui.button(ui.id("open"), "Open", width = fit(), height = fit()):
+    if ui.button(ui.id("open"), "Open"):
       emit FileOpened
-    ui.label(ui.id("state"), opened, width = fill(), height = fit())
+    ui.label(ui.id("state"), opened, width = fill())
 
 widget settingsScreen(theme: string) emits SettingsEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
-    if ui.button(ui.id("theme"), "Dark theme", width = fit(), height = fit()):
+    if ui.button(ui.id("theme"), "Dark theme"):
       emit ThemeChanged
-    ui.label(ui.id("state"), theme, width = fill(), height = fit())
+    ui.label(ui.id("state"), theme, width = fill())
 
 widget root(model: var App) emits AppEvent:
   ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
@@ -1619,9 +1761,9 @@ widget buildPanel(model: Build) emits BuildEvent:
       emit BuildFinished
 
   ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
-    if ui.button(ui.id("build"), "Build", width = fit(), height = fit()):
+    if ui.button(ui.id("build"), "Build"):
       emit BuildStarted
-    ui.label(ui.id("output"), model.output, width = fill(), height = fit())
+    ui.label(ui.id("output"), model.output, width = fill())
     if model.running:
       # Ask for another frame so the poll runs again.
       ui.requestRedrawAfter(50)
@@ -1658,8 +1800,7 @@ proc update(model: var Clock, event: ClockEvent) =
 
 widget clock(model: Clock) emits ClockEvent:
   ui.column(ui.id("root"), cfg(padding = 12, gap = 6)):
-    ui.label(ui.id("uptime"), "uptime " & $model.seconds & "s", width = fit(),
-        height = fit())
+    ui.label(ui.id("uptime"), "uptime " & $model.seconds & "s")
     ui.events:
       emit Ticked
     # One frame per second is enough for this label.
@@ -1677,6 +1818,56 @@ let appCfg = AppConfig.init(width = 640, height = 480, title = "Animated",
 #+end_src
 
 * Dialogs And Overlays
+
+** One Surface Owns The Pointer
+
+A surface that covers other widgets takes the pointer for itself: a floating
+card, a dialog, a menu popover, or the list an open combo box draws over its
+neighbours. While the pointer is inside it, every widget outside it is updated
+as though the pointer were nowhere near, so one click lands on one surface
+only and a click that dismisses a popover does not also press what was under
+it.
+
+A modal dialog goes further: while it is open it owns the pointer everywhere,
+not only where its box sits, so nothing behind it reacts at all.
+
+The owner is decided once per frame, from the frame on screen, and holds for
+the whole frame. ~ui.pointerSurface~ names it and ~ui.pointerReaches(id)~
+answers whether a given widget may see the pointer; a widget that reads a
+press directly, rather than through ~ui.clicked~, asks that first.
+
+#+begin_src nim
+import nest
+
+widget colourStrip(value: float64) emits float64:
+  # A widget that reads the press itself checks that the pointer is its own,
+  # so it stays quiet under an open menu.
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 4)):
+    let moved = ui.slider(ui.id("hue"), value, 0.0, 360.0)
+    if moved.active and ui.pointerReaches(ui.id("hue")):
+      emit moved.value
+#+end_src
+
+A component that draws outside its own box reports that area from
+~pointerShield~, which is how the combo box list is included.
+
+#+begin_src nim
+import nest
+import nest/coords
+
+type Tooltip = ref object of Component
+  text: string
+
+method pointerShield*(
+    self: Tooltip, widget: Widget, windowWidth, windowHeight: int
+): tuple[has: bool, frame: Frame] =
+  ## The bubble hangs below the widget, and swallows the pointer with it.
+  (
+    true,
+    Frame(x: widget.frame.x, y: widget.frame.y + widget.frame.height,
+        width: 180.0, height: 60.0),
+  )
+#+end_src
 
 ** Modal Dialogs
 
@@ -1711,20 +1902,19 @@ proc update(model: var App, event: AppEvent) =
 widget confirmDialog(open: bool) emits ConfirmEvent:
   ui.modalDialog(ui.id("root"), open, cfg(width = fixed(320), height = fit(),
       padding = 12, gap = 10)):
-    ui.label(ui.id("text"), "Delete the file?", width = fill(), height = fit())
+    ui.label(ui.id("text"), "Delete the file?", width = fill())
     ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8,
         justifyContent = JustifyEnd)):
-      if ui.button(ui.id("cancel"), "Cancel", width = fit(), height = fit()):
+      if ui.button(ui.id("cancel"), "Cancel"):
         emit Cancelled
-      if ui.button(ui.id("ok"), "Delete", width = fit(), height = fit()):
+      if ui.button(ui.id("ok"), "Delete"):
         emit Confirmed
 
 widget root(model: App) emits AppEvent:
   ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
-    if ui.button(ui.id("delete"), "Delete", width = fit(), height = fit()):
+    if ui.button(ui.id("delete"), "Delete"):
       emit DeleteRequested
-    ui.label(ui.id("state"), if model.deleted: "deleted" else: "not deleted",
-        width = fit(), height = fit())
+    ui.label(ui.id("state"), if model.deleted: "deleted" else: "not deleted")
 
   for event in ui.confirmDialog(model.confirmOpen):
     case event
@@ -1747,7 +1937,7 @@ type
 
 widget fileMenu(open: bool) emits MenuEvent:
   ui.menuBar(ui.id("bar"), cfg(width = fill(), height = fit(), gap = 4)):
-    if ui.menu(ui.id("file"), "File", width = fit(), height = fit()):
+    if ui.menu(ui.id("file"), "File"):
       emit MenuEvent(toggled: true)
 
   if open:
@@ -1755,12 +1945,12 @@ widget fileMenu(open: bool) emits MenuEvent:
         cfg(width = fixed(180), height = fit(), padding = 4, gap = 2)):
       for item in ["New", "Open"]:
         ui.menuItem(ui.id("item", item), cfg(width = fill(), height = fit())):
-          ui.label(ui.id("itemText", item), item, width = fit(), height = fit())
+          ui.label(ui.id("itemText", item), item)
         if ui.clicked(ui.id("item", item)):
           emit MenuEvent(command: item)
       ui.menuDivider(ui.id("divider"), width = fill(), height = fixed(9))
       ui.menuItem(ui.id("quit"), cfg(width = fill(), height = fit())):
-        ui.label(ui.id("quitText"), "Quit", width = fit(), height = fit())
+        ui.label(ui.id("quitText"), "Quit")
       if ui.clicked(ui.id("quit")):
         emit MenuEvent(command: "Quit")
 
@@ -1772,8 +1962,7 @@ widget shell(menuOpen: var bool, lastCommand: var string):
       elif event.command.len > 0:
         lastCommand = event.command
         menuOpen = false
-    ui.label(ui.id("last"), "last: " & lastCommand, width = fill(),
-        height = fit())
+    ui.label(ui.id("last"), "last: " & lastCommand, width = fill())
 #+end_src
 
 ** File Pickers
@@ -1789,7 +1978,7 @@ type PickerEvent = object
 
 widget filePicker(current: string) emits PickerEvent:
   ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
-    if ui.button(ui.id("browse"), "Browse", width = fit(), height = fit()):
+    if ui.button(ui.id("browse"), "Browse"):
       ui.io.files.pick(ui.id("browse"))
 
     ui.events:
@@ -1798,7 +1987,7 @@ widget filePicker(current: string) emits PickerEvent:
         ui.io.files.clear(ui.id("browse"))
         emit PickerEvent(path: picked)
 
-    ui.label(ui.id("path"), current, width = fill(), height = fit())
+    ui.label(ui.id("path"), current, width = fill())
 #+end_src
 
 * Testing A Widget
@@ -1940,6 +2129,8 @@ nimble gallery
 - A container takes a ~body: untyped~ parameter, which makes it a template: it
   cannot use ~emits~, so give it ~emitted: var seq[E]~, and avoid parameter names
   that also appear as field names in its body.
+- Leave sizes alone unless the widget needs a different one; the defaults fit
+  content, fill panes, and give every control the same height.
 - Keep ~LineInputState~, ~EditorState~ and ~Mesh2DState~ in the widget's state.
 - Reach for a ~Component~ subclass only when nothing built in draws what is
   needed, and give it a ~renderKeyOverride~ when its appearance depends on more

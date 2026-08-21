@@ -214,6 +214,17 @@ proc editorLineNumberWidth(
   resources.measureText(self.fontName, repeat("9", digits)).width +
       EditorPaddingX * 2
 
+proc editorTextTop(self: Editor, f: Frame, lineHeight: int): int =
+  ## Return the y the editor's first line of text starts at.
+  ##
+  ## A single-line editor centres its line in the frame, so a line input
+  ## laid out at the standard control height does not look top-heavy; a
+  ## multi-line one starts at its top padding.
+  if self.singleLine:
+    f.y.toInt + max((f.height.toInt - lineHeight) div 2, EditorPaddingY)
+  else:
+    f.y.toInt + EditorPaddingY
+
 proc editorLines(text: string): seq[string] =
   result = text.split('\n')
   if result.len == 0:
@@ -266,7 +277,7 @@ proc cursorAtMouse(
         editorLines(self.state.text)
     gutterWidth = self.editorLineNumberWidth(resources, lines.len)
     textLeft = f.x.toInt + EditorPaddingX + gutterWidth
-    textTop = f.y.toInt + EditorPaddingY
+    textTop = self.editorTextTop(f, lineHeight)
     contentY = mouseY.toFloat - textTop.toFloat + self.state.scrollY
     lineIndex = floor(contentY / lineHeight.toFloat).toInt.clamp(0, lines.len - 1)
     contentX = mouseX.toFloat - textLeft.toFloat + self.state.scrollX
@@ -477,7 +488,7 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
         editorLines(self.state.text)
     gutterWidth = self.editorLineNumberWidth(ctx.resources, lines.len)
     textLeft = f.x.toInt + EditorPaddingX + gutterWidth
-    textTop = f.y.toInt + EditorPaddingY
+    textTop = self.editorTextTop(f, lineHeight)
     contentHeight = EditorPaddingY * 2 + lines.len * lineHeight
   var widestLine = 0
   for line in lines:

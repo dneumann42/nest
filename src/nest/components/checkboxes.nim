@@ -5,7 +5,7 @@ import nest/[coords, screen]
 const
   CheckboxBoxSize = 14
   CheckboxGap = 8
-  CheckboxMinHeight = 24
+  CheckboxMinHeight = ControlHeight
 
 type Checkbox* = ref object of Interactive
   label: string

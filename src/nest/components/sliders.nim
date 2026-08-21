@@ -3,7 +3,7 @@ import component
 import nest/[coords, screen]
 
 const
-  SliderMinThickness = 28
+  SliderMinThickness = ControlHeight
   TrackThickness = 4
   ThumbSize = 16
 
@@ -77,10 +77,19 @@ method update*(self: Slider, widget: Widget, ctx: var UpdateContext) =
   ## Track the pointer: mark the slider hot when it is over the slider, and
   ## while it is dragged report the value under it and mark the slider as the
   ## one being dragged.
-  let hot = widget.frame.contains(ctx.mouseX, ctx.mouseY)
+  ##
+  ## A drag starts only on the press that lands on the slider, and the
+  ## slider that owns it keeps it until the button comes up, so dragging the
+  ## pointer across another slider does not move that one too.
+  let
+    hot = widget.frame.contains(ctx.mouseX, ctx.mouseY)
+    owned = ctx.sliderDragging == widget.id
+    unowned = ctx.sliderDragging == InvalidWidgetID
   if hot:
     ctx.setHot(widget.id)
-  if ctx.mouseLeftDown and (hot or ctx.sliderDragging == widget.id):
+  if not ctx.mouseLeftDown:
+    return
+  if owned or (unowned and hot and ctx.mouseLeftPressed):
     ctx.setActive(widget.id)
     ctx.setSliderValue(
       widget.id,

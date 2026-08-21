@@ -2,6 +2,12 @@ import ../widgets2
 import ../resources
 import nest/screen
 
+const ControlHeight* = 32
+  ## The height a single-line control resolves to under a `fit` height
+  ## policy: buttons, checkboxes, sliders, tabs, combo boxes and line
+  ## inputs all measure at least this tall, so a row of mixed controls
+  ## lines up without every call site naming a pixel height.
+
 type
   ComponentStyle* = object
     hasBackground*: bool
@@ -52,6 +58,19 @@ method measure*(c: Component, resources: Resources): IntrinsicSize {.base.} =
 
 method draw*(c: Component, widget: Widget, ctx: var DrawContext) {.base.} =
   ## Draw the component inside its widget's frame. Draws nothing by default.
+  discard
+
+method pointerShield*(
+    c: Component, widget: Widget, windowWidth, windowHeight: int
+): tuple[has: bool, frame: Frame] {.base.} =
+  ## Return the area this component swallows pointer input over, above
+  ## everything else in the frame.
+  ##
+  ## A component that draws outside its own box in `drawOverlay`, such as an
+  ## open dropdown list, reports that area here. While the pointer is inside
+  ## it, only this component and the widgets inside it see the pointer, so a
+  ## click on the list cannot also land on whatever it covers. Shields
+  ## nothing by default.
   discard
 
 method drawOverlay*(c: Component, widget: Widget, ctx: var DrawContext) {.base.} =

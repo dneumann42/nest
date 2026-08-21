@@ -17,8 +17,10 @@ method update*(self: LineInput, widget: Widget, ctx: var UpdateContext) =
   self.editor.update(widget, ctx)
 
 method measure*(self: LineInput, resources: Resources): IntrinsicSize =
-  ## Return the size of one line of text in the input's font.
-  self.editor.measure(resources)
+  ## Return the size of one line of text in the input's font, at least the
+  ## standard control height.
+  result = self.editor.measure(resources)
+  result.height = max(result.height, ControlHeight.toFloat)
 
 method draw*(self: LineInput, widget: Widget, ctx: var DrawContext) =
   ## Draw the input's text, selection and caret.

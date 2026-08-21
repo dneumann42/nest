@@ -5,7 +5,7 @@ import nest/[coords, screen]
 const
   TabPaddingX = 14
   TabPaddingY = 5
-  TabMinHeight = 26
+  TabMinHeight = ControlHeight
   TabInsetTop = 2
   TabAccentHeight = 3
 
@@ -63,6 +63,15 @@ method update*(self: TabButton, widget: Widget, ctx: var UpdateContext) =
     ctx.setHot(widget.id)
   if isActive:
     ctx.setActive(widget.id)
+
+proc tabContentBox(f: Frame): tuple[top, height: int] =
+  ## Return the top and height of the area a tab draws its label in.
+  ##
+  ## The box is the same whether or not the tab is selected: an unselected
+  ## tab's body is inset from the top, and the selected tab's accent stripe
+  ## takes the same room, so the label keeps its height across a selection
+  ## change.
+  (f.y.toInt + TabInsetTop + 1, max(f.height.toInt - TabInsetTop - 2, 1))
 
 proc drawTabFrame(f: Frame, border, highlight, shadow: Color, selected: bool) =
   let
@@ -136,9 +145,8 @@ method draw*(self: TabButton, widget: Widget, ctx: var DrawContext) =
   let
     (font, _) = ctx.resources.get("font")
     textExtent = ctx.resources.measureText("font", self.label)
-    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, TabPaddingX)
-    textY =
-      (if self.selected: f.y.toInt else: f.y.toInt + TabInsetTop) +
-      max((frameHeight.toInt - textExtent.height) div 2, TabPaddingY)
+    content = tabContentBox(f)
+    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, 0)
+    textY = content.top + max((content.height - textExtent.height) div 2, 0)
   discard
     drawText(Font(font), textX, textY, self.label, tabStyle.text, color(0, 0, 0, 0))

@@ -25,6 +25,9 @@ type
     key: string
     removed: bool
 
+  ToggleEvent = enum
+    Flipped
+
 # --- a leaf widget with its own event type -------------------------------
 
 widget counter(model: CounterModel) emits CounterEvent:
@@ -57,6 +60,13 @@ widget shell(model: CounterModel, log: var seq[string]) emits ShellEvent:
         emit Dirty
       of Reset:
         log.add "shell handled Reset"
+
+# --- a widget that reads a hit directly, rather than through a helper ----
+
+widget toggleRow(value: bool) emits ToggleEvent:
+  ui.checkbox(ui.id("flag"), "Flag", value, fit(), fit())
+  if ui.clicked(ui.id("flag")):
+    emit Flipped
 
 # --- a container that takes children ------------------------------------
 
@@ -233,3 +243,34 @@ suite "widget events":
         counterEvents.add ui.counter(model)
 
     check counterEvents == @[Incremented]
+
+  test "a handler built on ui.clicked runs once a frame":
+    # A widget body runs once for events and once for layout. `ui.clicked`
+    # answers only on the event pass, so a handler written against it does not
+    # run a second time while the widget tree is built.
+    var
+      handled = 0
+      toggleEvents: seq[ToggleEvent]
+      flag: WidgetID
+    ui.scope("toggleRow"):
+      flag = ui.id("flag")
+
+    ui.frame:
+      toggleEvents.add ui.toggleRow(false)
+    check toggleEvents.len == 0
+
+    ui.beginInputFrame()
+    ui.clickCentre(flag)
+    ui.frame:
+      toggleEvents.add ui.toggleRow(false)
+    check toggleEvents.len == 0
+
+    # The frame that dispatches the click runs the handler once, not once per
+    # pass.
+    ui.frame:
+      for event in ui.toggleRow(false):
+        toggleEvents.add event
+        handled.inc
+
+    check toggleEvents == @[Flipped]
+    check handled == 1
