@@ -726,6 +726,136 @@ template autoScoped*(self: var UI, body: untyped) =
     self.scope(autoID):
       body
 
+macro widget*(signature, body: untyped): untyped =
+  ## Declare a portion of a user interface as a named procedure.
+  ##
+  ## `widget name(params): body` expands to a procedure that takes the `UI` as
+  ## its first parameter and runs `body` inside `ui.scope("name")`:
+  ##
+  ## ```nim
+  ## widget counter(model: Model, msgs: var seq[Msg]):
+  ##   ui.row(ui.id("row"), cfg(gap = 8)):
+  ##     if ui.button(ui.id("dec"), "-", fit(), fit()):
+  ##       msgs.add Decrement
+  ##
+  ## # becomes
+  ## proc counter(ui: var UI, model: Model, msgs: var seq[Msg]) =
+  ##   ui.scope("counter"):
+  ##     ui.row(ui.id("row"), cfg(gap = 8)):
+  ##       ...
+  ## ```
+  ##
+  ## The body is ordinary Nim and keeps the `ui.` prefix on every call, so a
+  ## `widget` declaration and a hand-written `proc name(ui: var UI, ...)` are
+  ## interchangeable: turning one into the other is a change to the header, not
+  ## to the interface it declares.
+  ##
+  ## Ids built with `ui.id` inside the body are scoped by the name, which keeps
+  ## two widgets from meeting on a shared id such as `"row"`. Declaring the same
+  ## widget twice in one frame still needs a `ui.scope` at the call site, so the
+  ## two instances differ.
+  ##
+  ## Parameters take the usual forms, including a shared type and a default:
+  ##
+  ## ```nim
+  ## widget field(label, value: string, width = fill()):
+  ##   ui.row(ui.id("row"), cfg(width = width, height = fit(), gap = 8)):
+  ##     ui.label(ui.id("label"), label, fit(), fit())
+  ##     ui.label(ui.id("value"), value, fill(), fit())
+  ## ```
+  ##
+  ## Export a widget by marking its name, as in `widget counter*(...)`. A widget
+  ## reports an event by declaring a return type with `->`, and the result is
+  ## discardable, as it is for the built-in widgets:
+  ##
+  ## ```nim
+  ## widget swatch(value: Color) -> bool:
+  ##   ui.colorSwatch(ui.id("swatch"), value, fixed(24), fixed(24))
+  ##   result = ui.clicked(ui.id("swatch"))
+  ## ```
+  var
+    node = signature
+    returnType = newEmptyNode()
+
+  if node.kind == nnkInfix and node[0].eqIdent("->"):
+    if node.len != 3:
+      error("widget expects `name(params) -> ReturnType`", signature)
+    returnType = node[2]
+    node = node[1]
+
+  var
+    nameNode: NimNode
+    argumentList: NimNode = nil
+    firstArgument = 0
+
+  if node.kind == nnkInfix and node[0].eqIdent("*"):
+    nameNode = nnkPostfix.newTree(ident"*", node[1])
+    argumentList = node[2]
+  else:
+    case node.kind
+    of nnkIdent, nnkAccQuoted:
+      nameNode = node
+    of nnkCall, nnkCommand, nnkObjConstr:
+      nameNode = node[0]
+      argumentList = node
+      firstArgument = 1
+    else:
+      error("widget expects a name and a parameter list", signature)
+
+  if argumentList != nil and
+      argumentList.kind notin {nnkPar, nnkTupleConstr, nnkCall, nnkCommand,
+        nnkObjConstr}:
+    error("widget expects a name and a parameter list", signature)
+
+  let bareName =
+    if nameNode.kind == nnkPostfix:
+      nameNode[1]
+    else:
+      nameNode
+
+  var
+    parameters = @[returnType,
+      newIdentDefs(ident"ui", nnkVarTy.newTree(ident"UI"))]
+    pending: seq[NimNode]
+
+  if argumentList != nil:
+    for index in firstArgument ..< argumentList.len:
+      let argument = argumentList[index]
+      case argument.kind
+      of nnkIdent, nnkAccQuoted:
+        # A parameter that shares its type with a later one: `first, second: T`.
+        pending.add argument
+      of nnkExprColonExpr:
+        var
+          parameterType = argument[1]
+          default = newEmptyNode()
+        if parameterType.kind == nnkAsgn:
+          default = parameterType[1]
+          parameterType = parameterType[0]
+        pending.add argument[0]
+        for name in pending:
+          parameters.add newIdentDefs(name, parameterType, default)
+        pending.setLen(0)
+      of nnkExprEqExpr, nnkAsgn:
+        # A parameter whose type comes from its default: `tone = 0`.
+        if pending.len > 0:
+          error("widget parameter `" & pending[^1].repr & "` has no type",
+            signature)
+        parameters.add newIdentDefs(argument[0], newEmptyNode(), argument[1])
+      else:
+        error("widget parameters must be `name: Type`", argument)
+
+  if pending.len > 0:
+    error("widget parameter `" & pending[^1].repr & "` has no type", signature)
+
+  let scoped = newStmtList(
+    newCall(newDotExpr(ident"ui", ident"scope"), newLit($bareName), body)
+  )
+
+  result = newProc(name = nameNode, params = parameters, body = scoped)
+  if returnType.kind != nnkEmpty:
+    result.addPragma ident"discardable"
+
 proc beginEvents(self: var UI, context: DrawContext) =
   self.phase = EventPhase
   self.autoIDCounter = 0
@@ -1758,7 +1888,8 @@ template layout*(
   ## `blk` is the frame's declarations, and is run twice: once to dispatch
   ## events and once to build the widget tree, which is then solved, updated
   ## and drawn. Use the single-context overload unless the caller keeps its
-  ## own contexts.
+  ## own contexts. Whether the frame drew anything is reported by
+  ## `redrewFrame`.
   # This could totally be done at compile time, the only reason I am
   # avoiding doing that, is I want to allow loading ui from a dynamic module
   let previousDrawCommands {.gensym.} = screen.drawCommands
@@ -1825,8 +1956,9 @@ template layout*(ui: var UI, blk: untyped): auto =
   ## `blk` is the frame's declarations, and is run twice: once to dispatch
   ## events and once to build the widget tree. The tree is then solved,
   ## updated against this frame's input, and drawn, either fully or as an
-  ## incremental redraw of what changed. Evaluates to whether the layout
-  ## succeeded.
+  ## incremental redraw of what changed. A layout that cannot be solved is
+  ## skipped, leaving the previous frame on screen; whether this frame drew
+  ## anything is reported by `redrewFrame`.
   let previousDrawCommands {.gensym.} = screen.drawCommands
   let previousCommandMeasureText {.gensym.} = screen.commandMeasureText
   let previousCommandMeasureImage {.gensym.} = screen.commandMeasureImage

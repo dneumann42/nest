@@ -13,6 +13,7 @@ task test, "Run the Nest test suite":
   exec "nim c -r --path:src --nimcache:build/nimcache tests/test_layout.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_ui.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_owldsl.nim"
+  exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_widget.nim"
 
 task bench, "Run Nest benchmarks":
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/bench_network_dialog.nim"
@@ -31,3 +32,7 @@ task docCoverage, "Fail unless every exported routine has a doc comment":
   exec "nim jsondoc --project --outdir:build/jsondoc src/nest.nim"
   exec "nim c -r --hints:off --nimcache:build/nimcache-doccoverage " &
     "-o:build/doccoverage scripts/doccoverage.nim build/jsondoc"
+
+task gallery, "Build and run the component gallery":
+  exec "nim c -r --nimcache:build/nimcache-gallery -o:build/gallery " &
+    "apps/gallery/gallery.nim"

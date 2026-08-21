@@ -1,0 +1,1833 @@
+#+title: Building UIs In Nest
+
+Nest draws user interfaces by re-declaring them every frame. Widgets hold no
+state of their own; the application owns its state and describes what the window
+should contain right now. Positions and sizes come from a constraint solver, so
+a declaration states relationships, not pixels.
+
+Every portion of an interface is declared with the ~widget~ macro, and the state
+behind it follows Model / Msg / update / view: one state type, one message type,
+one procedure that applies a message to the state, and widgets that declare the
+window from the state. Every example below follows that.
+
+The library API is documented in the generated reference (~nimble docs~). Layout
+constraints are covered in [[file:layout.org][layout.org]]. Every built-in
+widget is shown in the gallery application, ~apps/gallery/gallery.nim~
+(~nimble gallery~).
+
+* A Complete Application
+
+A counter. Two buttons, a label, one integer of state.
+
+#+begin_src nim
+import nest
+
+type
+  Model = object
+    count: int
+
+  Msg = enum
+    Increment
+    Decrement
+
+proc update(model: var Model, msg: Msg) =
+  case msg
+  of Increment: inc model.count
+  of Decrement: dec model.count
+
+widget counter(model: Model, msgs: var seq[Msg]):
+  ui.panel(ui.id("root"), cfg(padding = 16, gap = 12, alignItems = AlignCenter,
+      justifyContent = JustifyCenter)):
+    ui.label(ui.id("title"), "Counter", width = fit(), height = fit())
+    ui.row(ui.id("controls"), cfg(width = fit(), height = fit(), gap = 8,
+        alignItems = AlignCenter)):
+      if ui.button(ui.id("dec"), "-", width = fixed(32), height = fit()):
+        msgs.add Decrement
+      ui.label(ui.id("count"), $model.count, width = fixed(80), height = fit())
+      if ui.button(ui.id("inc"), "+", width = fixed(32), height = fit()):
+        msgs.add Increment
+
+when isMainModule:
+  var
+    ui = UI.init()
+    model = Model()
+    msgs: seq[Msg]
+
+  let appCfg = AppConfig.init(width = 320, height = 160, title = "Counter")
+
+  application appCfg, ui:
+    ui.layout:
+      ui.events:
+        msgs.setLen(0)
+
+      ui.counter(model, msgs)
+
+      ui.events:
+        for msg in msgs:
+          model.update(msg)
+        if msgs.len > 0:
+          ui.markAllDirty()
+#+end_src
+
+Four pieces appear in every application:
+
+- ~UI.init()~ creates the widget tree and its solver.
+- ~AppConfig.init(...)~ describes the window.
+- ~application cfg, ui: blk~ opens the window and runs ~blk~ once per frame. It
+  injects ~running~; setting it to false leaves the loop.
+- ~ui.layout: blk~ runs one frame of the UI.
+
+* Widgets
+
+~widget name(params): body~ declares a portion of an interface. It expands to a
+procedure that takes the ~UI~ as its first parameter and runs the body inside
+~ui.scope("name")~.
+
+#+begin_src nim
+import nest
+
+type Model = object
+  count: int
+
+widget counterLabel(model: Model):
+  ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
+
+# The same declaration written by hand:
+proc counterLabelByHand(ui: var UI, model: Model) =
+  ui.scope("counterLabelByHand"):
+    ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
+#+end_src
+
+The two declarations above are equivalent. This is the point of the macro's
+shape: the body is ordinary Nim, every call keeps its ~ui.~ prefix, and turning
+a widget into a procedure or back is a change to the header only. No type is
+declared, and nothing in the body has to move.
+
+Call a widget with method-call syntax, like any other:
+
+#+begin_src nim
+import nest
+
+type Model = object
+  count: int
+
+widget counterLabel(model: Model):
+  ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
+
+widget panelWithCount(model: Model):
+  ui.panel(ui.id("root"), cfg(padding = 8, gap = 6)):
+    ui.label(ui.id("title"), "Count", width = fit(), height = fit())
+    ui.counterLabel(model)
+#+end_src
+
+** Ids Are Scoped By The Widget
+
+Because the body runs inside ~ui.scope("name")~, two widgets can both use
+~ui.id("row")~ without meeting.
+
+#+begin_src nim
+import nest
+
+widget header(title: string):
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
+    ui.label(ui.id("text"), title, width = fill(), height = fit())
+
+widget footer(text: string):
+  # `ui.id("row")` here is a different id from the one in `header`.
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
+    ui.label(ui.id("text"), text, width = fill(), height = fit())
+
+widget page():
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    ui.header("Title")
+    ui.footer("Status")
+#+end_src
+
+The scope covers the widget's name, not its arguments, so declaring the same
+widget twice in one frame still needs a scope at the call site.
+
+#+begin_src nim
+import nest
+
+widget pane(title: string):
+  ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8)):
+    ui.label(ui.id("title"), title, width = fill(), height = fit())
+
+widget splitView():
+  ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8)):
+    ui.scope("left"):
+      ui.pane("Left")
+    ui.scope("right"):
+      ui.pane("Right")
+#+end_src
+
+Reaching a widget's id from outside means entering its scope, which is how a
+caller finds a widget it did not declare itself.
+
+#+begin_src nim
+import nest
+
+widget searchBox(state: LineInputState):
+  ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
+
+proc focusSearch(ui: var UI) =
+  ui.scope("searchBox"):
+    ui.focus(ui.id("input"))
+#+end_src
+
+** Parameters
+
+Parameters take the usual forms: a type each, a shared type, or a default.
+
+#+begin_src nim
+import nest
+
+widget field(label, value: string, labelWidth = fixed(90)):
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8,
+      alignItems = AlignCenter)):
+    ui.label(ui.id("label"), label, width = labelWidth, height = fit())
+    ui.label(ui.id("value"), value, width = fill(), height = fit())
+
+widget details():
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 6)):
+    ui.field("Name", "nest")
+    ui.field("Version", "0.0.0", labelWidth = fixed(120))
+#+end_src
+
+A ~var~ parameter is how a widget writes back, and is the right way to pass a
+message queue.
+
+#+begin_src nim
+import nest
+
+type Msg = enum
+  Retry
+
+widget errorBanner(text: string, msgs: var seq[Msg]):
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
+    ui.coloredLabel(ui.id("text"), text, ui.palette.rose, width = fill(),
+        height = fit())
+    if ui.button(ui.id("retry"), "Retry", width = fit(), height = fit()):
+      msgs.add Retry
+#+end_src
+
+** Reporting Events
+
+A widget reports an event by declaring a return type with ~->~. The result is
+discardable, as it is for the built-in widgets.
+
+#+begin_src nim
+import nest
+
+widget labelledButton(label, text: string) -> bool:
+  ui.row(ui.id("row"), cfg(width = fit(), height = fit(), gap = 6,
+      alignItems = AlignCenter)):
+    ui.label(ui.id("label"), label, width = fit(), height = fit())
+    result = ui.button(ui.id("button"), text, width = fit(), height = fit())
+
+type Msg = enum
+  Deleted
+
+widget toolbar(msgs: var seq[Msg]):
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8)):
+    if ui.labelledButton("Danger", "Delete"):
+      msgs.add Deleted
+    # The result can also be ignored.
+    ui.labelledButton("Nothing", "Ignore")
+#+end_src
+
+A widget that reports several things returns a tuple, or takes ~var~ parameters.
+
+#+begin_src nim
+import nest
+
+widget pager(page, pages: int) -> tuple[back, forward: bool]:
+  ui.row(ui.id("row"), cfg(width = fit(), height = fit(), gap = 6,
+      alignItems = AlignCenter)):
+    result.back = ui.button(ui.id("back"), "<", width = fixed(28),
+        height = fit())
+    ui.label(ui.id("position"), $page & " / " & $pages, width = fixed(70),
+        height = fit())
+    result.forward = ui.button(ui.id("forward"), ">", width = fixed(28),
+        height = fit())
+#+end_src
+
+** Exporting
+
+Mark the name to export a widget from its module.
+
+#+begin_src nim
+import nest
+
+widget statusBar*(text: string):
+  ui.dialogHeader(ui.id("root"), cfg(width = fill(), height = fit(),
+      padding = 6)):
+    ui.label(ui.id("text"), text, width = fill(), height = fit())
+#+end_src
+
+** When To Write A Plain Procedure
+
+~widget~ adds a ~ui~ parameter and an id scope. Write a plain procedure when
+neither is wanted: for code that computes rather than declares, and for a helper
+that must share the caller's id scope.
+
+#+begin_src nim
+import nest
+
+type Task = object
+  title: string
+  done: bool
+
+# Computes; declares nothing.
+proc summary(tasks: seq[Task]): string =
+  var done = 0
+  for task in tasks:
+    if task.done:
+      inc done
+  $done & " of " & $tasks.len & " done"
+
+# Declares, but deliberately shares the caller's scope, so the ids it
+# builds belong to whichever widget called it.
+proc rowLabel(ui: var UI, key, text: string) =
+  ui.label(ui.id(key, "label"), text, width = fill(), height = fit())
+
+widget taskList(tasks: seq[Task]):
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
+    ui.label(ui.id("summary"), tasks.summary, width = fill(), height = fit())
+    for task in tasks:
+      ui.rowLabel($task.title, task.title)
+#+end_src
+
+* The Frame
+
+~ui.layout~ runs its body twice.
+
+| Pass   | Purpose                     | ~ui.inEventPhase~ | ~ui.inLayoutPhase~ |
+|--------+-----------------------------+-------------------+--------------------|
+| event  | dispatch last frame's input | true              | false              |
+| layout | build the widget tree       | false             | true               |
+
+Widget calls behave differently in each pass. ~ui.button~ returns whether it was
+clicked during the event pass and builds a button during the layout pass.
+Declaration-only calls such as ~ui.label~ do nothing during the event pass.
+
+#+begin_src nim
+import nest
+
+widget passProbe(log: var seq[string]):
+  if ui.inEventPhase:
+    log.add "event pass"
+  else:
+    log.add "layout pass"
+  ui.label(ui.id("hello"), "hello", width = fit(), height = fit())
+#+end_src
+
+Two rules follow from the double pass:
+
+1. State changes belong in the event pass. Code that runs in both passes would
+   apply a change twice.
+2. Declarations must not depend on anything the layout pass changes, because the
+   event pass has already run with the previous values.
+
+~ui.events:~ marks a block as event-pass only.
+
+#+begin_src nim
+import nest
+
+widget quitHint(quitRequested: var bool):
+  ui.events:
+    if ui.keyPressed("Escape"):
+      quitRequested = true
+
+  ui.label(ui.id("hint"), "Press Escape to quit", width = fit(), height = fit())
+#+end_src
+
+* Model, Msg, Update, View
+
+The architecture has four parts.
+
+- ~Model~: all application state.
+- ~Msg~: every event the interface can produce, as data.
+- ~update~: the only code that writes to the model.
+- widgets: declare the window from the model and collect messages.
+
+The wiring is the same in every application:
+
+1. Clear the message queue at the start of the event pass.
+2. Declare the interface. During the event pass it collects messages; during the
+   layout pass it builds widgets.
+3. Fold the messages into the model at the end of the event pass.
+
+Because step 3 runs before the layout pass, the widgets built in the same frame
+already show the new state.
+
+#+begin_src nim
+import nest
+
+type
+  Model = object
+    count: int
+
+  Msg = enum
+    Increment
+
+proc update(model: var Model, msg: Msg) =
+  case msg
+  of Increment: inc model.count
+
+widget root(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
+    ui.label(ui.id("count"), $model.count, width = fit(), height = fit())
+    if ui.button(ui.id("inc"), "+", width = fit(), height = fit()):
+      msgs.add Increment
+
+proc runFrame(ui: var UI, model: var Model, msgs: var seq[Msg]) =
+  ui.layout:
+    ui.events:
+      msgs.setLen(0)
+
+    ui.root(model, msgs)
+
+    ui.events:
+      for msg in msgs:
+        model.update(msg)
+      if msgs.len > 0:
+        ui.markAllDirty()
+#+end_src
+
+A widget takes the model as a non-~var~ parameter. That is the point of the
+split: a widget cannot change state, so the model has exactly one writer.
+
+** Messages With Payloads
+
+An enum is enough while messages carry no data. Use an object variant when they
+do.
+
+#+begin_src nim
+import nest
+
+type
+  Field = enum
+    FieldName
+    FieldEmail
+
+  MsgKind = enum
+    SetField
+    SetVolume
+    Submit
+    Clear
+
+  Msg = object
+    case kind: MsgKind
+    of SetField:
+      field: Field
+      text: string
+    of SetVolume:
+      value: float64
+    of Submit, Clear:
+      discard
+
+  Model = object
+    name: string
+    email: string
+    volume: float64
+    submitted: bool
+
+proc update(model: var Model, msg: Msg) =
+  case msg.kind
+  of SetField:
+    case msg.field
+    of FieldName: model.name = msg.text
+    of FieldEmail: model.email = msg.text
+  of SetVolume:
+    model.volume = msg.value
+  of Submit:
+    model.submitted = true
+  of Clear:
+    model = Model()
+
+widget form(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
+    let volume = ui.slider(ui.id("volume"), model.volume, 0.0, 1.0,
+        width = fill(), height = fixed(24))
+    if volume.active:
+      msgs.add Msg(kind: SetVolume, value: volume.value)
+
+    ui.row(ui.id("actions"), cfg(width = fit(), height = fit(), gap = 8)):
+      if ui.button(ui.id("submit"), "Submit", width = fit(), height = fit()):
+        msgs.add Msg(kind: Submit)
+      if ui.button(ui.id("clear"), "Clear", width = fit(), height = fit()):
+        msgs.add Msg(kind: Clear)
+#+end_src
+
+** One Message Per Event
+
+Messages name events, not setters. ~Submit~ and ~Clear~ describe what happened;
+what they do to the model is ~update~'s decision. A second button that clears
+the form adds no new code to ~update~.
+
+#+begin_src nim
+import nest
+
+type
+  Msg = enum
+    Reset
+
+  Model = object
+    count: int
+    history: seq[int]
+
+proc update(model: var Model, msg: Msg) =
+  case msg
+  of Reset:
+    model.history.add model.count
+    model.count = 0
+
+widget resetBar(model: Model, msgs: var seq[Msg]):
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+    if ui.button(ui.id("reset"), "Reset", width = fit(), height = fit()):
+      msgs.add Reset
+    if ui.button(ui.id("again"), "Start over", width = fit(), height = fit()):
+      msgs.add Reset
+    ui.label(ui.id("runs"), "runs: " & $model.history.len, width = fit(),
+        height = fit())
+#+end_src
+
+* Events
+
+Interaction is recorded when a frame updates its widgets, and observed on the
+next frame's event pass. A press therefore becomes a click one frame later;
+Nest requests that frame itself, so no polling is needed.
+
+The counter, frame by frame, with the pointer over the ~+~ button:
+
+#+begin_example
+frame 1 no input   : count=0 drawn=[-,0,+]
+frame 2 press on + : count=0 drawn=[-,0,+]
+frame 3 held       : count=1 drawn=[-,1,+]
+frame 4 release    : count=1 drawn=[-,1,+]
+#+end_example
+
+Frame 2 records the press. Frame 3 observes the click, applies ~Increment~, and
+draws ~1~ in that same frame.
+
+** Event Queries
+
+| Query                    | Reports                                           |
+|--------------------------+---------------------------------------------------|
+| ~ui.clicked(id)~         | widget is being pressed                           |
+| ~ui.rightClicked(id)~    | right button pressed over the widget this frame   |
+| ~ui.middleClicked(id)~   | middle button pressed over the widget this frame  |
+| ~ui.middleDragDelta(id)~ | middle-button drag state and horizontal distance  |
+| ~ui.submitted(id)~       | widget was submitted, as by the Enter key         |
+| ~ui.focused(id)~         | widget holds keyboard focus                       |
+| ~ui.sliderValue(id)~     | value under the pointer while a slider is dragged |
+| ~ui.keyPressed(name)~    | named key was pressed this frame                  |
+| ~ui.active(id)~          | widget is held down                               |
+
+Widget helpers wrap the common cases. ~ui.button~ returns ~ui.clicked~ for its
+own id, so both spellings work.
+
+#+begin_src nim
+import nest
+
+type Msg = enum
+  Save
+
+widget saveBar(msgs: var seq[Msg]):
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+    # As a return value.
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      msgs.add Save
+
+    # As a query on the same id.
+    ui.button(ui.id("saveAlso"), "Save", width = fit(), height = fit())
+    if ui.clicked(ui.id("saveAlso")):
+      msgs.add Save
+#+end_src
+
+** Widgets That Report State
+
+Some widgets draw a value and report what the user did to it. The model stays
+the source of truth.
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    ToggleSubscribed
+    SetVolume
+    SelectStyle
+
+  Msg = object
+    case kind: MsgKind
+    of SetVolume:
+      value: float64
+    of SelectStyle:
+      index: int
+    of ToggleSubscribed:
+      discard
+
+  Model = object
+    subscribed: bool
+    volume: float64
+    style: int
+
+const Styles = ["Solid", "Dashed", "Dotted"]
+
+widget settings(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 10)):
+    # A checkbox draws the flag it is given; the click is a separate query.
+    ui.checkbox(ui.id("subscribed"), "Subscribed", model.subscribed,
+        width = fit(), height = fit())
+    if ui.clicked(ui.id("subscribed")):
+      msgs.add Msg(kind: ToggleSubscribed)
+
+    # A slider reports the value under the pointer while it is dragged.
+    let volume = ui.slider(ui.id("volume"), model.volume, 0.0, 1.0,
+        width = fill(), height = fixed(24))
+    if volume.active:
+      msgs.add Msg(kind: SetVolume, value: volume.value)
+
+    # A combo box reports the index the user picked.
+    let picked = ui.combobox(ui.id("style"), model.style, Styles,
+        width = fixed(160), height = fixed(28))
+    if picked.changed:
+      msgs.add Msg(kind: SelectStyle, index: picked.index)
+#+end_src
+
+** Widgets That Write Through A Variable
+
+~ui.tabs~ and ~ui.colorInput~ write into a ~var~ parameter. Pass a copy and
+compare, so the model keeps its single writer.
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    SelectTab
+    SetAccent
+
+  Msg = object
+    case kind: MsgKind
+    of SelectTab:
+      index: int
+    of SetAccent:
+      color: Color
+
+  Model = object
+    tab: int
+    accent: Color
+
+const TabLabels = ["Files", "Search", "Settings"]
+
+widget shell(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 8)):
+    var tab = model.tab
+    ui.tabs(ui.id("tabs"), TabLabels, tab, width = fill(), height = fit())
+    if tab != model.tab:
+      msgs.add Msg(kind: SelectTab, index: tab)
+
+    var accent = model.accent
+    if ui.colorInput(ui.id("accent"), "Accent", accent):
+      msgs.add Msg(kind: SetAccent, color: accent)
+#+end_src
+
+** Keyboard And Focus
+
+~ui.keyPressed~ names keys without case, spaces, dashes or underscores, and the
+~Key~ prefix is optional: ~Escape~, ~esc~ and ~KeyEsc~ all match. Focus is moved
+with ~ui.focus~ and read with ~ui.focused~.
+
+#+begin_src nim
+import nest
+
+type
+  Msg = enum
+    Cancel
+    Confirm
+    FocusSearch
+
+widget searchBox(state: LineInputState, msgs: var seq[Msg]):
+  ui.events:
+    if ui.keyPressed("Escape"):
+      msgs.add Cancel
+    if ui.keyPressed("F3"):
+      msgs.add FocusSearch
+
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
+    ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
+    # Enter in a single-line input submits it.
+    if ui.submitted(ui.id("input")):
+      msgs.add Confirm
+
+    if ui.focused(ui.id("input")):
+      ui.label(ui.id("hint"), "Enter to search", width = fit(), height = fit())
+
+proc handle(ui: var UI, msg: Msg) =
+  case msg
+  of FocusSearch:
+    # Entering the widget's scope reaches the id it declared.
+    ui.scope("searchBox"):
+      ui.focus(ui.id("input"))
+  else:
+    discard
+#+end_src
+
+** Pointer Events Beyond Clicks
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    OpenContextMenu
+    ScrubBy
+
+  Msg = object
+    case kind: MsgKind
+    of OpenContextMenu:
+      x, y: int
+    of ScrubBy:
+      pixels: int
+
+widget canvas(msgs: var seq[Msg]):
+  ui.panel(ui.id("root"), cfg(width = fill(), height = fill())):
+    ui.label(ui.id("hint"), "Right click or middle drag", width = fit(),
+        height = fit())
+
+  ui.events:
+    if ui.rightClicked(ui.id("root")):
+      msgs.add Msg(kind: OpenContextMenu, x: 0, y: 0)
+
+    let drag = ui.middleDragDelta(ui.id("root"))
+    if drag.active and not drag.started and drag.deltaX != 0:
+      msgs.add Msg(kind: ScrubBy, pixels: drag.deltaX)
+#+end_src
+
+** Events That Are Not Widget Events
+
+Quitting, timers and external state also belong in the event pass.
+
+#+begin_src nim
+import nest
+
+type
+  Msg = enum
+    Quit
+
+widget quitButton(msgs: var seq[Msg]):
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+    if ui.button(ui.id("quit"), "Quit", width = fit(), height = fit()):
+      msgs.add Quit
+
+when isMainModule:
+  var
+    ui = UI.init()
+    msgs: seq[Msg]
+
+  let appCfg = AppConfig.init(width = 240, height = 120, title = "Quit")
+
+  application appCfg, ui:
+    ui.layout:
+      ui.events:
+        msgs.setLen(0)
+
+      ui.quitButton(msgs)
+
+      ui.events:
+        for msg in msgs:
+          case msg
+          of Quit:
+            running = false
+#+end_src
+
+* Widget Ids
+
+An id is derived from the names passed to ~ui.id~, plus the scopes around it. The
+same names produce the same id every frame, which is how a widget keeps focus,
+scroll position and editor state across frames.
+
+#+begin_src nim
+import nest
+
+widget rowList(rows: seq[string]):
+  # Names may be strings, numbers, or a mix.
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
+    for index, row in rows:
+      ui.label(ui.id("row", index), row, width = fill(), height = fit())
+#+end_src
+
+Ids must be stable, not merely unique. An id built from a loop index changes
+meaning when the list is reordered, so build it from something that belongs to
+the item.
+
+#+begin_src nim
+import nest
+
+type Task = object
+  id: int
+  title: string
+  done: bool
+
+widget taskList(tasks: seq[Task]):
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 4)):
+    for task in tasks:
+      # Keyed by the task's own id, so reordering keeps each row's state.
+      ui.checkbox(ui.id("task", task.id), task.title, task.done, width = fill(),
+          height = fit())
+#+end_src
+
+** List Keys
+
+~listKey~ and ~listItems~ produce stable keys for rows, including a filtered
+list.
+
+#+begin_src nim
+import nest
+
+type File = object
+  name: string
+  hidden: bool
+
+widget fileList(files: seq[File], selected: string, msgs: var seq[string]):
+  let visible = listItems(
+    files,
+    key = proc(file: File, index: int): string = listKey(index, file.name),
+    filter = proc(file: File, index: int): bool = not file.hidden,
+  )
+
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 2)):
+    for item in visible:
+      if ui.button(ui.id("file", item.key), item.value.name, width = fill(),
+          height = fit()):
+        msgs.add item.value.name
+      if item.value.name == selected:
+        ui.label(ui.id("mark", item.key), "selected", width = fit(),
+            height = fit())
+#+end_src
+
+** Unnamed Widgets
+
+Every built-in helper has an overload without an id. It generates one from a
+per-frame counter, so the id is stable only while the surrounding declarations
+are unchanged. Use it for decoration; name anything that holds state.
+
+#+begin_src nim
+import nest
+
+widget sourceView(editor: EditorState):
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
+    # Fine: a static label.
+    ui.label("Source", width = fit(), height = fit())
+
+    # Not fine as an unnamed widget: it owns focus and a cursor.
+    ui.textEditor(ui.id("source"), editor, width = fill(), height = fill())
+#+end_src
+
+* Layout
+
+A container takes a ~BoxConfig~ from ~cfg~ and a body of declarations.
+Constraint details are in [[file:layout.org][layout.org]].
+
+| Size policy      | Meaning                                             |
+|------------------+-----------------------------------------------------|
+| ~fixed(n)~       | exactly ~n~ pixels                                  |
+| ~fill(min, max)~ | take the available space, within bounds              |
+| ~fit(min, max)~  | shrink to the content's measured size                |
+| ~prefer(n, ...)~ | ask for ~n~, yield when constraints require another |
+| ~hug(n, ...)~    | same as ~prefer~                                    |
+
+#+begin_src nim
+import nest
+
+widget threePane():
+  ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 12,
+      padding = 12)):
+    # A sidebar that stays near 240px but can shrink.
+    ui.panel(ui.id("sidebar"), cfg(width = prefer(240, min = 180, max = 320),
+        height = fill(), padding = 8)):
+      ui.label(ui.id("sidebarTitle"), "Files", width = fill(), height = fit())
+
+    # Content absorbs what is left.
+    ui.panel(ui.id("content"), cfg(width = fill(min = 300), height = fill(),
+        padding = 8)):
+      ui.label(ui.id("contentTitle"), "Editor", width = fill(), height = fit())
+
+    # An inspector sized to its content.
+    ui.panel(ui.id("inspector"), cfg(width = fit(), height = fill(),
+        padding = 8)):
+      ui.label(ui.id("inspectorTitle"), "Inspector", width = fit(),
+          height = fit())
+#+end_src
+
+** Containers
+
+| Container              | Arrangement                                       |
+|------------------------+---------------------------------------------------|
+| ~ui.row~               | children left to right                            |
+| ~ui.column~            | children top to bottom                            |
+| ~ui.overlay~           | children stacked                                  |
+| ~ui.panel~             | background surface, children in a column          |
+| ~ui.card~              | raised surface that also swallows pointer presses |
+| ~ui.center~            | one centred child                                 |
+| ~ui.table~             | table surface, with header, row and cell          |
+| ~ui.menuBar~           | menu entries in a row                             |
+| ~ui.dialogHeader~      | titled strip                                      |
+| ~ui.modalDialog~       | centred surface over the frame                    |
+| ~ui.floatingCardBelow~ | surface anchored under another widget             |
+
+#+begin_src nim
+import nest
+
+widget cardExample():
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    ui.card(ui.id("card"), cfg(width = fill(), height = fit(), padding = 10,
+        gap = 6)):
+      ui.dialogHeader(ui.id("head"), cfg(width = fill(), height = fit(),
+          padding = 6)):
+        ui.label(ui.id("title"), "Details", width = fit(), height = fit())
+      ui.label(ui.id("body"), "One card, one header.", width = fill(),
+          height = fit())
+
+    ui.center(ui.id("center"), fill(), fixed(80)):
+      ui.label(ui.id("centered"), "centred", width = fit(), height = fit())
+
+    ui.row(ui.id("footer"), cfg(width = fill(), height = fit(), gap = 8)):
+      ui.label(ui.id("left"), "left", width = fit(), height = fit())
+      ui.spacer(ui.id("spacer"), width = fill(), height = fixed(1))
+      ui.label(ui.id("right"), "right", width = fit(), height = fit())
+#+end_src
+
+** Alignment And Justification
+
+~alignItems~ places children across the container's axis, ~justifyContent~
+distributes free space along it, and a child overrides ~alignItems~ with
+~alignSelf~.
+
+#+begin_src nim
+import nest
+
+widget toolbar():
+  ui.row(ui.id("root"), cfg(width = fill(), height = fixed(40), gap = 6,
+      padding = 6, alignItems = AlignCenter, justifyContent = JustifyEnd)):
+    ui.label(ui.id("title"), "Title", width = fit(), height = fit(),
+        alignSelf = AlignStart)
+    ui.button(ui.id("ok"), "OK", width = fit(), height = fit())
+    ui.button(ui.id("cancel"), "Cancel", width = fit(), height = fit())
+#+end_src
+
+** Tables
+
+#+begin_src nim
+import nest
+
+type Row = object
+  name: string
+  size: string
+
+widget fileTable(rows: seq[Row]):
+  ui.table(ui.id("root"), cfg(width = fill(), height = fit())):
+    ui.tableHeader(ui.id("head"), cfg(width = fill(), height = fit())):
+      for column, title in ["Name", "Size"]:
+        ui.tableCell(ui.id("head", column), cfg(width = fill(),
+            height = fit())):
+          ui.label(ui.id("headText", column), title, width = fit(),
+              height = fit())
+
+    for row in rows:
+      ui.tableRow(ui.id("row", row.name), cfg(width = fill(), height = fit())):
+        for column, text in [row.name, row.size]:
+          ui.tableCell(ui.id("cell", row.name, column), cfg(width = fill(),
+              height = fit())):
+            ui.label(ui.id("cellText", row.name, column), text, width = fit(),
+                height = fit())
+#+end_src
+
+** Scrolling
+
+~scrollX~ and ~scrollY~ on a container let its content exceed the container's
+box.
+
+#+begin_src nim
+import nest
+
+widget logView(lines: seq[string]):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), padding = 8,
+      gap = 2, scrollY = true)):
+    for index, line in lines:
+      ui.label(ui.id("line", index), line, width = fill(), height = fit())
+#+end_src
+
+* Composing Widgets
+
+An interface is a tree of widgets, each declaring the next. Splitting one is the
+main tool for keeping a large window readable: each widget takes the state it
+needs and the message queue.
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    SetName
+    SetEmail
+    Save
+
+  Msg = object
+    case kind: MsgKind
+    of SetName, SetEmail:
+      text: string
+    of Save:
+      discard
+
+  Model = object
+    name: LineInputState
+    email: LineInputState
+
+widget labelledInput(label: string, state: LineInputState) -> bool:
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8,
+      alignItems = AlignCenter)):
+    ui.label(ui.id("label"), label, width = fixed(80), height = fit())
+    ui.lineInput(ui.id("input"), state, width = fill(), height = fixed(30))
+  result = ui.submitted(ui.id("input"))
+
+widget form(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
+    ui.scope("name"):
+      if ui.labelledInput("Name", model.name):
+        msgs.add Msg(kind: SetName, text: model.name.text)
+    ui.scope("email"):
+      if ui.labelledInput("Email", model.email):
+        msgs.add Msg(kind: SetEmail, text: model.email.text)
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      msgs.add Msg(kind: Save)
+#+end_src
+
+Two instances of ~labelledInput~ appear in one frame, so each call sits in its
+own scope. Without them both inputs would share one id and behave as a single
+field.
+
+A widget that takes no state is worth extracting too.
+
+#+begin_src nim
+import nest
+
+widget sectionTitle(text: string):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 2)):
+    ui.label(ui.id("text"), text, width = fit(), height = fit())
+    ui.spacer(ui.id("rule"), width = fill(), height = fixed(1))
+
+widget settingsPage():
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 10)):
+    ui.scope("general"):
+      ui.sectionTitle("General")
+    ui.scope("advanced"):
+      ui.sectionTitle("Advanced")
+#+end_src
+
+* Custom Components
+
+~widget~ composes existing widgets. A component is the other extension point: a
+~Component~ subclass that measures, updates and draws itself, attached to a
+widget with ~ui.component~. Write one when nothing built in draws what is
+needed.
+
+| Method        | Called                          | Purpose                         |
+|---------------+---------------------------------+---------------------------------|
+| ~measure~     | before solving, for ~fit~ boxes | report the content's size       |
+| ~update~      | once per frame, after solving   | react to input                  |
+| ~draw~        | when the widget is dirty        | paint inside the widget's frame |
+| ~drawOverlay~ | after every ~draw~              | paint above sibling widgets     |
+
+A component that only draws:
+
+#+begin_src nim
+import nest
+import nest/[coords, resources]
+
+type ProgressBar = ref object of Component
+  fraction: float64
+
+proc new(T: typedesc[ProgressBar], fraction: float64): T =
+  T(fraction: fraction.clamp(0.0, 1.0))
+
+method measure(self: ProgressBar, resources: Resources): IntrinsicSize =
+  intrinsicSize(120, 10)
+
+method draw(self: ProgressBar, widget: Widget, ctx: var DrawContext) =
+  let
+    f = widget.frame
+    track = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
+    filled = rect(f.x.toInt, f.y.toInt, (f.width * self.fraction).toInt,
+        f.height.toInt)
+  fillRect(track, ctx.palette.panelMuted)
+  fillRect(filled, ctx.palette.primary)
+  lineRect(track, ctx.palette.panelBorder)
+
+widget progressBar(fraction: float64, width = fill(), height = fixed(10)):
+  discard ui.component(ui.id("bar"), ProgressBar.new(fraction), width, height,
+      renderKeyOverride = "progress:" & $fraction)
+
+widget download(progress: float64):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
+    ui.label(ui.id("label"), "Downloading", width = fit(), height = fit())
+    ui.progressBar(progress)
+#+end_src
+
+~renderKeyOverride~ tells Nest when the widget must be repainted. A component
+whose appearance depends on more than its size and alignment has to supply one,
+or a changed value will not be drawn.
+
+A component that reacts to the pointer derives from ~Interactive~, which also
+marks its frame as blocking pointer input. Wrapping it in a ~widget~ gives it
+the same call shape as a built-in helper.
+
+#+begin_src nim
+import nest
+import nest/[coords, resources]
+
+type Swatch = ref object of Interactive
+  value: Color
+
+proc new(T: typedesc[Swatch], value: Color): T =
+  T(value: value)
+
+method measure(self: Swatch, resources: Resources): IntrinsicSize =
+  intrinsicSize(24, 24)
+
+method update(self: Swatch, widget: Widget, ctx: var UpdateContext) =
+  let f = widget.frame
+  let inside =
+    ctx.mouseX.toFloat >= f.x and ctx.mouseX.toFloat < f.x + f.width and
+    ctx.mouseY.toFloat >= f.y and ctx.mouseY.toFloat < f.y + f.height
+  if inside:
+    ctx.setHot(widget.id)
+    if ctx.mouseLeftPressed:
+      ctx.setActive(widget.id)
+
+method draw(self: Swatch, widget: Widget, ctx: var DrawContext) =
+  let
+    f = widget.frame
+    box = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
+  fillRect(box, self.value)
+  lineRect(box, if ctx.hot(widget.id): ctx.palette.primary
+    else: ctx.palette.panelBorder)
+
+widget swatch(value: Color) -> bool:
+  discard ui.component(ui.id("swatch"), Swatch.new(value), fixed(24), fixed(24),
+      renderKeyOverride = "swatch:" & $value)
+  result = ui.clicked(ui.id("swatch"))
+
+widget paletteRow(colors: seq[Color], msgs: var seq[Color]):
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 4)):
+    for index, value in colors:
+      ui.scope(index):
+        if ui.swatch(value):
+          msgs.add value
+#+end_src
+
+** Animation
+
+A component asks for the next frame from its ~draw~ method.
+
+#+begin_src nim
+import nest
+import nest/[coords, resources]
+
+type Spinner = ref object of Component
+  discard
+
+proc new(T: typedesc[Spinner]): T =
+  T()
+
+method measure(self: Spinner, resources: Resources): IntrinsicSize =
+  intrinsicSize(16, 16)
+
+method draw(self: Spinner, widget: Widget, ctx: var DrawContext) =
+  let
+    f = widget.frame
+    step = (ctx.ticks div 120) mod 4
+    size = (f.width / 2).toInt
+    box = rect(f.x.toInt + (if step in {1, 2}: size else: 0),
+      f.y.toInt + (if step >= 2: size else: 0), size, size)
+  fillRect(box, ctx.palette.primary)
+  # Redraw in 120ms, which keeps the animation running.
+  ctx.requestRedrawAfter(120)
+
+widget spinner():
+  discard ui.component(ui.id("spinner"), Spinner.new(), fixed(16), fixed(16))
+  ui.markRealtime(ui.id("spinner"))
+
+widget statusLine(busy: bool):
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
+    if busy:
+      ui.spinner()
+    ui.label(ui.id("text"), if busy: "Working" else: "Idle", width = fit(),
+        height = fit())
+#+end_src
+
+~ui.markRealtime~ keeps a widget in the set that is repainted every frame, which
+is what an animation needs when the rest of the frame is unchanged.
+
+* Growing The Application
+
+The architecture stays the same as an application grows; what changes is how it
+is divided. Each stage below is reached only when the previous one becomes
+awkward.
+
+** Stage 1: One Widget
+
+A single ~Model~, a single ~Msg~, one ~widget~. This is the shape of the counter,
+and it stays readable for a window with a handful of children.
+
+** Stage 2: One Widget Per Region
+
+Split by region. The model and the message type stay whole.
+
+#+begin_src nim
+import nest
+
+type
+  Msg = enum
+    NewFile
+    OpenFile
+
+  Model = object
+    fileName: string
+    modified: bool
+
+widget toolbar(msgs: var seq[Msg]):
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
+      padding = 6)):
+    if ui.button(ui.id("new"), "New", width = fit(), height = fit()):
+      msgs.add NewFile
+    if ui.button(ui.id("open"), "Open", width = fit(), height = fit()):
+      msgs.add OpenFile
+
+widget statusBar(model: Model):
+  ui.dialogHeader(ui.id("root"), cfg(width = fill(), height = fit(),
+      padding = 6)):
+    ui.label(
+      ui.id("text"),
+      model.fileName & (if model.modified: " *" else: ""),
+      width = fill(),
+      height = fit(),
+    )
+
+widget shell(model: Model, msgs: var seq[Msg]):
+  ui.panel(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    ui.toolbar(msgs)
+    ui.panel(ui.id("body"), cfg(width = fill(), height = fill(), padding = 8)):
+      ui.label(ui.id("bodyText"), "Body", width = fill(), height = fit())
+    ui.statusBar(model)
+#+end_src
+
+** Stage 3: A Sub-Model Per Feature
+
+When a region owns state that nothing else touches, give it its own ~Model~,
+~Msg~, ~update~ and ~widget~, and let the parent forward messages. Each feature
+becomes a module that only its parent knows about.
+
+#+begin_src nim
+import nest
+
+# --- search feature -----------------------------------------------------
+
+type
+  SearchMsg = enum
+    SearchSubmitted
+    SearchCleared
+
+  SearchModel = object
+    query: LineInputState
+    results: seq[string]
+
+proc initSearch(): SearchModel =
+  SearchModel(query: LineInputState.new(""))
+
+proc update(model: var SearchModel, msg: SearchMsg) =
+  case msg
+  of SearchSubmitted:
+    model.results = @["result for " & model.query.text]
+  of SearchCleared:
+    model.query.text = ""
+    model.results.setLen(0)
+
+widget search*(model: SearchModel, msgs: var seq[SearchMsg]):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fit(), gap = 6,
+      padding = 8)):
+    ui.lineInput(ui.id("query"), model.query, width = fill(),
+        height = fixed(30))
+    if ui.submitted(ui.id("query")):
+      msgs.add SearchSubmitted
+    if ui.button(ui.id("clear"), "Clear", width = fit(), height = fit()):
+      msgs.add SearchCleared
+    for index, line in model.results:
+      ui.label(ui.id("result", index), line, width = fill(), height = fit())
+
+# --- application --------------------------------------------------------
+
+type
+  MsgKind = enum
+    FromSearch
+    ToggleSidebar
+
+  Msg = object
+    case kind: MsgKind
+    of FromSearch:
+      search: SearchMsg
+    of ToggleSidebar:
+      discard
+
+  Model = object
+    sidebarOpen: bool
+    search: SearchModel
+
+proc update(model: var Model, msg: Msg) =
+  case msg.kind
+  of FromSearch:
+    model.search.update(msg.search)
+  of ToggleSidebar:
+    model.sidebarOpen = not model.sidebarOpen
+
+widget root(model: Model, msgs: var seq[Msg]):
+  ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    if ui.button(ui.id("toggle"), "Sidebar", width = fit(), height = fit()):
+      msgs.add Msg(kind: ToggleSidebar)
+
+    if model.sidebarOpen:
+      # The child collects its own messages; the parent wraps them.
+      var searchMsgs: seq[SearchMsg]
+      ui.search(model.search, searchMsgs)
+      for msg in searchMsgs:
+        msgs.add Msg(kind: FromSearch, search: msg)
+#+end_src
+
+The child knows nothing about the parent. Moving it into its own module is a
+matter of moving the four declarations; the widget is already exported.
+
+#+begin_example
+src/myapp.nim                main loop and wiring
+src/myapp/model.nim          Model, Msg, update
+src/myapp/widgets/search.nim SearchModel, SearchMsg, update, widget search
+src/myapp/widgets/editor.nim EditorModel, EditorMsg, update, widget editor
+#+end_example
+
+** Stage 4: Routing Between Screens
+
+A screen enumeration in the model, a ~case~ in the parent widget.
+
+#+begin_src nim
+import nest
+
+type
+  Screen = enum
+    ScreenFiles
+    ScreenEditor
+    ScreenSettings
+
+  MsgKind = enum
+    GoTo
+
+  Msg = object
+    case kind: MsgKind
+    of GoTo:
+      screen: Screen
+
+  Model = object
+    screen: Screen
+
+const ScreenLabels = ["Files", "Editor", "Settings"]
+
+proc update(model: var Model, msg: Msg) =
+  case msg.kind
+  of GoTo:
+    model.screen = msg.screen
+
+widget filesScreen():
+  ui.label(ui.id("text"), "Files", width = fill(), height = fit())
+
+widget editorScreen():
+  ui.label(ui.id("text"), "Editor", width = fill(), height = fit())
+
+widget settingsScreen():
+  ui.label(ui.id("text"), "Settings", width = fill(), height = fit())
+
+widget root(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8,
+      padding = 8)):
+    var selected = model.screen.ord
+    ui.tabs(ui.id("tabs"), ScreenLabels, selected, width = fill(),
+        height = fit())
+    if selected != model.screen.ord:
+      msgs.add Msg(kind: GoTo, screen: Screen(selected))
+
+    case model.screen
+    of ScreenFiles: ui.filesScreen()
+    of ScreenEditor: ui.editorScreen()
+    of ScreenSettings: ui.settingsScreen()
+#+end_src
+
+Each screen is a widget, so its ids are scoped by its name and two screens can
+use the same names for their children.
+
+** Stage 5: Widget State That Lives Longer Than A Frame
+
+~LineInputState~, ~EditorState~ and ~Mesh2DState~ hold text, cursors, selection
+and scroll positions. They belong to the model, and the widget mutates them in
+place; they are not carried in messages. Everything else stays a value in the
+model.
+
+#+begin_src nim
+import nest
+import std/sets
+
+type
+  Msg = enum
+    Save
+
+  Model = object
+    path: string
+    source: EditorState
+    breakpoints: HashSet[int]
+
+proc initModel(path, text: string): Model =
+  Model(
+    path: path,
+    source: EditorState.new(text),
+    breakpoints: toHashSet([3]),
+  )
+
+widget sourceEditor(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6,
+      padding = 8)):
+    ui.textEditor(
+      ui.id("source"),
+      model.source,
+      width = fill(),
+      height = fill(min = 120),
+      fontName = "editor",
+      lineNumbers = true,
+      syntax = "nim",
+      gutterMarkers = model.breakpoints,
+      activeLine = model.source.lineColumn.line,
+    )
+    ui.label(
+      ui.id("position"),
+      "line " & $model.source.lineColumn.line & ", column " &
+        $model.source.lineColumn.column,
+      width = fit(),
+      height = fit(),
+    )
+    if ui.button(ui.id("save"), "Save", width = fit(), height = fit()):
+      msgs.add Save
+#+end_src
+
+Because the editor writes into ~model.source~, the position label in the same
+frame already reflects the new cursor.
+
+** Stage 6: Messages From Outside The Frame
+
+Work that finishes between frames also arrives as a message. Push onto the same
+queue during the event pass.
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    StartBuild
+    BuildFinished
+
+  Msg = object
+    case kind: MsgKind
+    of BuildFinished:
+      output: string
+    of StartBuild:
+      discard
+
+  Model = object
+    building: bool
+    output: string
+
+proc update(model: var Model, msg: Msg) =
+  case msg.kind
+  of StartBuild:
+    model.building = true
+  of BuildFinished:
+    model.building = false
+    model.output = msg.output
+
+proc pollBuild(model: Model): string =
+  ## Returns the build output once it is ready, or an empty string.
+  if model.building: "build finished" else: ""
+
+widget buildPanel(model: Model, msgs: var seq[Msg]):
+  ui.events:
+    let output = model.pollBuild()
+    if output.len > 0:
+      msgs.add Msg(kind: BuildFinished, output: output)
+
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
+    if ui.button(ui.id("build"), "Build", width = fit(), height = fit()):
+      msgs.add Msg(kind: StartBuild)
+    ui.label(ui.id("output"), model.output, width = fill(), height = fit())
+    if model.building:
+      # Ask for another frame so the poll runs again.
+      ui.requestRedrawAfter(50)
+#+end_src
+
+* Redraws
+
+Frames are event driven. Without input, nothing is drawn. Four calls change
+that.
+
+| Call                        | Effect                                     |
+|-----------------------------+--------------------------------------------|
+| ~ui.requestRedrawAfter(ms)~ | schedule a frame; the soonest request wins |
+| ~ui.markDirty(id)~          | repaint one widget on the next frame       |
+| ~ui.markAllDirty()~         | repaint the whole frame                    |
+| ~ui.markRealtime(id)~       | repaint this widget every frame            |
+
+An application that changes its own state, rather than reacting to input, marks
+the frame dirty when it does.
+
+#+begin_src nim
+import nest
+
+type
+  Msg = enum
+    Tick
+
+  Model = object
+    seconds: int
+
+proc update(model: var Model, msg: Msg) =
+  case msg
+  of Tick:
+    inc model.seconds
+
+widget uptime(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 6)):
+    ui.label(ui.id("clock"), "uptime " & $model.seconds & "s", width = fit(),
+        height = fit())
+    ui.events:
+      msgs.add Tick
+      ui.markDirty(ui.id("clock"))
+    # One frame per second is enough for this label.
+    ui.requestRedrawAfter(1000)
+#+end_src
+
+For an interface that animates continuously, set ~alwaysRun60Fps~ on the window
+configuration instead.
+
+#+begin_src nim
+import nest
+
+let appCfg = AppConfig.init(width = 640, height = 480, title = "Animated",
+    alwaysRun60Fps = true)
+#+end_src
+
+* Dialogs And Overlays
+
+** Modal Dialogs
+
+A modal is declared like any other container, gated on a flag in the model.
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    OpenConfirm
+    Confirmed
+    Cancelled
+
+  Msg = object
+    kind: MsgKind
+
+  Model = object
+    confirmOpen: bool
+    deleted: bool
+
+proc update(model: var Model, msg: Msg) =
+  case msg.kind
+  of OpenConfirm:
+    model.confirmOpen = true
+  of Confirmed:
+    model.confirmOpen = false
+    model.deleted = true
+  of Cancelled:
+    model.confirmOpen = false
+
+widget confirmDialog(open: bool, msgs: var seq[Msg]):
+  ui.modalDialog(ui.id("root"), open, cfg(width = fixed(320), height = fit(),
+      padding = 12, gap = 10)):
+    ui.label(ui.id("text"), "Delete the file?", width = fill(), height = fit())
+    ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8,
+        justifyContent = JustifyEnd)):
+      if ui.button(ui.id("cancel"), "Cancel", width = fit(), height = fit()):
+        msgs.add Msg(kind: Cancelled)
+      if ui.button(ui.id("ok"), "Delete", width = fit(), height = fit()):
+        msgs.add Msg(kind: Confirmed)
+
+widget root(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
+    if ui.button(ui.id("delete"), "Delete", width = fit(), height = fit()):
+      msgs.add Msg(kind: OpenConfirm)
+    ui.label(ui.id("state"), if model.deleted: "deleted" else: "not deleted",
+        width = fit(), height = fit())
+
+  ui.confirmDialog(model.confirmOpen, msgs)
+#+end_src
+
+The dialog is declared outside the root container, so it is laid out over the
+whole frame rather than inside the layout that opened it.
+
+** Menus
+
+A menu is an entry in a ~menuBar~ plus a floating card anchored under it. The
+anchor is an id from the same widget, which is why both live in one declaration.
+
+#+begin_src nim
+import nest
+
+type
+  MsgKind = enum
+    ToggleMenu
+    Command
+
+  Msg = object
+    case kind: MsgKind
+    of ToggleMenu, Command:
+      name: string
+
+  Model = object
+    openMenu: string
+    lastCommand: string
+
+proc update(model: var Model, msg: Msg) =
+  case msg.kind
+  of ToggleMenu:
+    model.openMenu = if model.openMenu == msg.name: "" else: msg.name
+  of Command:
+    model.lastCommand = msg.name
+    model.openMenu = ""
+
+widget fileMenu(open: bool, msgs: var seq[Msg]):
+  ui.menuBar(ui.id("bar"), cfg(width = fill(), height = fit(), gap = 4)):
+    if ui.menu(ui.id("file"), "File", width = fit(), height = fit()):
+      msgs.add Msg(kind: ToggleMenu, name: "File")
+
+  if open:
+    ui.floatingCardBelow(ui.id("popover"), ui.id("file"),
+        cfg(width = fixed(180), height = fit(), padding = 4, gap = 2)):
+      for item in ["New", "Open"]:
+        ui.menuItem(ui.id("item", item), cfg(width = fill(), height = fit())):
+          ui.label(ui.id("itemText", item), item, width = fit(), height = fit())
+        if ui.clicked(ui.id("item", item)):
+          msgs.add Msg(kind: Command, name: item)
+      ui.menuDivider(ui.id("divider"), width = fill(), height = fixed(9))
+      ui.menuItem(ui.id("quit"), cfg(width = fill(), height = fit())):
+        ui.label(ui.id("quitText"), "Quit", width = fit(), height = fit())
+      if ui.clicked(ui.id("quit")):
+        msgs.add Msg(kind: Command, name: "Quit")
+
+widget root(model: Model, msgs: var seq[Msg]):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    ui.fileMenu(model.openMenu == "File", msgs)
+    ui.label(ui.id("last"), "last: " & model.lastCommand, width = fill(),
+        height = fit())
+#+end_src
+
+** Dialog Results
+
+For a dialog whose answer is a string, ~ui.returnDialog~ stores the answer and
+closes the dialog in one call, and ~ui.dialogResult~ reads it back.
+
+#+begin_src nim
+import nest
+
+type Model = object
+  renameOpen: bool
+  name: LineInputState
+
+widget renameDialog(model: var Model):
+  ui.modalDialog(ui.id("root"), model.renameOpen, cfg(width = fixed(320),
+      height = fit(), padding = 12, gap = 8)):
+    ui.lineInput(ui.id("input"), model.name, width = fill(), height = fixed(30))
+    if ui.button(ui.id("ok"), "Rename", width = fit(), height = fit()):
+      discard ui.returnDialog("rename", model.name.text, model.renameOpen)
+
+  ui.events:
+    if ui.hasDialogResult("rename"):
+      let answer = ui.dialogResult("rename")
+      ui.clearDialogResult("rename")
+      ui.markAllDirty()
+      discard answer
+#+end_src
+
+** File Pickers
+
+Pickers are provided by the host through ~ui.io~, and are asynchronous: start
+one, then read its result on a later frame.
+
+#+begin_src nim
+import nest
+
+widget filePicker(path: var string):
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+    if ui.button(ui.id("browse"), "Browse", width = fit(), height = fit()):
+      ui.io.files.pick(ui.id("browse"))
+
+    ui.events:
+      let picked = ui.io.files.value(ui.id("browse"))
+      if picked.len > 0:
+        path = picked
+        ui.io.files.clear(ui.id("browse"))
+
+    ui.label(ui.id("path"), path, width = fill(), height = fit())
+#+end_src
+
+* Testing A Widget
+
+A widget can be driven without a window. Replace the font relays with stubs,
+build frames by hand, and assert on what was drawn. Entering the widget's scope
+gives a test the ids it declared.
+
+#+begin_src nim
+import std/strutils
+
+import nest
+import nest/screen
+
+type
+  Msg = enum
+    Increment
+
+  Model = object
+    count: int
+
+proc update(model: var Model, msg: Msg) =
+  case msg
+  of Increment: inc model.count
+
+widget counter(model: Model, msgs: var seq[Msg]):
+  ui.row(ui.id("root"), cfg(padding = 8, gap = 8)):
+    ui.label(ui.id("count"), $model.count, width = fixed(60),
+        height = fixed(24))
+    if ui.button(ui.id("inc"), "+", width = fixed(40), height = fixed(24)):
+      msgs.add Increment
+
+when isMainModule:
+  var drawn: seq[string]
+
+  fontRelays = FontRelays(
+    openFont: proc(path: string, size: int, metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+    closeFont: proc(f: Font) = discard,
+    getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+    measureText: proc(f: Font, text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+    drawText: proc(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent =
+      drawn.add text
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+  )
+
+  var
+    ui = UI.init()
+    model = Model()
+    msgs: seq[Msg]
+
+  ui.initContext(320, 200)
+  ui.loadFont("font", "", 18)
+
+  proc frame() =
+    drawn.setLen(0)
+    ui.markAllDirty()
+    ui.layout:
+      ui.events:
+        msgs.setLen(0)
+      ui.counter(model, msgs)
+      ui.events:
+        for msg in msgs:
+          model.update(msg)
+    ui.finishInputFrame()
+
+  # First frame: the initial state is drawn.
+  ui.beginInputFrame()
+  frame()
+  doAssert "0" in drawn
+
+  # The button's id belongs to the widget, so the lookup enters its scope.
+  var plusID: WidgetID
+  ui.scope("counter"):
+    plusID = ui.id("inc")
+  let plus = ui.widgetFrame(plusID)
+  doAssert plus.ok
+
+  # Press the button. The press is recorded this frame.
+  ui.beginInputFrame()
+  ui.mouseMove((plus.frame.x + plus.frame.width / 2).int,
+      (plus.frame.y + plus.frame.height / 2).int)
+  ui.mouseDown()
+  frame()
+
+  # Next frame: the click is observed, applied, and drawn.
+  ui.beginInputFrame()
+  frame()
+  doAssert model.count == 1
+  doAssert "1" in drawn
+
+  echo "widget test passed"
+#+end_src
+
+~ui.widgetFrame~ returns the solved frame of a widget, which is how a test finds
+where to click. ~tests/test_widget.nim~ drives the ~widget~ macro itself the same
+way.
+
+* The Gallery
+
+~apps/gallery/gallery.nim~ is a Nim application that shows every built-in widget,
+grouped in tabs. Each tab is a ~widget~ declaration, and the application is
+written in the style described here.
+
+#+begin_example
+nimble gallery
+#+end_example
+
+| Tab      | Widgets                                                                                                            |
+|----------+--------------------------------------------------------------------------------------------------------------------|
+| Text     | ~label~, ~coloredLabel~, ~diagnosticLabel~, text scrolling                                                         |
+| Buttons  | ~button~, ~spacer~, ~image~, ~imageButton~                                                                         |
+| Inputs   | ~checkbox~, ~slider~, ~colorSwatch~, ~colorInput~, ~combobox~, ~lineInput~                                         |
+| Editors  | ~textEditor~ with line numbers, gutter markers and syntax                                                          |
+| Tables   | ~table~, ~tableHeader~, ~tableRow~, ~tableCell~                                                                    |
+| Mesh     | ~mesh2d~                                                                                                           |
+| Overlays | ~menuBar~, ~menu~, ~menuItem~, ~menuDivider~, ~floatingCardBelow~, ~card~, ~dialogHeader~, ~center~, ~modalDialog~ |
+
+* Conventions
+
+- Declare every portion of the interface with ~widget~.
+- One ~Model~. All state, no widgets.
+- One ~Msg~ per event, named after the event.
+- ~update~ is the only writer of the model.
+- A widget takes the model by value and appends to a message queue.
+- Clear the queue at the start of the event pass, fold it at the end.
+- Mutate nothing outside ~ui.events~.
+- Wrap a repeated widget in ~ui.scope~ at the call site.
+- Build ids from data, not from a loop index.
+- Keep ~LineInputState~, ~EditorState~ and ~Mesh2DState~ on the model.
+- Write a plain procedure when the ~ui~ parameter or the id scope is unwanted.
+- Reach for a ~Component~ subclass only when nothing built in draws what is
+  needed, and give it a ~renderKeyOverride~ when its appearance depends on more
+  than its size.
+- ~import nest~ covers the widget API; ~rect~ and ~point~ come from
+  ~nest/coords~, and ~Resources~ from ~nest/resources~.
