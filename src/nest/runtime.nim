@@ -285,6 +285,22 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       refresh()
   shutdown()
 
+proc eventTypeOf*[M, E](
+    view: proc(ui: var UI, model: M, emitted: var seq[E]) {.nimcall.}
+): E =
+  ## Return the event type of a root widget that collects into a parameter.
+  ##
+  ## Only its type is of interest: `runApp` declares its queue from it, and
+  ## never calls this.
+  discard
+
+proc eventTypeOf*[M, E](
+    view: proc(ui: var UI, model: var M, emitted: var seq[E]) {.nimcall.}
+): E =
+  ## Return the event type of a root widget that collects into a parameter and
+  ## takes its model by `var`.
+  discard
+
 proc appLoop(cfg, initial, update, view, blk: NimNode): NimNode =
   ## Build the frame loop `runApp` expands to.
   ##
@@ -301,14 +317,33 @@ proc appLoop(cfg, initial, update, view, blk: NimNode): NimNode =
       let `cfgSym` = `cfg`
       var `uiSym` = UI.init()
       var `modelSym` = `initial`
-      # The root widget's own event type, taken from what it returns.
-      var `msgsSym`: typeof(`view`(`uiSym`, `modelSym`))
+      # The queue's type comes from the root widget, whichever shape it has.
+      when compiles(`view`(`uiSym`, `modelSym`)):
+        when typeof(`view`(`uiSym`, `modelSym`)) is void:
+          {.
+            error:
+              "runApp needs a root widget that either emits its own events " &
+              "or takes an `emitted: var seq[E]` parameter"
+          .}
+        else:
+          var `msgsSym`: typeof(`view`(`uiSym`, `modelSym`))
+      elif compiles(eventTypeOf(`view`)):
+        var `msgsSym`: seq[typeof(eventTypeOf(`view`))]
+      else:
+        {.
+          error:
+            "runApp needs a root widget that either emits its own events or " &
+            "takes an `emitted: var seq[E]` parameter"
+        .}
       application `cfgSym`, `uiSym`:
         `uiSym`.layout:
           `uiSym`.events:
             `msgsSym`.setLen(0)
 
-          `msgsSym`.add `view`(`uiSym`, `modelSym`)
+          when compiles(`msgsSym`.add `view`(`uiSym`, `modelSym`)):
+            `msgsSym`.add `view`(`uiSym`, `modelSym`)
+          else:
+            `view`(`uiSym`, `modelSym`, `msgsSym`)
 
           `uiSym`.events:
             for `msgSym` in `msgsSym`:
@@ -324,10 +359,12 @@ macro runApp*(cfg, initial, update, view, blk: untyped): untyped =
   ## one frame at a time: the message queue is cleared, `view` declares the
   ## interface, then every message it collected is applied with `update`.
   ##
-  ## `view` is a widget that emits its own events: it is called as
-  ## `view(ui, model)`, and what it returns is the frame's queue. `update` is
-  ## called as `update(model, event)` for every event in it, which resolves
-  ## among as many `update` overloads as the application has state types.
+  ## `view` is the root widget, in either shape: one that emits its own events,
+  ## called as `view(ui, model)` and returning them, or one that collects into a
+  ## parameter, called as `view(ui, model, emitted)`. The queue's type is taken
+  ## from whichever it is. `update` is called as `update(model, event)` for every
+  ## event of the frame, which resolves among as many `update` overloads as the
+  ## application has state types.
   ##
   ## `blk` runs at the end of every event pass, with `ui`, `model`, `msgs` and
   ## `running` in scope. Setting `running` to false leaves the loop.

@@ -176,9 +176,16 @@ suite "runApp":
         running = false
     check seen == 2
 
-  test "a root widget must emit its own events":
+  test "a root widget may collect into a parameter instead of emitting":
+    var frames = 0
+    # `counter` takes `msgs: var seq[Msg]` rather than emitting.
+    runApp(AppConfig.init(width = 120, height = 80), Model(), update, counter):
+      inc frames
+      ui.requestRedrawAfter(1)
+      if frames >= 2:
+        running = false
+    check frames == 2
+
+  test "a root widget of neither shape is rejected":
     proc wrongArity(ui: var UI) = discard
     check not compiles(runApp(AppConfig.init(), Model(), update, wrongArity))
-    # `counter` collects into a parameter instead of emitting, so it cannot be
-    # a root widget.
-    check not compiles(runApp(AppConfig.init(), Model(), update, counter))

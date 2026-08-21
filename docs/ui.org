@@ -907,9 +907,30 @@ when isMainModule:
       running = false
 #+end_src
 
-The root widget emits: ~runApp~ takes the type of its queue from what the root
-returns, and applies each event with ~update~. A widget that collects into a
-parameter can appear anywhere in the tree, but not at the root.
+A root widget may also collect into a parameter instead of emitting. ~runApp~
+takes the type of its queue from whichever shape the root has.
+
+#+begin_src nim
+import nest
+
+type
+  App = object
+    count: int
+
+  AppEvent = enum
+    Bumped
+
+proc update(model: var App, event: AppEvent) =
+  case event
+  of Bumped: inc model.count
+
+widget root(model: App, emitted: var seq[AppEvent]):
+  if ui.button(ui.id("inc"), $model.count, width = fit(), height = fit()):
+    emitted.add Bumped
+
+when isMainModule:
+  runApp(AppConfig.init(title = "Counter"), App(), update, root)
+#+end_src
 
 Other window shapes are ordinary ~AppConfig~ values.
 
