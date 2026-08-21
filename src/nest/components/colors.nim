@@ -11,9 +11,11 @@ type ColorSwatch* = ref object of Component
   border: bool
 
 proc new*(T: typedesc[ColorSwatch], value: Color, border = true): T =
+  ## Create a swatch that shows `value`, optionally without its border.
   T(value: value, border: border)
 
 method measure*(self: ColorSwatch, resources: Resources): IntrinsicSize =
+  ## Return the swatch's minimum size; swatches carry no content to measure.
   discard self
   discard resources
   intrinsicSize(SwatchMinSize.toFloat, SwatchMinSize.toFloat)
@@ -22,6 +24,8 @@ proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 method draw*(self: ColorSwatch, widget: Widget, ctx: var DrawContext) =
+  ## Draw the swatch: its colour over the card background, so a translucent
+  ## value reads correctly, plus its border.
   let f = widget.frame
   let bounds = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
   fillRect(bounds, ctx.palette.cardBackground)

@@ -24,6 +24,7 @@ type
     tabStyle: TabStyle
 
 proc defaultTabStyle*(palette: Palette): TabStyle =
+  ## Return the default tab colours taken from `palette`.
   TabStyle(
     selectedBackground: palette.backgroundActive,
     background: palette.background,
@@ -36,9 +37,13 @@ proc defaultTabStyle*(palette: Palette): TabStyle =
 proc new*(
     T: typedesc[TabButton], label: string, selected: bool, tabStyle: TabStyle
 ): T =
+  ## Create a tab button labelled `label`, drawn as the selected tab when
+  ## `selected` is set, using the colours in `tabStyle`.
   T(label: label, selected: selected, tabStyle: tabStyle)
 
 method measure*(self: TabButton, resources: Resources): IntrinsicSize =
+  ## Return the size of the label plus the tab's padding, at least the
+  ## minimum tab height.
   let measurement = resources.measureText("font", self.label)
   intrinsicSize(
     (measurement.width + TabPaddingX * 2).toFloat,
@@ -46,6 +51,8 @@ method measure*(self: TabButton, resources: Resources): IntrinsicSize =
   )
 
 method update*(self: TabButton, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the tab hot while the pointer is over it and active while the left
+  ## button is held on it.
   let isHot =
     ctx.mouseX > widget.frame.x.toInt and
     ctx.mouseX < (widget.frame.x + widget.frame.width).toInt and
@@ -75,6 +82,8 @@ proc drawTabFrame(f: Frame, border, highlight, shadow: Color, selected: bool) =
     drawLine(x, bottom, x + w - 1, bottom, shadow)
 
 method draw*(self: TabButton, widget: Widget, ctx: var DrawContext) =
+  ## Draw the tab's background, border and label, plus the accent stripe that
+  ## marks the selected tab.
   let
     f = widget.frame
     hot = ctx.hot(widget.id)

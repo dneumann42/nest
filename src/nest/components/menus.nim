@@ -20,18 +20,22 @@ type
   MenuDivider* = ref object of Component
 
 proc new*(T: typedesc[Menu], label = ""): T =
+  ## Create a menu bar entry labelled `label`.
   T(label: label)
 
 proc new*(T: typedesc[MenuItem], selected = false): T =
+  ## Create a menu item, marked `selected` when it is the current choice.
   T(selected: selected)
 
 proc new*(T: typedesc[MenuDivider]): T =
+  ## Create a horizontal divider between groups of menu items.
   T()
 
 proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 method measure*(self: Menu, resources: Resources): IntrinsicSize =
+  ## Return the size of the entry's label plus the menu's padding.
   let measurement = resources.measureText("font", self.label)
   intrinsicSize(
     (measurement.width + MenuPaddingX * 2).toFloat,
@@ -39,6 +43,8 @@ method measure*(self: Menu, resources: Resources): IntrinsicSize =
   )
 
 method measure*(self: MenuItem, resources: Resources): IntrinsicSize =
+  ## Return the height of one menu item, measured from a sample string, and
+  ## leave the width to the enclosing menu.
   discard self
   let measurement = resources.measureText("font", "Menu item")
   intrinsicSize(
@@ -47,11 +53,14 @@ method measure*(self: MenuItem, resources: Resources): IntrinsicSize =
   )
 
 method measure*(self: MenuDivider, resources: Resources): IntrinsicSize =
+  ## Return the divider's height; it has no width of its own.
   discard self
   discard resources
   intrinsicSize(1, DividerHeight)
 
 method update*(self: Menu, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the menu entry hot while the pointer is over it and active while
+  ## the left button is held on it.
   discard self
   let isHot =
     ctx.mouseX > widget.frame.x.toInt and
@@ -64,6 +73,8 @@ method update*(self: Menu, widget: Widget, ctx: var UpdateContext) =
     ctx.setActive(widget.id)
 
 method update*(self: MenuItem, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the menu item hot while the pointer is over it and active while the
+  ## left button is held on it.
   discard self
   let isHot =
     ctx.mouseX > widget.frame.x.toInt and
@@ -76,6 +87,8 @@ method update*(self: MenuItem, widget: Widget, ctx: var UpdateContext) =
     ctx.setActive(widget.id)
 
 method draw*(self: Menu, widget: Widget, ctx: var DrawContext) =
+  ## Draw the menu entry's background and label, highlighted while hot or
+  ## open.
   let
     f = widget.frame
     hot = ctx.hot(widget.id)
@@ -105,6 +118,7 @@ method draw*(self: Menu, widget: Widget, ctx: var DrawContext) =
   )
 
 method draw*(self: MenuItem, widget: Widget, ctx: var DrawContext) =
+  ## Draw the menu item's background, its label and its selection marker.
   let
     f = widget.frame
     hot = ctx.hot(widget.id)
@@ -119,6 +133,7 @@ method draw*(self: MenuItem, widget: Widget, ctx: var DrawContext) =
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), bg)
 
 method draw*(self: MenuDivider, widget: Widget, ctx: var DrawContext) =
+  ## Draw the divider as a single line across the middle of its frame.
   discard self
   let f = widget.frame
   let y = (f.y + f.height / 2).toInt

@@ -92,7 +92,9 @@ type
     imageSize*: proc(img: Image): TextExtent {.nimcall.}
 
 proc `==`*(a, b: Font): bool {.borrow.}
+  ## Compare two font handles.
 proc `==`*(a, b: Image): bool {.borrow.}
+  ## Compare two image handles.
 
 var windowRelays* = WindowRelays(
   createWindow: proc(layout: var ScreenLayout) =
@@ -150,6 +152,11 @@ var commandMeasureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
 var commandMeasureImage*: proc(path: string): TextExtent {.nimcall.}
 
 proc printableText*(text: string): string =
+  ## Return `text` with characters the renderer cannot draw replaced.
+  ##
+  ## Tabs become spaces and other control characters are dropped, so a
+  ## string taken from a file or the clipboard is safe to hand to the font
+  ## backend.
   for ch in text:
     case ch
     of '\t':
@@ -160,34 +167,49 @@ proc printableText*(text: string): string =
       result.add ch
 
 proc createWindow*(requestedW, requestedH: int, fullScreen = false): ScreenLayout =
+  ## Create the application window at `requestedW` by `requestedH` pixels and
+  ## return the layout the backend settled on, which may differ from the
+  ## request.
   result = ScreenLayout(width: requestedW, height: requestedH, fullScreen: fullScreen)
   windowRelays.createWindow(result)
 
 proc refresh*() =
+  ## Present what has been drawn since the last refresh.
   windowRelays.refresh()
 
 proc saveState*() =
+  ## Save the renderer's clip state so it can be restored later.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(kind: SaveState)
     return
   windowRelays.saveState()
 
 proc restoreState*() =
+  ## Restore the clip state saved by the matching `saveState`.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(kind: RestoreState)
     return
   windowRelays.restoreState()
 
 proc setClipRect*(r: Rect) =
+  ## Clip further drawing to `r`.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(kind: SetClipRect, rect: r)
     return
   windowRelays.setClipRect(r)
 
 proc setCursor*(c: CursorKind) =
+  ## Set the mouse cursor shape.
   windowRelays.setCursor(c)
 
 proc setWindowTitle*(title: string) =
+  ## Set the window's title.
   windowRelays.setWindowTitle(title)
 
 proc moveWindowBy*(dx, dy: int) =
@@ -196,24 +218,38 @@ proc moveWindowBy*(dx, dy: int) =
     windowRelays.moveWindowBy(dx, dy)
 
 proc openFont*(path: string, size: int, metrics: var FontMetrics): Font =
+  ## Open the font at `path` at `size` and report its `metrics`.
+  ##
+  ## An empty path, or the name `nerd-monospace`, lets the backend choose a
+  ## system font. Returns a null handle when no font could be opened.
   fontRelays.openFont(path, size, metrics)
 
 proc closeFont*(f: Font) =
+  ## Release a font handle.
   fontRelays.closeFont(f)
 
 proc getFontMetrics*(f: Font): FontMetrics =
+  ## Return the ascent, descent and line height of `f`.
   fontRelays.getFontMetrics(f)
 
 proc fontLineSkip*(f: Font): int =
+  ## Return the baseline-to-baseline distance of `f`, in pixels.
   fontRelays.getFontMetrics(f).lineHeight
 
 proc measureText*(f: Font, text: string): TextExtent =
+  ## Return the pixel size `text` occupies in font `f`.
+  ##
+  ## Unprintable characters are normalised first, as they are for drawing.
   let rendered = printableText(text)
   if drawCommands != nil and commandMeasureText != nil:
     return commandMeasureText(f, rendered)
   fontRelays.measureText(f, rendered)
 
 proc drawText*(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent =
+  ## Draw `text` in font `f` at `x`, `y` in colour `fg` over background `bg`,
+  ## and return the size it occupied.
+  ##
+  ## The position is the top-left corner of the text. Recorded into the active draw-command buffer instead when one is set, so retained frames can be replayed without touching the backend.
   let rendered = printableText(text)
   if drawCommands != nil:
     result = fontRelays.measureText(f, rendered)
@@ -224,12 +260,18 @@ proc drawText*(f: Font, x, y: int, text: string, fg, bg: Color): TextExtent =
   fontRelays.drawText(f, x, y, rendered, fg, bg)
 
 proc fillRect*(r: Rect, color: Color) =
+  ## Fill `r` with `color`.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set, so retained frames can be replayed without touching the backend.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(kind: FillRect, rect: r, color: color)
     return
   drawRelays.fillRect(r, color)
 
 proc lineRect*(r: Rect, color: Color) =
+  ## Stroke the outline of `r` in `color`, skipping empty rectangles.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set, so retained frames can be replayed without touching the backend.
   if r.w <= 0 or r.h <= 0:
     return
   if drawCommands != nil:
@@ -244,6 +286,9 @@ proc lineRect*(r: Rect, color: Color) =
   drawRelays.drawLine(r.x + r.w - 1, r.y, r.x + r.w - 1, r.y + r.h - 1, color)
 
 proc drawLine*(x1, y1, x2, y2: int, color: Color) =
+  ## Draw a line from `x1`, `y1` to `x2`, `y2` in `color`.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set, so retained frames can be replayed without touching the backend.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(
       kind: DrawLine, x1: x1, y1: y1, x2: x2, y2: y2, lineColor: color
@@ -252,27 +297,38 @@ proc drawLine*(x1, y1, x2, y2: int, color: Color) =
   drawRelays.drawLine(x1, y1, x2, y2, color)
 
 proc drawPoint*(x, y: int, color: Color) =
+  ## Draw a single pixel at `x`, `y` in `color`.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set, so retained frames can be replayed without touching the backend.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(kind: DrawPoint, x: x, y: y, pointColor: color)
     return
   drawRelays.drawPoint(x, y, color)
 
 proc loadImage*(path: string): Image =
+  ## Load the image at `path` and return its handle.
   drawRelays.loadImage(path)
 
 proc freeImage*(img: Image) =
+  ## Release an image handle.
   drawRelays.freeImage(img)
 
 proc drawImage*(img: Image, src, dst: Rect) =
+  ## Draw the `src` region of `img` into the `dst` rectangle, scaling as
+  ## needed.
+  ##
+  ## Recorded into the active draw-command buffer instead when one is set, so retained frames can be replayed without touching the backend.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(kind: DrawImage, image: img, src: src, dst: dst)
     return
   drawRelays.drawImage(img, src, dst)
 
 proc imageSize*(img: Image): TextExtent =
+  ## Return the pixel size of a loaded image.
   drawRelays.imageSize(img)
 
 proc measureImage*(path: string): TextExtent =
+  ## Return the pixel size of the image at `path`, loading it if necessary.
   if drawCommands != nil and commandMeasureImage != nil:
     return commandMeasureImage(path)
   let image = loadImage(path)
@@ -282,6 +338,10 @@ proc measureImage*(path: string): TextExtent =
   freeImage(image)
 
 proc drawImage*(path: string, src, dst: Rect) =
+  ## Draw the `src` region of the image at `path` into the `dst` rectangle.
+  ##
+  ## The path is resolved when the command is replayed, which lets recorded
+  ## frames refer to images that are not loaded yet.
   if drawCommands != nil:
     drawCommands[].add DrawCommand(
       kind: DrawImage, image: Image(0), imagePath: path, src: src, dst: dst
@@ -294,4 +354,5 @@ proc drawImage*(path: string, src, dst: Rect) =
   freeImage(image)
 
 proc color*(r, g, b: uint8, a: uint8 = 255): Color =
+  ## Construct an opaque `Color`, or a translucent one when `a` is given.
   Color(r: r, g: g, b: b, a: a)

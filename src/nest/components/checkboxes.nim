@@ -18,9 +18,11 @@ proc new*(
     checked = false,
     fontName = "font",
 ): T =
+  ## Create a checkbox component labelled `label`, initially `checked`.
   T(label: label, checked: checked, fontName: fontName)
 
 method measure*(self: Checkbox, resources: Resources): IntrinsicSize =
+  ## Return the size of the box, its gap and the label together.
   let measurement = resources.measureText(self.fontName, self.label)
   intrinsicSize(
     (CheckboxBoxSize + CheckboxGap + measurement.width).toFloat,
@@ -28,6 +30,8 @@ method measure*(self: Checkbox, resources: Resources): IntrinsicSize =
   )
 
 method update*(self: Checkbox, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the checkbox hot while the pointer is over it and active while the
+  ## left button is held on it.
   let
     f = widget.frame
     isHot =
@@ -39,6 +43,7 @@ method update*(self: Checkbox, widget: Widget, ctx: var UpdateContext) =
       ctx.setActive(widget.id)
 
 method draw*(self: Checkbox, widget: Widget, ctx: var DrawContext) =
+  ## Draw the box, its check mark when checked, and the label.
   let
     f = widget.frame
     (font, _) = ctx.resources.get(self.fontName)

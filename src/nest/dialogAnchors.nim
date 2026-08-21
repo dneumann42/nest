@@ -20,6 +20,12 @@ proc intField(node: JsonNode; name: string): int =
   numberField(node, name).int
 
 proc parseDialogAnchor*(value: string): DialogAnchor =
+  ## Parse the JSON anchor description passed to a dialog process.
+  ##
+  ## The object is expected to carry `x`, `y`, `width`, `height`,
+  ## `windowWidth` and `windowHeight`. Missing fields default to zero, and
+  ## the result has `ok == false` for an empty string, malformed JSON, or a
+  ## window of zero size.
   if value.len == 0:
     return
   try:
@@ -46,6 +52,12 @@ proc clampDistance(value, size, limit: float64): float64 =
   value.clamp(0.0, max(limit - size, 0.0))
 
 proc applyDialogAnchor*(app: AppConfig; anchor: DialogAnchor): AppConfig =
+  ## Return `app` reconfigured as a layer-shell overlay pinned next to `anchor`.
+  ##
+  ## The anchor's centre decides which screen edges the surface attaches to:
+  ## left, right or horizontally centred, and above or below the anchor. The
+  ## popup is kept inside the reported window bounds. `app` is returned
+  ## unchanged when `anchor.ok` is false.
   result = app
   if not anchor.ok:
     return

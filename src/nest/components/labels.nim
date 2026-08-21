@@ -23,20 +23,34 @@ proc new*(
     hasColor = false,
     textScroll = false,
 ): T =
+  ## Create a text label.
+  ##
+  ## `fg` together with `hasColor` overrides the palette's text colour, and
+  ## `textScroll` lets text wider than the widget scroll rather than be
+  ## clipped.
   T(text: text, fontName: fontName, fg: fg, hasColor: hasColor, textScroll: textScroll)
 
 proc new*(T: typedesc[DiagnosticLabel], text = "", fontName = "font", fg = color(0, 0, 0, 0), hasColor = false): T =
+  ## Create a label that reacts to the pointer, used for clickable
+  ## diagnostics such as compiler messages.
+  ##
+  ## `fg` together with `hasColor` overrides the palette's text colour.
   T(text: text, fontName: fontName, fg: fg, hasColor: hasColor)
 
 method measure*(self: Label, resources: Resources): IntrinsicSize =
+  ## Return the size the label's text occupies.
   let measurement = resources.measureText(self.fontName, self.text)
   intrinsicSize(measurement.width.toFloat, measurement.height.toFloat)
 
 method measure*(self: DiagnosticLabel, resources: Resources): IntrinsicSize =
+  ## Return the size the diagnostic's text occupies.
   let measurement = resources.measureText(self.fontName, self.text)
   intrinsicSize(measurement.width.toFloat, measurement.height.toFloat)
 
 method update*(self: DiagnosticLabel, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the diagnostic hot while the pointer is over it and active while
+  ## the left button is held on it, so a caller can treat it as a click
+  ## target.
   let f = widget.frame
   let isHot =
     ctx.mouseX.toFloat >= f.x and ctx.mouseX.toFloat < f.x + f.width and
@@ -47,6 +61,7 @@ method update*(self: DiagnosticLabel, widget: Widget, ctx: var UpdateContext) =
       ctx.setActive(widget.id)
 
 method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
+  ## Draw the label's text, clipped or scrolled to fit its frame.
   let
     f = widget.frame
     (font, _) = ctx.resources.get(self.fontName)
@@ -75,6 +90,7 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
     )
 
 method draw*(self: DiagnosticLabel, widget: Widget, ctx: var DrawContext) =
+  ## Draw the diagnostic's text, highlighting its background while hot.
   let
     f = widget.frame
     (font, _) = ctx.resources.get(self.fontName)

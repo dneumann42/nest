@@ -3,6 +3,7 @@ import std/[cmdline, os, strutils]
 import nest/[owldsl, errorDialogs, generator, perf, runner]
 
 proc usage*(): string =
+  ## Return the usage text for the `nest` command line tool.
   """Usage:
   nest --project DIR
   nest run DIR [--perf-overlay] [--benchmark [FRAMES]]
@@ -34,6 +35,14 @@ proc parseRunPerfOptions(args: seq[string]; start: int): PerfOptions =
     inc i
 
 proc main*() =
+  ## Entry point of the `nest` executable.
+  ##
+  ## Dispatches the first command line argument: `--project`/`-p` and `run`
+  ## run a project directory, `dialog` runs one as a dialog process and
+  ## reports its result, `error-dialog` and `error-dialog-json` show the
+  ## error dialog, `generate`/`gen` scaffolds a new project, and `--help`
+  ## prints `usage()`. Quits with the usage text on an unknown or
+  ## incomplete command.
   let args = commandLineParams()
   if args.len == 0:
     quit(usage(), 1)

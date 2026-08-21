@@ -23,6 +23,8 @@ proc new*(
     maximum = 1.0,
     orientation = SliderHorizontal,
 ): T =
+  ## Create a slider whose handle starts at `value` within `minimum` to
+  ## `maximum`, laid out along `orientation`.
   T(value: value, minimum: minimum, maximum: maximum, orientation: orientation)
 
 proc clamp(value, lo, hi: float64): float64 =
@@ -43,6 +45,11 @@ proc sliderValueFromMouse*(
     minimum, maximum: float64,
     orientation: SliderOrientation,
 ): float64 =
+  ## Return the slider value the pointer at `mouseX`, `mouseY` selects within
+  ## `frame`.
+  ##
+  ## The position is taken along the slider's own axis and clamped to
+  ## `minimum` .. `maximum`.
   let n =
     case orientation
     of SliderHorizontal:
@@ -58,6 +65,7 @@ proc contains(frame: Frame, x, y: int): bool =
     y.toFloat >= frame.y and y.toFloat < frame.y + frame.height
 
 method measure*(self: Slider, resources: Resources): IntrinsicSize =
+  ## Return the slider's minimum size for its orientation.
   discard resources
   case self.orientation
   of SliderHorizontal:
@@ -66,6 +74,9 @@ method measure*(self: Slider, resources: Resources): IntrinsicSize =
     intrinsicSize(SliderMinThickness, 120)
 
 method update*(self: Slider, widget: Widget, ctx: var UpdateContext) =
+  ## Track the pointer: mark the slider hot when it is over the slider, and
+  ## while it is dragged report the value under it and mark the slider as the
+  ## one being dragged.
   let hot = widget.frame.contains(ctx.mouseX, ctx.mouseY)
   if hot:
     ctx.setHot(widget.id)
@@ -80,6 +91,7 @@ proc drawBorder(f: Frame, c: Color) =
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 method draw*(self: Slider, widget: Widget, ctx: var DrawContext) =
+  ## Draw the slider's track, its filled portion and its handle.
   let
     f = widget.frame
     n = normalized(self.value, self.minimum, self.maximum)

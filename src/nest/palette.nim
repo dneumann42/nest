@@ -31,6 +31,7 @@ type Palette* = object
   textColor*: Color
 
 proc dark*(T: typedesc[Palette]): T =
+  ## Return Nest's built-in dark palette.
   let t: uint8 = 8
   T(
     primary: color(79, 185, 154),
@@ -65,6 +66,7 @@ proc dark*(T: typedesc[Palette]): T =
   )
 
 proc light*(T: typedesc[Palette]): T =
+  ## Return Nest's built-in light palette.
   T(
     primary: color(25, 132, 112),
     primaryStrong: color(17, 105, 91),
@@ -95,9 +97,15 @@ proc light*(T: typedesc[Palette]): T =
   )
 
 proc fallback*(T: typedesc[Palette]): T =
+  ## Return the palette used when no theme has been chosen: the dark one.
   Palette.dark()
 
 proc theme*(T: typedesc[Palette], name: string): T =
+  ## Return the built-in palette called `name`.
+  ##
+  ## `light` and `dark` select those palettes, an empty name means dark, and
+  ## an unrecognised name falls back to `Palette.fallback()`. Matching
+  ## ignores case and underscores.
   case name.normalize
   of "light":
     Palette.light()
@@ -146,6 +154,11 @@ proc alatarThemePath(): string =
     getHomeDir() / ".config" / "alatar" / "theme.json"
 
 proc loadWallustTheme*(fallback: Palette): Palette =
+  ## Return `fallback` with the colors of the wallust/alatar theme file
+  ## applied on top.
+  ##
+  ## `fallback` is returned untouched when the theme file is missing or
+  ## cannot be parsed.
   result = fallback
   let path = alatarThemePath()
   if not fileExists(path):
@@ -202,9 +215,15 @@ proc loadWallustTheme*(fallback: Palette): Palette =
     result = fallback
 
 proc init*(T: typedesc[Palette]): T =
+  ## Return the palette Nest starts with: the fallback palette with the
+  ## wallust theme applied when the user has one.
   Palette.fallback().loadWallustTheme()
 
 proc init*(T: typedesc[Palette], themeName: string): T =
+  ## Return the palette for the configured `themeName`.
+  ##
+  ## An empty name, `wallust` or `alatar` load the user's wallust theme over
+  ## the fallback palette; any other name selects a built-in palette.
   case themeName.normalize
   of "", "wallust", "alatar":
     Palette.fallback().loadWallustTheme()
@@ -212,6 +231,11 @@ proc init*(T: typedesc[Palette], themeName: string): T =
     Palette.theme(themeName)
 
 proc colorByName*(self: Palette, name: string, fallback: Color): Color =
+  ## Return the palette color called `name`, or `fallback` when the palette
+  ## has no such color.
+  ##
+  ## Names ignore case and accept `-` or `_` between words, so
+  ## `primaryStrong`, `primary-strong` and `primary_strong` all match.
   case name.normalize
   of "primary":
     self.primary

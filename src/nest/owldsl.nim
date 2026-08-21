@@ -123,6 +123,9 @@ type
     path: string
 
 proc errorLocation*(pos: SourcePos, label = ""): ErrorLocation =
+  ## Return the error location `pos` points at, tagged with `label`.
+  ##
+  ## Positions that carry no source information yield an empty path.
   result.label = label
   if pos.hasSource:
     result.path = pos.sourcePath
@@ -131,12 +134,18 @@ proc errorLocation*(pos: SourcePos, label = ""): ErrorLocation =
     result.column = pos.column.int
 
 proc errorDetails*(error: ref EvaluatorError): ErrorDetails =
+  ## Turn an evaluator error into the report shown in the error dialog:
+  ## its message, the position that failed and the call frames above it.
   result.message = error.msg
   result.primary = error.primary.errorLocation()
   for frame in error.frames:
     result.frames.add frame.pos.errorLocation(frame.label)
 
 proc errorReport*(details: ErrorDetails): string =
+  ## Format error details as the plain-text report written to the terminal.
+  ##
+  ## Returns the message, the failing source position and the source line
+  ## when one is known, followed by the call frames.
   result = "error: " & details.message
   if details.primary.path.len > 0:
     result.add "\n" & details.primary.path & ":" & $details.primary.line & ":" &
@@ -150,6 +159,7 @@ proc errorReport*(details: ErrorDetails): string =
         result.add " in " & frame.label
 
 proc init*(T: typedesc[NestOwlRuntime]): T
+  ## Create a runtime with a fresh evaluator and Nest's owl builtins.
 proc renderNodes(
   runtime: NestOwlRuntime, env: Environment, nodes: seq[SyntaxNode]
 ): Value
@@ -178,6 +188,8 @@ var pickDirectoryDialog*: PathPickerProc = proc(
     discard
 
 proc queueExternal*(runtime: NestOwlRuntime, name: string) =
+  ## Queue an external event called `name`, to be delivered to the program on
+  ## its next frame. Empty names are ignored.
   if name.len > 0:
     runtime.externalEvents.inc(name)
 
@@ -958,6 +970,11 @@ proc currentTicks(): int {.raises: [].} =
     0
 
 proc pollShellProcesses*(runtime: NestOwlRuntime, ui: var UI) =
+  ## Collect the output of finished shell commands.
+  ##
+  ## Each command's output is cached for the owl program to read, and the
+  ## frame is marked dirty when the output changed, so a `shell` value
+  ## refreshes on screen.
   var finished: seq[string]
   for key, shell in runtime.shellProcesses.pairs:
     if not shell.process.running:
@@ -982,6 +999,7 @@ proc pollShellProcesses*(runtime: NestOwlRuntime, ui: var UI) =
     runtime.shellProcesses.del key
 
 proc closeShellProcesses*(runtime: NestOwlRuntime) =
+  ## Terminate every running shell command and forget them all.
   for shell in runtime.shellProcesses.values:
     if shell.process.running:
       shell.process.terminate
@@ -1001,6 +1019,7 @@ proc launchShellCommand(command: string): bool {.raises: [].} =
     false
 
 proc closeWorkspaceSubscriptions*(runtime: NestOwlRuntime) =
+  ## Stop every workspace subscription and forget them all.
   for subscription in runtime.workspaceSubscriptions.values:
     subscription.stopWorkspaceSubscription()
   runtime.workspaceSubscriptions.clear()
@@ -1145,6 +1164,8 @@ proc launchDialogProcess(
       resultPath: resultPath)
 
 proc pollDialogProcesses*(runtime: NestOwlRuntime) =
+  ## Reap dialog processes that have exited, recording each one's result for
+  ## the owl program to read.
   var finished: seq[string]
   for key, dialog in runtime.dialogProcesses.pairs:
     if not dialog.process.running:
@@ -1170,6 +1191,8 @@ proc pollDialogProcesses*(runtime: NestOwlRuntime) =
     runtime.dialogProcesses.del key
 
 proc closeManagedDialog*(runtime: NestOwlRuntime, key: string) =
+  ## Close the managed dialog stored under `key`, terminating its process if
+  ## it is still running. Unknown keys are ignored.
   if key notin runtime.dialogProcesses:
     return
   let dialog = runtime.dialogProcesses[key]
@@ -1186,6 +1209,7 @@ proc closeManagedDialog*(runtime: NestOwlRuntime, key: string) =
   runtime.dialogProcesses.del key
 
 proc closeDialogProcesses*(runtime: NestOwlRuntime) =
+  ## Terminate every running dialog process and forget them all.
   for dialog in runtime.dialogProcesses.values:
     if dialog.process.running:
       dialog.process.terminate
@@ -1200,6 +1224,10 @@ proc closeDialogProcesses*(runtime: NestOwlRuntime) =
   runtime.closeWorkspaceSubscriptions()
 
 proc owlErrorLines*(message: string, maxLineLen = 68, maxLines = 7): seq[string] =
+  ## Split `message` into at most `maxLines` display lines of at most
+  ## `maxLineLen` characters, for the error dialog.
+  ##
+  ## Longer lines are wrapped and anything past the line budget is dropped.
   for rawLine in message.splitLines:
     var line = rawLine
     if line.len == 0:
@@ -1219,6 +1247,10 @@ proc owlErrorLines*(message: string, maxLineLen = 68, maxLines = 7): seq[string]
 proc diagnosticLocation*(
     line: string
 ): tuple[ok: bool, path: string, line: int, column: int] =
+  ## Parse a `path:line:column` reference out of a diagnostic line.
+  ##
+  ## A leading `at ` is ignored, and `ok` is false when the line carries no
+  ## location. A missing column defaults to one.
   var text = line.strip
   if text.startsWith("at "):
     text = text[3 .. ^1]
@@ -1243,6 +1275,11 @@ proc diagnosticLocation*(
     discard
 
 proc openDiagnosticLocation*(line: string) =
+  ## Open the source location named in a diagnostic line in the user's
+  ## editor, through `emacsclient`.
+  ##
+  ## Does nothing when the line carries no location or the editor cannot be
+  ## started.
   let location = diagnosticLocation(line)
   if not location.ok:
     return
@@ -1264,6 +1301,9 @@ proc isErrorHighlightLine(line: string): bool =
 proc renderOwlErrorLine*(
     ui: var UI, index: int, line: string, width, height: SizePolicy
 ) =
+  ## Lay out one line of an error report as row `index`, colouring the
+  ## message and underline lines and making a line that names a source
+  ## location clickable.
   let
     location = diagnosticLocation(line)
     fg =
@@ -1280,6 +1320,9 @@ proc renderOwlErrorLine*(
     openDiagnosticLocation(line)
 
 proc renderErrorDialog*(runtime: NestOwlRuntime, ui: var UI, message: string) =
+  ## Lay out the in-window error dialog for `message`.
+  ##
+  ## Does nothing for an empty message or one the user has already dismissed.
   if message.len == 0 or runtime.dismissedError == message:
     return
 
@@ -1338,6 +1381,11 @@ proc renderErrorDialog*(runtime: NestOwlRuntime, ui: var UI, message: string) =
 proc loadSyntaxFile*(
     runtime: NestOwlRuntime, path: string
 ): SyntaxNode {.raises: [EvaluatorError].} =
+  ## Read and parse the owl source file at `path` and return its syntax tree.
+  ##
+  ## `path` is resolved as a module path, and the file is registered as a
+  ## dependency so a change to it triggers a reload. Raises
+  ## `EvaluatorError` when the file cannot be read or parsed.
   var resolved = path
   try:
     resolved = runtime.resolveModulePath(path)
@@ -3023,6 +3071,10 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
   runtime.evaluator.env.define("JustifyEnd", justifyValue(JustifyEnd))
 
 proc init*(T: typedesc[NestOwlRuntime]): T =
+  ## Create a runtime with a fresh evaluator and Nest's owl builtins.
+  ##
+  ## The runtime owns the program's state bindings, its dialog and shell
+  ## processes, its workspace subscriptions and its editor states.
   result = T(
     evaluator: Evaluator.init(),
     externalEvents: initCountTable[string](),
@@ -3042,14 +3094,22 @@ proc init*(T: typedesc[NestOwlRuntime]): T =
 
 proc get*(runtime: NestOwlRuntime, name: string): Value {.raises: [
     EvaluatorError].} =
+  ## Return the value bound to `name` in the program's environment.
+  ##
+  ## Raises `EvaluatorError` when nothing is bound to that name.
   runtime.evaluator.env.get(name)
 
 proc widgetID*(
     runtime: NestOwlRuntime, name: string
 ): WidgetID {.raises: [EvaluatorError].} =
+  ## Return the widget id the program bound to `name`.
+  ##
+  ## Raises `EvaluatorError` when nothing is bound to that name or the value
+  ## is not a widget id.
   runtime.asWidgetID(runtime.get(name))
 
 proc dependenciesChanged*(runtime: NestOwlRuntime): bool =
+  ## Test whether any loaded owl file has changed on disk since it was read.
   for path, lastTime in runtime.loadedFiles:
     try:
       if getLastModificationTime(path) != lastTime:
@@ -3058,6 +3118,11 @@ proc dependenciesChanged*(runtime: NestOwlRuntime): bool =
       return true
 
 proc reload*(app: NestOwlApp): bool {.discardable.} =
+  ## Reload the app's owl program from disk and report whether it parsed.
+  ##
+  ## Dialog and shell processes and workspace subscriptions from the previous
+  ## program are closed first. A program that fails to load leaves the error
+  ## on `lastError` and `lastErrorDetails`.
   if app.runtime != nil:
     app.runtime.closeDialogProcesses()
     app.runtime.closeShellProcesses()
@@ -3075,10 +3140,15 @@ proc reload*(app: NestOwlApp): bool {.discardable.} =
     false
 
 proc init*(T: typedesc[NestOwlApp], rootPath: string): T =
+  ## Create an app rooted at the owl file `rootPath` and load its program.
   result = T(rootPath: rootPath.normalizedPath, runtime: NestOwlRuntime.init())
   discard result.reload()
 
 proc render*(runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode) =
+  ## Render `program` into `ui` for this frame.
+  ##
+  ## Polls the program's shell and dialog processes, evaluates its event
+  ## handlers and widget declarations, and commits the state they changed.
   if program.isNil:
     return
   runtime.pollShellProcesses(ui)
@@ -3100,6 +3170,8 @@ proc render*(runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode) =
     runtime.currentUi = nil
 
 proc loadComponentLibrary*(runtime: NestOwlRuntime, path: string) =
+  ## Import the owl component library at `path` into the program's
+  ## environment, making its components available to render.
   runtime.importModule(runtime.evaluator.env, path)
 
 proc renderComponent*(
@@ -3108,6 +3180,10 @@ proc renderComponent*(
     libraryPath, componentName: string,
     arguments: openArray[SyntaxNode],
 ) =
+  ## Render the component `componentName` from the library at `libraryPath`
+  ## into `ui`, passing `arguments` as owl syntax nodes.
+  ##
+  ## Does nothing while the runtime is holding an error.
   if runtime.hasError:
     return
   runtime.currentUi = addr ui
@@ -3129,6 +3205,8 @@ proc renderComponent*(
     libraryPath, componentName: string,
     arguments: openArray[string] = [],
 ) =
+  ## Render the component `componentName` from the library at `libraryPath`
+  ## into `ui`, passing `arguments` as owl string literals.
   var nodes: seq[SyntaxNode]
   for argument in arguments:
     nodes.add stringLiteral(argument)
@@ -3137,6 +3215,9 @@ proc renderComponent*(
 proc renderLayoutOnly*(
     runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode, width, height: int
 ) =
+  ## Lay `program` out in a `width` by `height` window without drawing it.
+  ##
+  ## Used by tests and by size probes that need the solved layout only.
   if program.isNil:
     return
   runtime.pollShellProcesses(ui)
@@ -3155,6 +3236,11 @@ proc renderLayoutOnly*(
     runtime.currentUi = nil
 
 proc render*(app: NestOwlApp, ui: var UI) =
+  ## Render the app's program into `ui` for this frame.
+  ##
+  ## Reloads the program when a source file changed, decides between a full
+  ## and an incremental render, and keeps the program's shell and dialog
+  ## processes polled. Does nothing when no program is loaded.
   if app.isNil:
     return
   let now = currentTicks()

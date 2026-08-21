@@ -39,6 +39,10 @@ proc readPid(path: string): int =
     0
 
 proc removeSingleInstanceLock*(lock: SingleInstanceLock) =
+  ## Release `lock`, removing its pid file and lock directory.
+  ##
+  ## Does nothing when the lock was never acquired or when the pid file has
+  ## since been claimed by another process.
   if not lock.active:
     return
   if lock.pidPath.fileExists and lock.pidPath.readPid == getCurrentProcessId():
@@ -62,6 +66,12 @@ proc terminatePid(pid: int) =
     discard execShellCmd("kill -KILL " & $pid & " >/dev/null 2>&1")
 
 proc acquireSingleInstanceLock*(namespace: string): SingleInstanceLock =
+  ## Claim the single-instance lock for `namespace`.
+  ##
+  ## A lock still held by a live instance of this application is taken over:
+  ## the old process is asked to quit, then killed if it lingers. A stale
+  ## lock is simply removed. Quits the process when the lock cannot be
+  ## acquired after three attempts.
   result.lockDir = getTempDir() / (singleInstanceName(namespace) & ".lock")
   result.pidPath = result.lockDir / "pid"
 

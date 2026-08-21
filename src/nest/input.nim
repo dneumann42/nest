@@ -147,22 +147,36 @@ var inputRelays* = InputRelays(
 )
 
 proc pollEvent*(e: var Event, flags: set[InputFlag] = {}): bool =
+  ## Take the next pending input event into `e` without blocking.
+  ##
+  ## Returns false when nothing is queued. `flags` carries backend hints for
+  ## the frame, such as `WantTextInput` while a text widget has focus.
   inputRelays.pollEvent(e, flags)
 
 proc waitEvent*(e: var Event, timeoutMs: int = -1, flags: set[InputFlag] = {}): bool =
+  ## Wait for the next input event, storing it in `e`.
+  ##
+  ## Blocks for at most `timeoutMs` milliseconds, or indefinitely when it is
+  ## negative, and returns false when the wait timed out. `flags` carries
+  ## backend hints for the frame, such as `WantTextInput`.
   inputRelays.waitEvent(e, timeoutMs, flags)
 
 proc getClipboardText*(): string =
+  ## Return the current text contents of the system clipboard.
   clipboardRelays.getText()
 
 proc putClipboardText*(text: string) =
+  ## Replace the system clipboard contents with `text`.
   clipboardRelays.putText(text)
 
 proc getTicks*(): int =
+  ## Return the milliseconds elapsed since the input backend started.
   inputRelays.getTicks()
 
 proc sleep*(ms: int) =
+  ## Block the calling thread for `ms` milliseconds.
   inputRelays.sleep(ms)
 
 proc shutdown*() =
+  ## Shut the input backend down and release its resources.
   inputRelays.shutdown()

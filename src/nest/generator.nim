@@ -6,6 +6,11 @@ proc writeProjectFile(path, content: string) =
   writeFile(path, content)
 
 proc generateProject*(projectDir: string) =
+  ## Scaffold a new Nest project in `projectDir`, creating the directory when
+  ## it does not exist.
+  ##
+  ## Writes a `project.owl` and a small counter `main.owl`. Quits rather
+  ## than overwriting a file that is already there.
   let dir = projectDir.normalizedPath
   if not dirExists(dir):
     createDir(dir)

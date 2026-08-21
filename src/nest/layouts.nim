@@ -43,27 +43,41 @@ type
     boxes*: seq[Widget]
 
 proc `$`*(frame: Frame): string =
+  ## Render a frame as text, for debugging and test failures.
   &"Frame(x: {frame.x}, y: {frame.y}, width: {frame.width}, height: {frame.height})"
 
 proc fill*(min = 0.0, max = Inf): SizePolicy =
+  ## Size policy that takes as much space as the parent can give. `min` and `max` bound the result.
   SizePolicy(kind: Fill, min: min, max: max)
 
 proc fixed*(value: float64): SizePolicy =
+  ## Size policy that pins the box to exactly `value` pixels.
   SizePolicy(kind: Fixed, value: value, min: value, max: value)
 
 proc fit*(min = 0.0, max = Inf): SizePolicy =
+  ## Size policy that shrinks the box to its content's intrinsic size.
+  ##
+  ## `min` and `max` bound the result. A box with no intrinsic size falls back to `min`.
   SizePolicy(kind: Fit, min: min, max: max)
 
 proc hug*(preferred: float64, min = 0.0, max = Inf): SizePolicy =
+  ## Size policy that asks for `preferred` pixels but yields when the
+  ## surrounding constraints require another size. `min` and `max` bound the result.
   SizePolicy(kind: Hug, value: preferred, min: min, max: max)
 
 proc prefer*(value: float64, min = 0.0, max = Inf): SizePolicy =
+  ## Size policy that asks for `value` pixels but yields when the
+  ## surrounding constraints require another size. `min` and `max` bound the result.
+  ##
+  ## Behaves like `hug`.
   SizePolicy(kind: Prefer, value: value, min: min, max: max)
 
 proc insets*(all: float64): EdgeInsets =
+  ## Return insets with the same padding on all four edges.
   EdgeInsets(left: all, top: all, right: all, bottom: all)
 
 proc insets*(left, top, right, bottom: float64): EdgeInsets =
+  ## Return insets with a separate value per edge.
   EdgeInsets(left: left, top: top, right: right, bottom: bottom)
 
 proc resolveInsets(
@@ -91,39 +105,56 @@ proc widgetPolicy(policy: SizePolicy): WidgetSizePolicy =
       max: policy.max)
 
 proc newLayout*(): Layout =
+  ## Create an empty layout with a fresh constraint solver.
   Layout(solver: newSolver())
 
 proc x*(box: Widget): Variable =
+  ## Return the solver variable holding the box's left edge.
   box.x
 
 proc y*(box: Widget): Variable =
+  ## Return the solver variable holding the box's top edge.
   box.y
 
 proc width*(box: Widget): Variable =
+  ## Return the solver variable holding the box's width.
   box.w
 
 proc height*(box: Widget): Variable =
+  ## Return the solver variable holding the box's height.
   box.h
 
 proc left*(box: Widget): Expression =
+  ## Return the box's left edge as a constraint expression.
   box.x.toExpression
 
 proc top*(box: Widget): Expression =
+  ## Return the box's top edge as a constraint expression.
   box.y.toExpression
 
 proc right*(box: Widget): Expression =
+  ## Return the box's right edge as a constraint expression.
   box.x + box.w
 
 proc bottom*(box: Widget): Expression =
+  ## Return the box's bottom edge as a constraint expression.
   box.y + box.h
 
 proc centerX*(box: Widget): Expression =
+  ## Return the box's horizontal centre as a constraint expression.
   box.x + box.w / 2.0
 
 proc centerY*(box: Widget): Expression =
+  ## Return the box's vertical centre as a constraint expression.
   box.y + box.h / 2.0
 
 proc constrain*(ui: Layout, constraint: Constraint): Constraint {.discardable.} =
+  ## Add `constraint` to the layout's solver and return it, so it can be
+  ## removed again later.
+  ##
+  ## A constraint the solver rejects as unsatisfiable or duplicate is
+  ## dropped rather than raised, which keeps one bad constraint from taking
+  ## down a frame.
   try:
     result = ui.solver.constraint(constraint)
   except InternalSolverError, UnsatisfiableConstraintError, DuplicateConstraintError:
@@ -168,12 +199,18 @@ proc initBox(
   ui.applyPolicy(result.h, height)
 
 proc box*(ui: Layout, id: LayoutBoxID, width = fill(), height = fill()): Widget =
+  ## Create a box with the numeric id `id` and register it with the layout.
   ui.initBox(WidgetID(id), $id, width, height)
 
 proc box*(ui: Layout, id: string, width = fill(), height = fill()): Widget =
+  ## Create a box with a fresh widget id, labelled `id` for debugging.
   ui.initBox(nextWidgetID(), id, width, height)
 
 proc root*(ui: Layout, box: Widget) =
+  ## Make `box` the layout's root, pinning it to the origin.
+  ##
+  ## The root's size is what `resize` suggests, so it must be set before the
+  ## first resize.
   ui.rootBox = box
   discard ui.constrain(box.x == 0.0)
   discard ui.constrain(box.y == 0.0)
@@ -181,6 +218,10 @@ proc root*(ui: Layout, box: Widget) =
   ui.solver[box.h] = WindowResizeStrength
 
 proc resize*(ui: Layout, width, height: float64) =
+  ## Suggest a new size for the root box, normally the window size.
+  ##
+  ## Negative values are clamped to zero. Raises `ValueError` when no root
+  ## has been set yet.
   if ui.rootBox.w.isNil or ui.rootBox.h.isNil:
     raise newException(ValueError, "layout root must be set before resize")
 
@@ -188,6 +229,10 @@ proc resize*(ui: Layout, width, height: float64) =
   ui.solver.suggest(ui.rootBox.h, max(height, 0.0))
 
 proc solve*(ui: Layout): bool {.discardable.} =
+  ## Solve the layout and report whether it succeeded.
+  ##
+  ## Returns false, leaving the previous solution in place, when the
+  ## constraints turned out to be unsatisfiable.
   try:
     ui.solver.update()
     result = true
@@ -195,9 +240,14 @@ proc solve*(ui: Layout): bool {.discardable.} =
     result = false
 
 proc add*(group: var ConstraintGroup, constraint: Constraint) =
+  ## Append `constraint` to the group.
   group.constraints.add constraint
 
 template collect*(ui: Layout, body: untyped): ConstraintGroup =
+  ## Collect the constraints created in `body` into a `ConstraintGroup`.
+  ##
+  ## Inside `body`, pass each constraint to the injected `keep` template.
+  ## The group can later be handed to `remove` to retract them all at once.
   block:
     var collected {.gensym.}: ConstraintGroup
     template keep(constraint: Constraint) =
@@ -207,10 +257,12 @@ template collect*(ui: Layout, body: untyped): ConstraintGroup =
     collected
 
 proc remove*(ui: Layout, group: ConstraintGroup) =
+  ## Retract every constraint in `group` from the solver.
   for constraint in group.constraints:
     ui.solver.remove constraint
 
 proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
+  ## Constrain `child` to fill `parent`, leaving `inset` pixels on each side.
   let pad = insets(inset)
   discard ui.constrain(child.left == parent.left + pad.left)
   discard ui.constrain(child.top == parent.top + pad.top)
@@ -232,6 +284,12 @@ proc overlay*(
     alignItems = AlignStretch,
     justifyContent = JustifyCenter,
 ) =
+  ## Stack `children` on top of each other inside `parent`.
+  ##
+  ## Every child gets the same box: the parent's area less its padding, with
+  ## `alignItems` and `justifyContent` deciding how a child that does not
+  ## stretch is placed within it. A child's own `alignSelf` overrides
+  ## `alignItems`.
   let pad = resolveInsets(padding, paddingLeft, paddingTop, paddingRight,
       paddingBottom)
   for child in children:
@@ -344,6 +402,15 @@ proc row*(
     scrollX = false,
     scrollY = false,
 ) =
+  ## Lay `children` out left to right inside `parent`.
+  ##
+  ## `gap` separates neighbours and the padding arguments inset the content;
+  ## a per-edge padding argument overrides `padding`. `alignItems` places
+  ## the children on the cross axis and `justifyContent` distributes any
+  ## leftover space along the row, both of which a child can override with
+  ## its own `alignSelf`. `scrollX` and `scrollY` mark the row as scrollable,
+  ## so it may size its content past the parent's bounds. Does nothing for an
+  ## empty `children`.
   if children.len == 0:
     return
   let pad = resolveInsets(padding, paddingLeft, paddingTop, paddingRight,
@@ -421,6 +488,15 @@ proc column*(
     scrollX = false,
     scrollY = false,
 ) =
+  ## Lay `children` out top to bottom inside `parent`.
+  ##
+  ## `gap` separates neighbours and the padding arguments inset the content;
+  ## a per-edge padding argument overrides `padding`. `alignItems` places
+  ## the children on the cross axis and `justifyContent` distributes any
+  ## leftover space along the column, both of which a child can override
+  ## with its own `alignSelf`. `scrollX` and `scrollY` mark the column as
+  ## scrollable, so it may size its content past the parent's bounds. Does
+  ## nothing for an empty `children`.
   if children.len == 0:
     return
   let pad = resolveInsets(padding, paddingLeft, paddingTop, paddingRight,
@@ -484,30 +560,39 @@ proc column*(
     discard ui.constrain(children[^1].bottom == parent.bottom - pad.bottom)
 
 proc alignLeft*(ui: Layout, a, b: Widget, offset = 0.0) =
+  ## Constrain `a`'s left edge to `b`'s, plus `offset`.
   discard ui.constrain(a.left == b.left + offset)
 
 proc alignRight*(ui: Layout, a, b: Widget, offset = 0.0) =
+  ## Constrain `a`'s right edge to `b`'s, plus `offset`.
   discard ui.constrain(a.right == b.right + offset)
 
 proc alignTop*(ui: Layout, a, b: Widget, offset = 0.0) =
+  ## Constrain `a`'s top edge to `b`'s, plus `offset`.
   discard ui.constrain(a.top == b.top + offset)
 
 proc alignBottom*(ui: Layout, a, b: Widget, offset = 0.0) =
+  ## Constrain `a`'s bottom edge to `b`'s, plus `offset`.
   discard ui.constrain(a.bottom == b.bottom + offset)
 
 proc alignCenterX*(ui: Layout, a, b: Widget, offset = 0.0) =
+  ## Constrain `a`'s horizontal centre to `b`'s, plus `offset`.
   discard ui.constrain(a.centerX == b.centerX + offset)
 
 proc alignCenterY*(ui: Layout, a, b: Widget, offset = 0.0) =
+  ## Constrain `a`'s vertical centre to `b`'s, plus `offset`.
   discard ui.constrain(a.centerY == b.centerY + offset)
 
 proc after*(ui: Layout, a, b: Widget, gap = 0.0) =
+  ## Place `a` immediately to the right of `b`, `gap` pixels apart.
   discard ui.constrain(a.left == b.right + gap)
 
 proc below*(ui: Layout, a, b: Widget, gap = 0.0) =
+  ## Place `a` immediately below `b`, `gap` pixels apart.
   discard ui.constrain(a.top == b.bottom + gap)
 
 proc equalWidth*(ui: Layout, boxes: varargs[Widget]) =
+  ## Constrain every box in `boxes` to the same width. Needs at least two.
   if boxes.len < 2:
     return
 
@@ -515,6 +600,7 @@ proc equalWidth*(ui: Layout, boxes: varargs[Widget]) =
     discard ui.constrain(boxes[i].width == boxes[0].width)
 
 proc equalHeight*(ui: Layout, boxes: varargs[Widget]) =
+  ## Constrain every box in `boxes` to the same height. Needs at least two.
   if boxes.len < 2:
     return
 

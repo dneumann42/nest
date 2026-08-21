@@ -22,22 +22,31 @@ type
 var overlayEnabled: bool
 
 proc enabled*(options: PerfOptions): bool =
+  ## Test whether these options ask for any performance instrumentation.
   options.overlay or options.benchmarkFrames > 0
 
 proc perfOverlayEnabled*(): bool =
+  ## Test whether the performance overlay is currently being drawn.
   overlayEnabled
 
 proc setPerfOverlay*(enabled: bool) =
+  ## Show or hide the performance overlay.
   overlayEnabled = enabled
 
 proc togglePerfOverlay*(): bool =
+  ## Flip the performance overlay on or off and return its new state.
   overlayEnabled = not overlayEnabled
   overlayEnabled
 
 proc init*(T: typedesc[PerfStats], historySize = DefaultHistorySize): T =
+  ## Create frame statistics that keep the last `historySize` frame times.
   T(samples: newSeq[float64](max(historySize, 1)))
 
 proc recordFrame*(stats: var PerfStats; ticks = input.getTicks()) =
+  ## Record the frame that ended at `ticks`.
+  ##
+  ## The first call only establishes a starting point; every call after that
+  ## adds one frame time to the rolling history and to the running totals.
   if stats.lastTicks == 0:
     stats.lastTicks = ticks
     return
@@ -71,12 +80,16 @@ proc sampleAt(stats: PerfStats; index: int): float64 =
   stats.samples[offset]
 
 proc fps*(dt: float64): float64 =
+  ## Convert a frame time in seconds to frames per second, returning 0 for a
+  ## non-positive `dt`.
   if dt <= 0:
     0
   else:
     1.0 / dt
 
 proc latestFps*(stats: PerfStats): float64 =
+  ## Return the frame rate of the most recently recorded frame, or 0 when
+  ## nothing has been recorded yet.
   let count = stats.sampleCount
   if count == 0:
     0
@@ -84,6 +97,8 @@ proc latestFps*(stats: PerfStats): float64 =
     fps(stats.sampleAt(count - 1))
 
 proc averageFps*(stats: PerfStats; window = DefaultAverageWindow): float64 =
+  ## Return the frame rate averaged over the last `window` frames, or 0 when
+  ## nothing has been recorded yet.
   let count = stats.sampleCount
   if count == 0:
     return 0
@@ -97,6 +112,8 @@ proc averageFps*(stats: PerfStats; window = DefaultAverageWindow): float64 =
     (count - first).float64 / total
 
 proc summary*(stats: PerfStats): string =
+  ## Return a one-line summary of the run: frame count, average frame rate
+  ## and frame times. Useful as benchmark output.
   let avg =
     if stats.totalDt > 0:
       stats.frameCount.float64 / stats.totalDt
@@ -106,6 +123,8 @@ proc summary*(stats: PerfStats): string =
   &"frames={stats.frameCount} avgFps={avg:.1f} latestFps={stats.latestFps():.1f} avgFrameMs={avgFrameMs:.2f} minFrameMs={stats.minDt * 1000.0:.2f} maxFrameMs={stats.maxDt * 1000.0:.2f}"
 
 proc drawOverlay*(stats: PerfStats; windowWidth, windowHeight: int; font: Font) =
+  ## Draw the performance overlay panel in the top-right corner of a window
+  ## of `windowWidth` by `windowHeight` pixels, using `font` for its text.
   let
     panelW = min(260, max(windowWidth - 16, 120))
     panelH = 116

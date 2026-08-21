@@ -30,6 +30,15 @@ proc runProject*(
     dialogAnchor = "";
     perfOptions = PerfOptions();
 ): string =
+  ## Load and run the Nest project in `projectDir` until it quits, returning
+  ## the value the project closed its dialog with.
+  ##
+  ## `dialogData` is handed to the project as its dialog input, and
+  ## `dialogMode` marks the process as a dialog so it skips the
+  ## single-instance lock. `dialogAnchor` is a JSON anchor description used
+  ## to place a dialog next to its opener, and `perfOptions` controls the
+  ## performance overlay and benchmark mode. Quits when the directory or
+  ## the project's main file is missing.
   discard dialogResultPath
   let dir = projectDir.normalizedPath
   if not dirExists(dir):

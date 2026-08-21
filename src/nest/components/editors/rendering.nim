@@ -296,6 +296,9 @@ proc updateScrollBounds(state: EditorState, f: Frame) =
     state.dragging = NoEditorScroll
 
 method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
+  ## Handle this frame's input for the editor: focus and caret placement by
+  ## pointer, selection dragging, scrollbar dragging, wheel scrolling, and
+  ## text and key input while focused.
   let isHot = widget.frame.frameContains(ctx.mouseX, ctx.mouseY)
   let handlesWheel = isHot or ctx.focused(widget.id)
   let f = widget.frame
@@ -418,6 +421,11 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
     self.state.ensureCursorVisible = true
 
 method measure*(self: Editor, resources: Resources): IntrinsicSize =
+  ## Return the size the editor's text needs, and cache the content size on
+  ## the state for scrolling.
+  ##
+  ## A single-line editor reports one line's height; a multi-line one reports
+  ## its full content, bounded by the editor's minimum size.
   let (width, height) = self.editorContentSize(resources)
   self.state.contentWidth = width
   self.state.contentHeight = height
@@ -428,6 +436,8 @@ method measure*(self: Editor, resources: Resources): IntrinsicSize =
 
 proc getFrameStyle*(ctx: var DrawContext, hot, focused: bool): tuple[bg,
     border: Color] =
+  ## Return the background and border colours a text field should use for its
+  ## `hot` and `focused` state.
   let
     bg =
       if focused:
@@ -450,6 +460,8 @@ proc cursorLineAndColumn(state: EditorState): tuple[line, column: int] =
   result.column = state.cursor - lineStart
 
 method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
+  ## Draw the editor: its frame, the gutter and line numbers, highlighted
+  ## text, the selection, the caret and any scrollbars.
   let
     f = widget.frame
     focused = ctx.focused(widget.id)

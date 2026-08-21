@@ -17,3 +17,4 @@ tests/test_layout
 /tests/test_crowdsl
 example/layerShellBar/layerShellBar
 *.out
+docs/api/

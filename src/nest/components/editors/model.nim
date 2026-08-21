@@ -44,20 +44,31 @@ type
     activeLine*: int
 
 proc new*(T: typedesc[EditorState], text = ""): T =
+  ## Create editor state holding `text`, with the cursor at its end and
+  ## nothing selected.
   T(text: text, cursor: text.len, selectionAnchor: -1, preferredColumn: -1)
 
 proc clampCursor*(state: EditorState) =
+  ## Pull the cursor, and the selection anchor when there is one, back inside
+  ## the text.
+  ##
+  ## Call this after replacing `state.text` from outside the editor.
   state.cursor = clamp(state.cursor, 0, state.text.len)
   if state.selectionAnchor >= 0:
     state.selectionAnchor = clamp(state.selectionAnchor, 0, state.text.len)
 
 proc clearSelection*(state: EditorState) =
+  ## Drop the selection, leaving the cursor where it is.
   state.selectionAnchor = -1
 
 proc hasSelection*(state: EditorState): bool =
+  ## Test whether there is a selection covering at least one character.
   state.selectionAnchor >= 0 and state.selectionAnchor != state.cursor
 
 proc selectionRange*(state: EditorState): tuple[first, last: int] =
+  ## Return the selected range as `first ..< last` offsets into the text.
+  ##
+  ## Both ends are the cursor position when nothing is selected.
   if state.hasSelection:
     result.first = min(state.selectionAnchor, state.cursor)
     result.last = max(state.selectionAnchor, state.cursor)
@@ -66,6 +77,7 @@ proc selectionRange*(state: EditorState): tuple[first, last: int] =
     result.last = state.cursor
 
 proc selectedText*(state: EditorState): string =
+  ## Return the selected text, or an empty string when nothing is selected.
   let r = state.selectionRange
   if r.last > r.first:
     state.text[r.first ..< r.last]
@@ -73,6 +85,10 @@ proc selectedText*(state: EditorState): string =
     ""
 
 proc resetPreferredColumn*(state: EditorState) =
+  ## Forget the column the cursor should return to when moving between lines.
+  ##
+  ## Vertical movement keeps the column of the line the cursor started on;
+  ## any other edit or movement resets it.
   state.preferredColumn = -1
 
 proc rememberUndo(state: EditorState) =
@@ -83,6 +99,7 @@ proc rememberUndo(state: EditorState) =
   state.redoStack.setLen(0)
 
 proc undo*(state: EditorState) =
+  ## Undo the last edit, pushing the current text onto the redo stack.
   if state.undoStack.len == 0:
     return
   state.redoStack.add state.text
@@ -93,6 +110,7 @@ proc undo*(state: EditorState) =
   state.resetPreferredColumn()
 
 proc redo*(state: EditorState) =
+  ## Redo the last undone edit, pushing the current text onto the undo stack.
   if state.redoStack.len == 0:
     return
   state.undoStack.add state.text
@@ -113,6 +131,13 @@ proc new*(
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
 ): T =
+  ## Create an editor component over `state`.
+  ##
+  ## `singleLine` restricts it to one line, so Enter submits instead of
+  ## inserting a newline. `lineNumbers` shows a gutter, `scrollbars` shows
+  ## scrollbars when the content overflows, `syntax` names the highlighter to
+  ## run, `gutterMarkers` are the lines to mark in the gutter, and
+  ## `activeLine` is the line to highlight, counted from one.
   state.clampCursor()
   T(
     state: state,
@@ -169,6 +194,11 @@ proc nextLineCursor(state: EditorState): int =
   nextStart + min(column, nextEnd - nextStart)
 
 proc setCursor*(state: EditorState, cursor: int, selecting = false) =
+  ## Move the cursor to `cursor`.
+  ##
+  ## With `selecting`, the selection is extended from where the cursor was,
+  ## starting a selection if there was none; without it the selection is
+  ## dropped.
   let previous = state.cursor
   if selecting and state.selectionAnchor < 0:
     state.selectionAnchor = previous
@@ -178,6 +208,9 @@ proc setCursor*(state: EditorState, cursor: int, selecting = false) =
   state.resetPreferredColumn()
 
 proc deleteSelection*(state: EditorState): bool {.discardable.} =
+  ## Delete the selected text and report whether anything was deleted.
+  ##
+  ## The edit is recorded on the undo stack.
   if not state.hasSelection:
     return false
   state.rememberUndo()
@@ -189,11 +222,17 @@ proc deleteSelection*(state: EditorState): bool {.discardable.} =
   true
 
 proc selectAll*(state: EditorState) =
+  ## Select the whole text, leaving the cursor at its end.
   state.selectionAnchor = 0
   state.cursor = state.text.len
   state.resetPreferredColumn()
 
 proc insertText*(state: EditorState, text: string, singleLine = false) =
+  ## Insert `text` at the cursor, replacing the selection when there is one.
+  ##
+  ## With `singleLine`, newlines in `text` are stripped so pasted
+  ## multi-line text stays on one line. The edit is recorded on the undo
+  ## stack.
   state.clampCursor()
   let inserted =
     if singleLine:
@@ -213,6 +252,8 @@ proc insertText*(state: EditorState, text: string, singleLine = false) =
   state.resetPreferredColumn()
 
 proc deleteBackward*(state: EditorState) =
+  ## Delete the selection, or the character before the cursor when nothing is
+  ## selected.
   state.clampCursor()
   if state.deleteSelection():
     return
@@ -224,6 +265,8 @@ proc deleteBackward*(state: EditorState) =
     state.resetPreferredColumn()
 
 proc deleteForward*(state: EditorState) =
+  ## Delete the selection, or the character after the cursor when nothing is
+  ## selected.
   state.clampCursor()
   if state.deleteSelection():
     return
@@ -234,6 +277,7 @@ proc deleteForward*(state: EditorState) =
     state.resetPreferredColumn()
 
 proc killToStart*(state: EditorState) =
+  ## Delete from the start of the current line up to the cursor.
   state.clampCursor()
   let start = state.text.lineStart(state.cursor)
   if state.cursor > start:
@@ -244,6 +288,7 @@ proc killToStart*(state: EditorState) =
     state.resetPreferredColumn()
 
 proc killToEnd*(state: EditorState) =
+  ## Delete from the cursor to the end of the current line.
   state.clampCursor()
   let stop = state.text.lineEnd(state.cursor)
   if state.cursor < stop:
@@ -253,6 +298,10 @@ proc killToEnd*(state: EditorState) =
     state.resetPreferredColumn()
 
 proc copySelection*(state: EditorState): string {.raises: [].} =
+  ## Copy the selection to the system clipboard and return it.
+  ##
+  ## Returns an empty string, and leaves the clipboard alone, when nothing is
+  ## selected.
   result = state.selectedText()
   if result.len > 0:
     try:
@@ -261,6 +310,7 @@ proc copySelection*(state: EditorState): string {.raises: [].} =
       discard
 
 proc cutSelection*(state: EditorState): string {.raises: [].} =
+  ## Cut the selection to the system clipboard and return it.
   result = state.copySelection()
   if result.len > 0:
     try:
@@ -269,12 +319,17 @@ proc cutSelection*(state: EditorState): string {.raises: [].} =
       discard
 
 proc pasteClipboard*(state: EditorState, singleLine = false) {.raises: [].} =
+  ## Insert the clipboard contents at the cursor.
+  ##
+  ## With `singleLine`, newlines are stripped from what is pasted. A
+  ## clipboard that cannot be read is ignored.
   try:
     state.insertText(getClipboardText(), singleLine)
   except Exception:
     discard
 
 proc lineColumn*(state: EditorState): tuple[line, column: int] =
+  ## Return the cursor's one-based line and column.
   result.line = 1
   result.column = 1
   let stop = state.cursor.clamp(0, state.text.len)
@@ -286,6 +341,10 @@ proc lineColumn*(state: EditorState): tuple[line, column: int] =
   result.column = stop - lineStart + 1
 
 proc cursorForLineColumn*(state: EditorState, line, column: int): int =
+  ## Return the text offset of one-based `line` and `column`.
+  ##
+  ## Positions past the end of a line, or past the end of the text, clamp to
+  ## the nearest valid offset.
   let wantedLine = max(line, 1)
   let wantedColumn = max(column, 1)
   var currentLine = 1
@@ -301,6 +360,12 @@ proc cursorForLineColumn*(state: EditorState, line, column: int): int =
 
 proc handleKey*(state: EditorState, input: KeyInput, widget: Widget,
     ctx: var UpdateContext, singleLine = false) =
+  ## Apply one key press to the editor state.
+  ##
+  ## Handles cursor movement, with Shift extending the selection, editing
+  ## and deletion keys, undo and redo, select-all, and the clipboard
+  ## shortcuts. Escape drops focus. In a `singleLine` editor Enter submits
+  ## `widget` and drops focus instead of inserting a newline.
   let ctrl = CtrlPressed in input.mods
   let shift = ShiftPressed in input.mods
   case input.key

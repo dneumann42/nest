@@ -24,6 +24,11 @@ proc new*(
     open = false,
     optionHeight = ComboMinHeight,
 ): T =
+  ## Create a combo box.
+  ##
+  ## `label` is the text shown on the closed field, `options` are the
+  ## choices, `selected` indexes the current one, `open` starts the popover
+  ## open, and `optionHeight` sets the height of one row in the list.
   T(label: label, options: @options, selected: selected, open: open, optionHeight: optionHeight)
 
 proc contains(frame: Frame, x, y: int): bool =
@@ -46,6 +51,7 @@ proc popupFrame(field: Frame, optionCount, optionHeight, windowHeight: int): Fra
   Frame(x: field.x, y: y, width: field.width, height: popupHeight.float64)
 
 method measure*(self: ComboBox, resources: Resources): IntrinsicSize =
+  ## Return the size of the label plus the field's padding and arrow.
   let measurement = resources.measureText("font", self.label)
   intrinsicSize(
     (measurement.width + ComboPaddingX * 2 + ComboArrowWidth).toFloat,
@@ -53,6 +59,11 @@ method measure*(self: ComboBox, resources: Resources): IntrinsicSize =
   )
 
 method update*(self: ComboBox, widget: Widget, ctx: var UpdateContext) =
+  ## Handle this frame's input: open and close the popover, track the option
+  ## under the pointer and commit a click on one as the new selection.
+  ##
+  ## The popover is flipped above the field when there is not enough room
+  ## below it in the window.
   let
     fieldHot = widget.frame.contains(ctx.mouseX, ctx.mouseY)
     popover = popupFrame(widget.frame, self.options.len, self.optionHeight, ctx.windowHeight)
@@ -85,6 +96,7 @@ proc drawTextClipped(ctx: var DrawContext, f: Frame, text: string, selected = fa
     fillRect(rect(f.x.toInt + 3, f.y.toInt + 3, 3, max(f.height.toInt - 6, 1)), ctx.palette.cardAccent)
 
 method draw*(self: ComboBox, widget: Widget, ctx: var DrawContext) =
+  ## Draw the closed field: its background, label and arrow.
   let
     f = widget.frame
     hot = ctx.hot(widget.id)
@@ -121,6 +133,9 @@ method draw*(self: ComboBox, widget: Widget, ctx: var DrawContext) =
 
 
 method drawOverlay*(self: ComboBox, widget: Widget, ctx: var DrawContext) =
+  ## Draw the open popover above the rest of the frame, one row per option
+  ## with the selected and hovered rows highlighted. Draws nothing while the
+  ## combo box is closed.
   if not self.open:
     return
   let

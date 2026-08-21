@@ -4,6 +4,8 @@ import nest/[appConfig, owldsl, runtime, ui]
 import nest/input
 
 proc closeOwlErrorDialog*(app: NestOwlApp) =
+  ## Close the error dialog `app` has open, terminating the dialog process if
+  ## it is still running.
   if app.errorDialogProcess != nil:
     if app.errorDialogProcess.running:
       app.errorDialogProcess.terminate
@@ -11,6 +13,10 @@ proc closeOwlErrorDialog*(app: NestOwlApp) =
     app.errorDialogProcess = nil
 
 proc pollOwlErrorDialog*(app: NestOwlApp) =
+  ## Reap the error dialog process once the user has closed it.
+  ##
+  ## The reported error is remembered as dismissed, so the same error does
+  ## not immediately raise the dialog again.
   if app.errorDialogProcess != nil and not app.errorDialogProcess.running:
     app.errorDialogProcess.close
     app.errorDialogProcess = nil
@@ -27,6 +33,8 @@ proc detailsJson(details: ErrorDetails): string =
     "sourceLine": details.primary.sourceLine}, "frames": frames})
 
 proc errorDetailsFromJson*(value: string): ErrorDetails =
+  ## Parse the JSON error description passed to the `error-dialog-json`
+  ## command into `ErrorDetails`.
   try:
     let node = parseJson(value)
     result.message = node["message"].getStr
@@ -42,6 +50,10 @@ proc errorDetailsFromJson*(value: string): ErrorDetails =
     result = ErrorDetails(message: value)
 
 proc launchOwlErrorDialog*(app: NestOwlApp, details: ErrorDetails) =
+  ## Show `details` in a separate error dialog process.
+  ##
+  ## Does nothing for an empty report, for an error the user has already
+  ## dismissed, or while a dialog for it is still open.
   let message = details.errorReport()
   if message.len == 0 or app.runtime.dismissedError == message:
     return
@@ -135,6 +147,8 @@ proc drawOwlErrorDialog(
 proc layoutOwlErrorDialogForTest*(
     ui: var UI, message: string, width, height: int
 ): bool =
+  ## Lay out the error dialog once against `ui` at `width` by `height` and
+  ## report whether the layout succeeded. Exposed for the test suite.
   var
     copied = false
     stackExpanded = false
@@ -146,6 +160,10 @@ proc layoutOwlErrorDialogForTest*(
   ui.endLayout()
 
 proc runOwlErrorDialog*(details: ErrorDetails) =
+  ## Run the error dialog for `details` as its own application, blocking
+  ## until the user closes it.
+  ##
+  ## This is what the `nest error-dialog` command runs.
   var ui = UI.init()
   var copied = false
   var stackExpanded = false
@@ -159,4 +177,6 @@ proc runOwlErrorDialog*(details: ErrorDetails) =
     drawOwlErrorDialog(ui, details, copied, stackExpanded, running)
 
 proc runOwlErrorDialog*(message: string) =
+  ## Run the error dialog for a plain `message`, blocking until the user
+  ## closes it.
   runOwlErrorDialog(ErrorDetails(message: message))

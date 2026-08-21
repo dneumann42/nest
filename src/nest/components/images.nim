@@ -14,18 +14,26 @@ type
     hasSource: bool
 
 proc new*(T: typedesc[ImageView], path = ""): T =
+  ## Create an image view showing the whole image at `path`.
   T(path: path)
 
 proc new*(T: typedesc[ImageView], path: string, source: Rect): T =
+  ## Create an image view showing only the `source` region of the image at
+  ## `path`, as one sprite out of a sheet.
   T(path: path, source: source, hasSource: true)
 
 proc new*(T: typedesc[ImageButton], path = ""): T =
+  ## Create a clickable image button showing the whole image at `path`.
   T(path: path)
 
 proc new*(T: typedesc[ImageButton], path: string, source: Rect): T =
+  ## Create a clickable image button showing only the `source` region of the
+  ## image at `path`.
   T(path: path, source: source, hasSource: true)
 
 method measure*(self: ImageView, resources: Resources): IntrinsicSize =
+  ## Return the size of the source region, or of the whole image when the
+  ## view shows all of it.
   if self.hasSource:
     intrinsicSize(self.source.w.toFloat, self.source.h.toFloat)
   else:
@@ -33,6 +41,8 @@ method measure*(self: ImageView, resources: Resources): IntrinsicSize =
     intrinsicSize(size.w.toFloat, size.h.toFloat)
 
 method measure*(self: ImageButton, resources: Resources): IntrinsicSize =
+  ## Return the size of the source region, or of the whole image when the
+  ## button shows all of it.
   if self.hasSource:
     intrinsicSize(self.source.w.toFloat, self.source.h.toFloat)
   else:
@@ -45,6 +55,8 @@ proc isInside(widget: Widget, ctx: UpdateContext): bool =
     ctx.mouseY.toFloat >= f.y and ctx.mouseY.toFloat < f.y + f.height
 
 method update*(self: ImageButton, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the button hot while the pointer is over it and active while the
+  ## left button is held on it.
   let hot = widget.isInside(ctx)
   if hot:
     ctx.setHot(widget.id)
@@ -88,9 +100,12 @@ proc drawImagePath(
   )
 
 method draw*(self: ImageView, widget: Widget, ctx: var DrawContext) =
+  ## Draw the image, scaled into the widget's frame.
   drawImagePath(self.path, widget, ctx, self.source, self.hasSource)
 
 method draw*(self: ImageButton, widget: Widget, ctx: var DrawContext) =
+  ## Draw the button's background when it has one, then the image, tinted for
+  ## its hot and active state.
   let f = widget.frame
   if self.style.hasBackground:
     fillRect(

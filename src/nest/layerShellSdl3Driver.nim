@@ -86,6 +86,11 @@ var layerShellConfig* = LayerShellConfig(
 )
 
 proc dockTop*(height: Positive, namespace = "nest"): LayerShellConfig =
+  ## Return a layer-shell configuration for a bar `height` pixels tall
+  ## spanning the top edge of the output.
+  ##
+  ## `namespace` is the surface namespace compositors use to identify and
+  ## style the bar.
   LayerShellConfig(
     namespace: namespace,
     layer: LayerTop,
@@ -95,6 +100,8 @@ proc dockTop*(height: Positive, namespace = "nest"): LayerShellConfig =
   )
 
 proc dockBottom*(height: Positive, namespace = "nest"): LayerShellConfig =
+  ## Return a layer-shell configuration for a bar `height` pixels tall
+  ## spanning the bottom edge of the output.
   LayerShellConfig(
     namespace: namespace,
     layer: LayerTop,
@@ -104,6 +111,8 @@ proc dockBottom*(height: Positive, namespace = "nest"): LayerShellConfig =
   )
 
 proc dockLeft*(width: Positive, namespace = "nest"): LayerShellConfig =
+  ## Return a layer-shell configuration for a bar `width` pixels wide
+  ## spanning the left edge of the output.
   LayerShellConfig(
     namespace: namespace,
     layer: LayerTop,
@@ -113,6 +122,8 @@ proc dockLeft*(width: Positive, namespace = "nest"): LayerShellConfig =
   )
 
 proc dockRight*(width: Positive, namespace = "nest"): LayerShellConfig =
+  ## Return a layer-shell configuration for a bar `width` pixels wide
+  ## spanning the right edge of the output.
   LayerShellConfig(
     namespace: namespace,
     layer: LayerTop,
@@ -205,6 +216,8 @@ var
   wakeEventQueued: Atomic[bool]
 
 proc currentSdlWindow*(): sdl3.Window =
+  ## Return the SDL window this driver is rendering into, or nil before one
+  ## has been created.
   win
 
 proc clearMeasureCache() =
@@ -969,6 +982,10 @@ proc sdlDelay(ms: int) =
   sdl3.delay(ms.uint32)
 
 proc wakeEventLoop*() {.gcsafe, raises: [].} =
+  ## Wake an event loop that is blocked waiting for input.
+  ##
+  ## Safe to call from a signal handler or another thread: at most one wake
+  ## event is queued at a time.
   if wakeEventQueued.exchange(true, moAcquireRelease):
     return
   var event: sdl3.Event
@@ -1036,6 +1053,10 @@ proc installSdl3Relays() =
     ClipboardRelays(getText: sdlGetClipboardText, putText: sdlPutClipboardText)
 
 proc initSdl3Driver*() =
+  ## Install the SDL3 relays for an ordinary desktop window.
+  ##
+  ## Prefers SDL's Wayland video driver when the session provides one and the
+  ## environment has not already chosen a driver.
   useLayerShell = false
   if getEnv("WAYLAND_DISPLAY").len > 0 and getEnv("SDL_VIDEODRIVER").len == 0 and
       getEnv("SDL_VIDEO_DRIVER").len == 0:
@@ -1043,6 +1064,8 @@ proc initSdl3Driver*() =
   installSdl3Relays()
 
 proc initLayerShellSdl3Driver*() =
+  ## Install the SDL3 relays for a Wayland layer-shell surface, configured
+  ## beforehand through `layerShellConfig`.
   useLayerShell = true
   selectWaylandVideoDriver()
   installSdl3Relays()

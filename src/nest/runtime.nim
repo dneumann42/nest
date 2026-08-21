@@ -129,6 +129,13 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
     discard
 
 template application*(cfg: AppConfig; blk: untyped) =
+  ## Run `blk` as an application main loop against a raw update/draw context.
+  ##
+  ## Opens the window described by `cfg`, then repeats `blk` once per frame
+  ## with `window`, `running`, `updateContext` and `drawContext` injected;
+  ## set `running` to false to leave the loop. Frames are driven by input
+  ## events unless `cfg.alwaysRun60Fps` is set, in which case the loop is
+  ## paced at a fixed 60 fps. Prefer the `UI` overload for widget code.
   let window {.inject.} = cfg.initWindow()
   var
     running {.inject.} = true
@@ -206,6 +213,14 @@ template application*(cfg: AppConfig; blk: untyped) =
   shutdown()
 
 template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
+  ## Run `blk` as an application main loop that drives `ui`.
+  ##
+  ## Opens the window described by `cfg`, applies the configured theme and
+  ## fonts to `ui`, then repeats `blk` once per frame with `window` and
+  ## `running` injected; set `running` to false to leave the loop. `blk` is
+  ## expected to declare the frame's widgets, normally through `ui.layout`.
+  ## Redraws follow input events and `ui`'s own redraw requests unless
+  ## `cfg.alwaysRun60Fps` is set.
   let window {.inject.} = cfg.initWindow()
   var running {.inject.} = true
   ui.setTheme(cfg.themeName)

@@ -43,13 +43,19 @@ const
   HandleRadius = 5.0
 
 proc hash*(edge: Mesh2DEdge): Hash =
+  ## Hash an edge independently of the order of its endpoints.
   hash((min(edge.a, edge.b), max(edge.a, edge.b)))
 
 proc `==`*(a, b: Mesh2DEdge): bool =
+  ## Compare two edges, treating an edge and its reverse as equal.
   (a.a == b.a and a.b == b.b) or (a.a == b.b and a.b == b.a)
 
 proc new*(T: typedesc[Mesh2DEditor], state: var Mesh2DState,
     imagePath = ""): T =
+  ## Create a mesh editor that edits `state` over the image at `imagePath`.
+  ##
+  ## The editor keeps a reference to `state`, so the caller owns it across
+  ## frames. A zoom of zero or less is initialised to a centred default view.
   if state.viewZoom <= 0:
     state.viewZoom = 1
     state.viewCenterX = 0.5
@@ -57,6 +63,7 @@ proc new*(T: typedesc[Mesh2DEditor], state: var Mesh2DState,
   T(state: addr state, imagePath: imagePath)
 
 method measure*(self: Mesh2DEditor, resources: Resources): IntrinsicSize =
+  ## Return the editor's default size; the mesh itself imposes none.
   discard self
   discard resources
   intrinsicSize(240, 240)
@@ -239,6 +246,12 @@ proc drag(state: var Mesh2DState, view: Frame, x, y: int) =
   state.lastMouseY = y
 
 method update*(self: Mesh2DEditor, widget: Widget, ctx: var UpdateContext) =
+  ## Handle this frame's input: pick, select and drag points, edges and
+  ## islands, pan and zoom the view, and set `state.changed` when the mesh
+  ## was edited.
+  ##
+  ## Holding Alt drags at `altDragSensitivity`, snapped to
+  ## `altDragSnapStep` when that is non-zero. Does nothing without state.
   if self.state == nil:
     return
   let
@@ -292,6 +305,8 @@ proc drawHandle(x, y: float64, selected: bool) =
       (HandleRadius * 2 + 1).int, (HandleRadius * 2 + 1).int), color)
 
 method draw*(self: Mesh2DEditor, widget: Widget, ctx: var DrawContext) =
+  ## Draw the backing image, the mesh's triangles and edges, and the handles
+  ## of its points, with selected geometry highlighted.
   if self.state == nil:
     return
   let

@@ -18,10 +18,16 @@ type Button* = ref object of Interactive
 
 proc new*(T: typedesc[Button], label = "", textScroll = false,
     fontName = "font", padding = insets(-1.0)): T =
+  ## Create a button component labelled `label`.
+  ##
+  ## `textScroll` lets a label wider than the button scroll instead of being
+  ## clipped, `fontName` picks a loaded font, and `padding` overrides the
+  ## default insets around the text; negative insets keep the default.
   T(label: label, textScroll: textScroll, fontName: fontName, padding: padding)
 
 proc new*(T: typedesc[Button], label: string, textScroll: bool,
     fontName: string, padding: float64): T =
+  ## Create a button component with the same `padding` on every edge.
   T.new(label, textScroll, fontName, insets(padding))
 
 proc leftPadding(self: Button): float64 =
@@ -37,6 +43,7 @@ proc bottomPadding(self: Button): float64 =
   if self.padding.bottom < 0: ButtonPaddingY.toFloat else: self.padding.bottom
 
 method measure*(self: Button, resources: Resources): IntrinsicSize =
+  ## Return the size of the label plus the button's padding.
   let measurement = resources.measureText(self.fontName, self.label)
   intrinsicSize(
     measurement.width.toFloat + self.leftPadding + self.rightPadding,
@@ -45,6 +52,8 @@ method measure*(self: Button, resources: Resources): IntrinsicSize =
   )
 
 method update*(self: Button, widget: Widget, ctx: var UpdateContext) =
+  ## Mark the button hot while the pointer is over it and active while the
+  ## left button is held on it.
   let isHot =
     ctx.mouseX > widget.frame.x.toInt and
     ctx.mouseX < (widget.frame.x + widget.frame.width).toInt and
@@ -57,6 +66,8 @@ method update*(self: Button, widget: Widget, ctx: var UpdateContext) =
     ctx.setActive(widget.id)
 
 method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
+  ## Draw the button's background, border and label, styled for its hot and
+  ## active state.
   let
     f = widget.frame
     hot = ctx.hot(widget.id)

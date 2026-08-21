@@ -34,6 +34,7 @@ var pendingRequests: seq[DialogRequest]
 var lastDialogError* = ""
 
 proc dialogError*(): string =
+  ## Return the message of the last dialog that failed, or an empty string.
   lastDialogError
 
 proc toSdlFilters(request: DialogRequest) =
@@ -72,6 +73,10 @@ proc openFileCallback(
   removePending(request)
 
 proc showOpenFileDialog*(options: OpenFileDialogOptions, callback: FileDialogCallback) =
+  ## Open the system file-open dialog described by `options`.
+  ##
+  ## The dialog runs asynchronously; `callback` is invoked with the chosen
+  ## paths, or with a cancelled result if the user dismisses it.
   discard sdl3.clearError()
   lastDialogError = ""
   var request = DialogRequest(
@@ -115,6 +120,12 @@ proc showOpenFileDialog*(
     allowMany = false,
     window: Window = nil,
 ) =
+  ## Open the system file-open dialog.
+  ##
+  ## `defaultLocation` is the directory it starts in, `filters` restricts the
+  ## visible file types, `allowMany` permits a multiple selection, and
+  ## `window` is the parent the dialog is modal to. `callback` receives the
+  ## result once the user is done.
   showOpenFileDialog(
     OpenFileDialogOptions(
       window: window,
@@ -131,6 +142,9 @@ proc browse*(
     filters: openArray[FileDialogFilter] = [],
     window: Window = nil,
 ) =
+  ## Ask the user for a single file and pass its path to `callback`.
+  ##
+  ## `callback` is not invoked when the dialog is cancelled.
   showOpenFileDialog(
     proc(result: FileDialogResult) =
       if not result.canceled and result.paths.len > 0 and not callback.isNil:
@@ -149,6 +163,9 @@ proc pick*(
     allowMany = true,
     window: Window = nil,
 ) =
+  ## Ask the user for files and pass their paths to `callback`.
+  ##
+  ## `callback` is not invoked when the dialog is cancelled.
   showOpenFileDialog(
     proc(result: FileDialogResult) =
       if not result.canceled and not callback.isNil:
@@ -163,6 +180,10 @@ proc pick*(
 proc showOpenFolderDialog*(
     options: OpenFolderDialogOptions, callback: FileDialogCallback
 ) =
+  ## Open the system folder-open dialog described by `options`.
+  ##
+  ## The dialog runs asynchronously; `callback` is invoked with the chosen
+  ## paths, or with a cancelled result if the user dismisses it.
   discard sdl3.clearError()
   lastDialogError = ""
   var request =
@@ -189,6 +210,10 @@ proc showOpenFolderDialog*(
     allowMany = false,
     window: Window = nil,
 ) =
+  ## Open the system folder-open dialog.
+  ##
+  ## `defaultLocation` is the directory it starts in, `allowMany` permits a
+  ## multiple selection, and `window` is the parent the dialog is modal to.
   showOpenFolderDialog(
     OpenFolderDialogOptions(
       window: window, defaultLocation: defaultLocation, allowMany: allowMany
@@ -199,6 +224,9 @@ proc showOpenFolderDialog*(
 proc browseFolder*(
     callback: proc(path: string), defaultLocation = "", window: Window = nil
 ) =
+  ## Ask the user for a single directory and pass its path to `callback`.
+  ##
+  ## `callback` is not invoked when the dialog is cancelled.
   showOpenFolderDialog(
     proc(result: FileDialogResult) =
       if not result.canceled and result.paths.len > 0 and not callback.isNil:
@@ -215,6 +243,9 @@ proc pickFolders*(
     allowMany = true,
     window: Window = nil,
 ) =
+  ## Ask the user for directories and pass their paths to `callback`.
+  ##
+  ## `callback` is not invoked when the dialog is cancelled.
   showOpenFolderDialog(
     proc(result: FileDialogResult) =
       if not result.canceled and not callback.isNil:

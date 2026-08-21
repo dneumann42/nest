@@ -23,6 +23,7 @@ const MaxTextMeasurements = 1024
 const MaxImages = 32
 
 proc new*(T: typedesc[Resources]): T =
+  ## Create an empty resource cache for fonts, images and text measurements.
   T(
     fontMetrics: newTable[string, FontMetrics](),
     fontPaths: newTable[string, string](),
@@ -36,9 +37,15 @@ proc new*(T: typedesc[Resources]): T =
   )
 
 proc ready*(resources: Resources): bool =
+  ## Test whether this cache has been initialised and is usable.
   not resources.resources.isNil
 
 proc loadFont*(resources: Resources, name, path: string, size: Positive) =
+  ## Open the font at `path` at `size` and register it under `name`.
+  ##
+  ## An empty `path`, or the name `nerd-monospace`, lets the backend pick a
+  ## suitable system font; any other value is treated as a font file path.
+  ## Cached text measurements are dropped, since they no longer apply.
   var metrics = FontMetrics()
   let font = openFont(path, size, metrics)
   resources.resources[name] = int(font)
@@ -58,6 +65,8 @@ proc fontAtSize*(resources: Resources, name: string, size: int): string =
 proc get*(
     resources: Resources, name: string
 ): tuple[resource: int, metrics: FontMetrics] =
+  ## Return the backend handle and metrics of the font registered as `name`,
+  ## falling back to the font registered as `font` when `name` is unknown.
   let resolvedName =
     if resources.resources.hasKey(name):
       name
@@ -69,6 +78,10 @@ proc get*(
 
 proc measureText*(resources: Resources, fontName,
     text: string): TextMeasurement =
+  ## Measure `text` in the font registered as `fontName`.
+  ##
+  ## Results are memoised per font and string; the cache is dropped whole
+  ## once it grows past its limit or a font is reloaded.
   let key = fontName & "\0" & text
   if resources.textMeasurements.hasKey(key):
     return resources.textMeasurements[key]
@@ -126,6 +139,12 @@ proc evictImagesIfNeeded(resources: Resources) =
     resources.imageLastUsed.del(oldestPath)
 
 proc loadImage*(resources: Resources, path: string): Image =
+  ## Load the image at `path` and return its backend handle.
+  ##
+  ## Relative paths are resolved against the working directory and the
+  ## executable's directory. Images are cached by path and reloaded when the
+  ## file changes on disk; the least recently used ones are evicted once the
+  ## cache is full. An empty path yields the null image.
   if path.len == 0:
     return Image(0)
   let resolvedPath = resolveImagePath(path)
@@ -154,6 +173,8 @@ proc loadImage*(resources: Resources, path: string): Image =
   resources.evictImagesIfNeeded()
 
 proc measureImage*(resources: Resources, path: string): TextExtent =
+  ## Return the pixel size of the image at `path`, loading and caching it if
+  ## it has not been measured yet.
   let resolvedPath = resolveImagePath(path)
   if resources.imageMeasurements.hasKey(resolvedPath):
     resources.imageLastUsed[resolvedPath] = resources.nextImageGeneration()

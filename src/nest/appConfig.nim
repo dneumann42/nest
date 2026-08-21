@@ -18,6 +18,11 @@ proc init*(
     title = "Nest",
     alwaysRun60Fps = false,
 ): T =
+  ## Build the configuration for an ordinary application window.
+  ##
+  ## `alwaysRun60Fps` opts out of Nest's event-driven redraws and keeps the
+  ## main loop running at a fixed frame rate, which suits continuously
+  ## animating apps and benchmarks.
   T(
     title: title,
     width: width,
@@ -28,6 +33,7 @@ proc init*(
   )
 
 proc layerShell*(cfg: AppConfig, config: LayerShellConfig): AppConfig =
+  ## Return `cfg` turned into a layer-shell surface described by `config`.
   result = cfg
   result.layerShell = true
   result.layerShellConfig = config
@@ -35,6 +41,8 @@ proc layerShell*(cfg: AppConfig, config: LayerShellConfig): AppConfig =
 proc dockTop*(
     T: typedesc[AppConfig], height: Positive, title = "Nest", namespace = "nest"
 ): T =
+  ## Configure a layer-shell bar docked to the top edge of the screen,
+  ## `height` pixels tall and as wide as the output.
   AppConfig.init(width = 1, height = height, title = title).layerShell(
     layerShellSdl3Driver.dockTop(height, namespace)
   )
@@ -42,6 +50,8 @@ proc dockTop*(
 proc dockBottom*(
     T: typedesc[AppConfig], height: Positive, title = "Nest", namespace = "nest"
 ): T =
+  ## Configure a layer-shell bar docked to the bottom edge of the screen,
+  ## `height` pixels tall and as wide as the output.
   AppConfig.init(width = 1, height = height, title = title).layerShell(
     layerShellSdl3Driver.dockBottom(height, namespace)
   )
@@ -49,6 +59,8 @@ proc dockBottom*(
 proc dockLeft*(
     T: typedesc[AppConfig], width: Positive, title = "Nest", namespace = "nest"
 ): T =
+  ## Configure a layer-shell bar docked to the left edge of the screen,
+  ## `width` pixels wide and as tall as the output.
   AppConfig.init(width = width, height = 1, title = title).layerShell(
     layerShellSdl3Driver.dockLeft(width, namespace)
   )
@@ -56,6 +68,8 @@ proc dockLeft*(
 proc dockRight*(
     T: typedesc[AppConfig], width: Positive, title = "Nest", namespace = "nest"
 ): T =
+  ## Configure a layer-shell bar docked to the right edge of the screen,
+  ## `width` pixels wide and as tall as the output.
   AppConfig.init(width = width, height = 1, title = title).layerShell(
     layerShellSdl3Driver.dockRight(width, namespace)
   )
@@ -68,6 +82,11 @@ proc overlayDialog*(
     namespace = "nest-dialog",
     draggable = false,
 ): T =
+  ## Configure a floating overlay dialog of `width` by `height` pixels.
+  ##
+  ## The surface sits on the overlay layer, takes keyboard focus on demand
+  ## and claims no exclusive zone. `draggable` anchors it to the top-left
+  ## corner so the app can move it by changing the surface margins.
   var layerConfig = LayerShellConfig(
       namespace: namespace,
       layer: LayerOverlay,
@@ -83,6 +102,11 @@ proc overlayDialog*(
   AppConfig.init(width = width, height = height, title = title).layerShell(layerConfig)
 
 proc initWindow*(cfg: AppConfig): ScreenLayout =
+  ## Open the window described by `cfg` and return its screen layout.
+  ##
+  ## Initialises either the layer-shell or the ordinary window backend,
+  ## installs the file and directory pickers used by the owl runtime, and
+  ## applies the configured window title.
   if cfg.layerShell:
     layerShellSdl3Driver.layerShellConfig = cfg.layerShellConfig
     initLayerShellSdl3Driver()

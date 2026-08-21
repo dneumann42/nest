@@ -124,6 +124,12 @@ type
     key*: string
 
 macro layoutOnly*(definition: untyped): untyped =
+  ## Pragma macro that turns a routine into a no-op during the event phase.
+  ##
+  ## A frame's declarations run twice, once to dispatch events and once to
+  ## build the widget tree, so anything that only builds widgets carries this
+  ## pragma and returns early while events are being dispatched. The routine
+  ## must take a `UI` as its first parameter.
   result = definition
   if result.kind notin {nnkProcDef, nnkFuncDef, nnkMethodDef}:
     error("layoutOnly can only be used on routines", definition)
@@ -167,6 +173,17 @@ proc cfg*(
     syntax = "",
     style = ComponentStyle(),
 ): BoxConfig =
+  ## Build the configuration shared by Nest's box widgets.
+  ##
+  ## `width` and `height` are size policies, `gap` separates children, and
+  ## `padding` insets the content on every edge; `paddingLeft` and its
+  ## siblings override single edges and default to unset. `alignItems` and
+  ## `justifyContent` place the children, and `alignSelf` places the box
+  ## itself in its parent. `scrollX`, `scrollY` and `scrollbars` control
+  ## scrolling, `textScroll`, `lineNumbers`, `gutterMarkers`, `activeLine`
+  ## and `syntax` configure text widgets, `fontName` and `fontSize` pick the
+  ## font, `buttonPadding` overrides the padding inside buttons, and `style`
+  ## carries an explicit background or opacity.
   var resolvedPadding = insets(padding)
   if paddingLeft == paddingLeft:
     resolvedPadding.left = paddingLeft
@@ -199,16 +216,20 @@ proc cfg*(
   )
 
 proc withBackground*(config: BoxConfig, background: Color): BoxConfig =
+  ## Return `config` with `background` as its explicit background colour.
   result = config
   result.style.hasBackground = true
   result.style.background = background
 
 proc withOpacity*(config: BoxConfig, opacity: float64): BoxConfig =
+  ## Return `config` with `opacity` applied to what it draws.
   result = config
   result.style.hasOpacity = true
   result.style.opacity = opacity
 
 proc init*(T: typedesc[UI]): T =
+  ## Create an empty UI: a fresh layout whose root fills the window, the
+  ## default palette and an empty resource cache.
   var ui = newLayout()
   result = T(
     layout: ui,
@@ -223,10 +244,14 @@ proc init*(T: typedesc[UI]): T =
   )
 
 proc setTheme*(self: var UI; themeName: string) =
+  ## Select the palette the UI draws with, by theme name.
   self.themeName = themeName
   self.context.draw.palette = Palette.init(themeName)
 
 proc initContext*(self: var UI, windowWidth, windowHeight: int) =
+  ## Set the window size the UI lays out against, and load the palette.
+  ##
+  ## Call this once the window exists, before the first frame.
   self.context.update.windowWidth = windowWidth
   self.context.update.windowHeight = windowHeight
   self.context.draw.windowWidth = windowWidth
@@ -234,30 +259,44 @@ proc initContext*(self: var UI, windowWidth, windowHeight: int) =
   self.context.draw.palette = Palette.init(self.themeName)
 
 proc resources*(self: UI): Resources =
+  ## Return the font and image cache shared by the UI's widgets.
   self.context.draw.resources
 
 proc palette*(self: UI): Palette =
+  ## Return the palette the UI is drawing with.
   self.context.draw.palette
 
 proc font*(self: UI, name = "font"): screen.Font =
+  ## Return the backend handle of the font registered as `name`.
   let (font, _) = self.context.draw.resources.get(name)
   screen.Font(font)
 
 proc loadFont*(self: UI, name, path: string, size: Positive) =
+  ## Load the font at `path` at `size` and register it as `name`.
   self.context.draw.resources.loadFont(name, path, size)
 
 proc fontAtSize*(self: var UI, name: string, size: int): string =
+  ## Return the name of the font `name` rendered at `size`, loading that size
+  ## if it is not cached yet.
+  ##
+  ## The returned name can be passed as a `fontName` to any widget.
   self.context.draw.resources.fontAtSize(name, size)
 
 proc windowWidth*(self: UI): int =
+  ## Return the window width the UI is laying out against.
   self.context.draw.windowWidth
 
 proc windowHeight*(self: UI): int =
+  ## Return the window height the UI is laying out against.
   self.context.draw.windowHeight
 
 proc widgetFrame*(
     self: UI, id: WidgetID
 ): tuple[ok: bool, frame: Frame] {.raises: [].} =
+  ## Return the solved frame of the widget with `id`.
+  ##
+  ## `ok` is false, and the frame empty, when no widget in the current frame
+  ## has that id.
   try:
     if self.frameByID.hasKey(id):
       return (true, self.frameByID[id])
@@ -269,24 +308,36 @@ proc widgetFrame*(
   (false, Frame())
 
 proc pointerInputBlocked*(self: UI, x, y: int): bool {.raises: [].} =
+  ## Test whether the point `x`, `y` lands on a surface that swallows pointer
+  ## input, such as an open menu or a floating card.
   for frame in self.pointerBlockFrames:
     if x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
         y.toFloat >= frame.y and y.toFloat < frame.y + frame.height:
       return true
 
 proc pointerOverUi*(self: UI, x, y: int): bool {.raises: [].} =
+  ## Test whether the point `x`, `y` lands on the UI rather than on what is
+  ## behind it. Equivalent to `pointerInputBlocked`.
   self.pointerInputBlocked(x, y)
 
 proc pointerOverInteractive*(self: UI, x, y: int): bool {.raises: [].} =
+  ## Test whether the point `x`, `y` lands on an interactive widget, so a
+  ## host application can leave that input to the UI.
   for frame in self.pointerInteractiveFrames:
     if x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
         y.toFloat >= frame.y and y.toFloat < frame.y + frame.height:
       return true
 
 proc wantsTextInput*(self: UI): bool =
+  ## Test whether a widget holds keyboard focus, which is when the backend
+  ## should be asked for text input.
   self.context.draw.focusedWidget != InvalidWidgetID
 
 proc requestRedrawAfter*(self: var UI, ms: int) =
+  ## Ask for another frame in at most `ms` milliseconds.
+  ##
+  ## The soonest outstanding request wins, so an animation can keep asking
+  ## for the next frame without postponing a sooner one.
   let now =
     if self.context.draw.ticks > 0:
       self.context.draw.ticks
@@ -304,51 +355,73 @@ proc requestRedrawAfterSafe(self: var UI, ms: int) {.raises: [].} =
     discard
 
 proc redrawDelayMs*(self: UI): int =
+  ## Return the milliseconds until the scheduled redraw, or -1 when none is
+  ## scheduled.
   if not self.hasScheduledRedraw:
     return -1
   max(self.scheduledRedrawTicks - input.getTicks(), 0)
 
 proc clearRedrawRequest*(self: var UI) {.raises: [].} =
+  ## Forget the scheduled redraw.
   self.hasScheduledRedraw = false
 
 proc markAllDirty*(self: var UI) {.raises: [].} =
+  ## Mark the whole frame as needing to be redrawn.
   self.context.draw.dirtyAll = true
 
 proc markDirty*(self: var UI, id: WidgetID) {.raises: [].} =
+  ## Mark one widget as needing to be redrawn. Ignores `InvalidWidgetID`.
   if id != InvalidWidgetID:
     self.context.draw.dirtyWidgets.incl id
 
 proc markRealtime*(self: var UI, id: WidgetID) {.raises: [].} =
+  ## Mark a widget as animating, so it is redrawn every frame for as long as
+  ## it stays in the tree. Ignores `InvalidWidgetID`.
   if id != InvalidWidgetID:
     self.liveRealtimeWidgetIDs.incl id
 
 proc hasRealtimeWidgets*(self: UI): bool {.raises: [].} =
+  ## Test whether the retained frame holds any animating widget.
   self.retainedRealtimeWidgets.len > 0
 
 proc redrewFrame*(self: UI): bool {.raises: [].} =
+  ## Test whether the last frame actually drew anything, which decides
+  ## whether the window needs presenting.
   self.frameRedrawn
 
 proc hasPendingWidgetEvents*(self: UI): bool {.raises: [].} =
+  ## Test whether an interaction is still in flight: a widget held active,
+  ## one submitted this frame, or a middle-button drag.
   self.context.draw.activeWidgets.len > 0 or
       self.context.draw.submittedWidgets.len > 0 or
       self.context.draw.middleDragging != InvalidWidgetID
 
 proc hasPendingInput*(self: UI): bool {.raises: [].} =
+  ## Test whether there is input the UI has not consumed yet.
   self.inputPending or self.hasPendingWidgetEvents()
 
 proc hasPendingFullRenderInput*(self: UI): bool {.raises: [].} =
+  ## Test whether there is input that forces a full redraw rather than an
+  ## incremental one.
   self.fullRenderInputPending or self.hasPendingWidgetEvents()
 
 proc needsFullRender*(self: UI): bool {.raises: [].} =
+  ## Test whether anything has been marked dirty since the last draw.
   self.context.draw.dirtyAll or self.context.draw.dirtyWidgets.len > 0
 
 proc hasRetainedFrame*(self: UI): bool {.raises: [].} =
+  ## Test whether a retained frame is available to redraw from.
   self.retainedFrameValid
 
 proc setDrawTicks*(self: var UI, ticks: int) =
+  ## Set the tick count the frame is drawn at, which animations measure
+  ## time against.
   self.context.draw.ticks = ticks
 
 proc setDrawCommands*(self: var UI, commands: ptr seq[DrawCommand]) =
+  ## Record drawing into `commands` instead of issuing it to the backend.
+  ##
+  ## Pass nil to go back to drawing directly.
   self.context.draw.drawCommands = commands
 
 proc setDrawCommandRelays*(
@@ -357,68 +430,98 @@ proc setDrawCommandRelays*(
     measureText: proc(f: Font, text: string): TextExtent {.nimcall.},
     measureImage: proc(path: string): TextExtent {.nimcall.},
 ) =
+  ## Record drawing into `commands`, and measure text and images through
+  ## `measureText` and `measureImage`.
+  ##
+  ## Recording needs its own measuring hooks, because the backend is not
+  ## being touched while the frame is captured.
   self.context.draw.drawCommands = commands
   self.context.draw.commandMeasureText = measureText
   self.context.draw.commandMeasureImage = measureImage
 
 proc setIO*(self: var UI, io: IO) =
+  ## Install the host hooks widgets reach the outside world through, such as
+  ## file pickers.
   self.context.draw.io = io
 
 proc io*(self: UI): IO =
+  ## Return the host hooks installed with `setIO`.
   self.context.draw.io
 
 proc pick*(files: FileIO, id: WidgetID, defaultLocation = ""): bool {.discardable.} =
+  ## Start the host's file picker for the widget `id`, starting at
+  ## `defaultLocation`.
+  ##
+  ## Returns false when the host installed no picker.
   if files.openFile.isNil:
     false
   else:
     files.openFile(id, defaultLocation.cstring)
 
 proc value*(files: FileIO, id: WidgetID): string =
+  ## Return the path the picker for `id` produced, or an empty string.
   if files.fileValue.isNil:
     ""
   else:
     $files.fileValue(id)
 
 proc error*(files: FileIO, id: WidgetID): string =
+  ## Return the error the picker for `id` reported, or an empty string.
   if files.fileError.isNil:
     ""
   else:
     $files.fileError(id)
 
 proc clear*(files: FileIO, id: WidgetID) =
+  ## Forget the picker result stored for `id`.
   if not files.clearFile.isNil:
     files.clearFile(id)
 
 proc openDialog*(self: var UI, open: var bool) =
+  ## Open the dialog `open` tracks and ask for a redraw.
   open = true
   self.requestRedrawAfter(0)
 
 proc closeDialog*(self: var UI, open: var bool) =
+  ## Close the dialog `open` tracks and ask for a redraw.
   open = false
   self.requestRedrawAfter(0)
 
 proc toggleDialog*(self: var UI, open: var bool): bool {.discardable.} =
+  ## Flip the dialog `open` tracks, ask for a redraw, and return its new
+  ## state.
   open = not open
   self.requestRedrawAfter(0)
-  open
+  result = open
 
 proc returnDialog*(
     self: var UI, key, value: string, open: var bool
 ): string {.discardable.} =
+  ## Close the dialog `open` tracks, storing `value` as its result under
+  ## `key`, and return `value`.
   self.dialogResults[key] = value
   self.closeDialog(open)
   value
 
 proc hasDialogResult*(self: UI, key: string): bool =
+  ## Test whether a dialog has stored a result under `key`.
   self.dialogResults.hasKey(key)
 
 proc dialogResult*(self: UI, key: string): string =
+  ## Return the result stored under `key`, or an empty string.
   self.dialogResults.getOrDefault(key)
 
 proc clearDialogResult*(self: var UI, key: string) =
+  ## Forget the dialog result stored under `key`.
   self.dialogResults.del key
 
 proc setRenderKey*(self: var UI, id: WidgetID, key: string) =
+  ## Record what the widget `id` renders as, so the UI can tell when it needs
+  ## redrawing.
+  ##
+  ## A widget whose key changed is marked dirty; a widget seen for the first
+  ## time only marks itself, while a changed key marks the whole frame, since
+  ## it may have changed the layout around it.
   let previous = self.renderKeys.getOrDefault(id)
   if previous != key:
     if previous.len > 0:
@@ -448,6 +551,8 @@ proc renderKey(kind: string, width, height: SizePolicy,
   kind & "|" & $width & "|" & $height & "|" & $alignSelf
 
 proc beginInputFrame*(self: var UI) =
+  ## Start collecting a frame's input, clearing what the last frame left
+  ## behind.
   self.context.update.keyInputs.setLen(0)
   self.context.update.textInputs.setLen(0)
   self.context.update.mouseWheelX = 0
@@ -459,6 +564,8 @@ proc beginInputFrame*(self: var UI) =
   self.context.update.mouseRightPressed = false
 
 proc finishInputFrame*(self: var UI) =
+  ## Finish a frame's input, clearing the one-shot state so a press or a key
+  ## is not delivered twice.
   self.context.update.mouseLeftPressed = false
   self.context.update.mouseMiddlePressed = false
   self.context.update.mouseRightPressed = false
@@ -473,6 +580,7 @@ proc finishInputFrame*(self: var UI) =
   self.fullRenderInputPending = false
 
 proc mouseMove*(self: var UI, x, y: int) =
+  ## Report the pointer moving to `x`, `y`.
   self.inputPending = true
   self.context.update.mouseX = x
   self.context.update.mouseY = y
@@ -480,6 +588,8 @@ proc mouseMove*(self: var UI, x, y: int) =
   self.context.draw.mouseY = y
 
 proc mouseDown*(self: var UI) =
+  ## Report the left button going down; the frame it goes down on counts as a
+  ## press.
   self.inputPending = true
   self.fullRenderInputPending = true
   let last = self.context.update.mouseLeftDown
@@ -487,12 +597,14 @@ proc mouseDown*(self: var UI) =
   self.context.update.mouseLeftPressed = not last
 
 proc mouseUp*(self: var UI) =
+  ## Report the left button coming up, which also ends a slider drag.
   self.inputPending = true
   self.fullRenderInputPending = true
   self.context.update.mouseLeftDown = false
   self.context.update.sliderDragging = InvalidWidgetID
 
 proc mouseMiddleDown*(self: var UI) =
+  ## Report the middle button going down.
   self.inputPending = true
   self.fullRenderInputPending = true
   let last = self.context.update.mouseMiddleDown
@@ -500,6 +612,8 @@ proc mouseMiddleDown*(self: var UI) =
   self.context.update.mouseMiddlePressed = not last
 
 proc mouseMiddleUp*(self: var UI) =
+  ## Report the middle button coming up, which also ends a middle-button
+  ## drag.
   self.inputPending = true
   self.fullRenderInputPending = true
   self.context.update.mouseMiddleDown = false
@@ -507,11 +621,14 @@ proc mouseMiddleUp*(self: var UI) =
   self.context.draw.middleDragging = InvalidWidgetID
 
 proc mouseRightDown*(self: var UI) =
+  ## Report the right button going down.
   self.inputPending = true
   self.fullRenderInputPending = true
   self.context.update.mouseRightPressed = true
 
 proc resizeWindow*(self: var UI, width, height: int) =
+  ## Report the window being resized to `width` by `height`; negative sizes
+  ## clamp to zero.
   self.inputPending = true
   self.fullRenderInputPending = true
   self.context.update.windowWidth = max(width, 0)
@@ -520,17 +637,20 @@ proc resizeWindow*(self: var UI, width, height: int) =
   self.context.draw.windowHeight = self.context.update.windowHeight
 
 proc keyDown*(self: var UI, key: KeyCode, mods: set[Modifier]) =
+  ## Report `key` being pressed with the modifiers `mods` held.
   self.inputPending = true
   self.fullRenderInputPending = true
   self.context.update.keyInputs.add KeyInput(key: key, mods: mods)
 
 proc textInput*(self: var UI, text: string) =
+  ## Report typed `text`. Empty text is ignored.
   if text.len > 0:
     self.inputPending = true
     self.fullRenderInputPending = true
     self.context.update.textInputs.add text
 
 proc mouseWheel*(self: var UI, x, y: float64) =
+  ## Report wheel movement, accumulated over the frame.
   self.inputPending = true
   self.fullRenderInputPending = true
   self.context.update.mouseWheelX += x
@@ -552,6 +672,11 @@ proc keyedWidgetID(parts: openArray[string]): WidgetID =
   WidgetID(0x8000_0000_0000_0000'u64 or stableHash(text))
 
 proc id*(self: UI, parts: varargs[string, `$`]): WidgetID =
+  ## Return the widget id named by `parts`.
+  ##
+  ## Ids are hashed from the parts and the enclosing `scope`, so the same
+  ## name yields the same id every frame, which is what lets a widget keep
+  ## its state across frames.
   var scoped = self.idScopes
   if parts.len == 0 and scoped.len == 0:
     scoped.add "_nest_empty_id"
@@ -562,6 +687,8 @@ proc id*(self: UI, parts: varargs[string, `$`]): WidgetID =
 
 proc scopedID*(self: var UI, parent: WidgetID,
     parts: varargs[string, `$`]): WidgetID =
+  ## Return the widget id named by `parts` inside the scope of `parent`,
+  ## without disturbing the current scope.
   self.idScopes.add($parent)
   try:
     self.id(parts)
@@ -569,11 +696,19 @@ proc scopedID*(self: var UI, parent: WidgetID,
     self.idScopes.setLen(self.idScopes.len - 1)
 
 proc nextAutoID*(self: var UI): WidgetID =
+  ## Return a generated id for a widget the caller did not name.
+  ##
+  ## The counter restarts each frame, so an unnamed widget keeps its id only
+  ## as long as the declarations around it are unchanged.
   let key = "_nest_auto_id:" & $self.autoIDCounter
   inc self.autoIDCounter
   self.id(key)
 
 template scope*(self: var UI, key: untyped, body: untyped) =
+  ## Run `body` with `key` pushed onto the id scope.
+  ##
+  ## Every id built inside is qualified by `key`, which is how the same
+  ## component can be declared more than once without its widgets colliding.
   block:
     self.idScopes.add($key)
     try:
@@ -583,6 +718,9 @@ template scope*(self: var UI, key: untyped, body: untyped) =
       self.idScopes.setLen(self.idScopes.len - 1)
 
 template autoScoped*(self: var UI, body: untyped) =
+  ## Run `body` in a scope named by a generated id, injected as `autoID`.
+  ##
+  ## This is how the unnamed widget overloads keep their children apart.
   block:
     let autoID {.inject.} = self.nextAutoID()
     self.scope(autoID):
@@ -596,9 +734,14 @@ proc beginEvents(self: var UI, context: DrawContext) =
   self.eventFocusedWidget = context.focusedWidget
 
 proc active*(self: UI, id: WidgetID): bool =
+  ## Test whether the widget `id` is being pressed.
   id in self.eventActiveWidgets
 
 proc clicked*(self: UI, id: WidgetID): bool =
+  ## Test whether the widget `id` was clicked.
+  ##
+  ## True while the widget is held pressed, which is what the widget helpers
+  ## return from the event phase.
   self.active(id)
 
 proc dragWindow*(self: var UI, id: WidgetID) =
@@ -629,6 +772,8 @@ proc dragWindow*(self: var UI, id: WidgetID) =
     self.windowDragLastY = self.context.update.mouseY
 
 proc rightClicked*(self: UI, id: WidgetID): bool =
+  ## Test whether the right button was pressed over the widget `id` this
+  ## frame. Only reports during the event phase.
   if self.phase != EventPhase or not self.context.update.mouseRightPressed:
     return false
   let located = self.widgetFrame(id)
@@ -639,6 +784,8 @@ proc rightClicked*(self: UI, id: WidgetID): bool =
     self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
 
 proc middleClicked*(self: UI, id: WidgetID): bool =
+  ## Test whether the middle button was pressed over the widget `id` this
+  ## frame. Only reports during the event phase.
   if self.phase != EventPhase or not self.context.update.mouseMiddlePressed:
     return false
   let located = self.widgetFrame(id)
@@ -650,6 +797,11 @@ proc middleClicked*(self: UI, id: WidgetID): bool =
 
 proc middleDragDelta*(self: var UI, id: WidgetID):
     tuple[active: bool, started: bool, deltaX: int] =
+  ## Report a middle-button drag on the widget `id`.
+  ##
+  ## `active` is true while the drag is in progress, `started` only on the
+  ## frame it begins, and `deltaX` is the horizontal distance from where it
+  ## started. Only reports during the event phase.
   if self.phase != EventPhase:
     return (false, false, 0)
   let located = self.widgetFrame(id)
@@ -672,29 +824,40 @@ proc middleDragDelta*(self: var UI, id: WidgetID):
   (false, false, 0)
 
 proc submitted*(self: UI, id: WidgetID): bool =
+  ## Test whether the widget `id` was submitted, as a line input is by the
+  ## Enter key.
   id in self.eventSubmittedWidgets
 
 proc sliderValue*(self: UI, id: WidgetID): tuple[active: bool, value: float64] =
+  ## Report the value of the slider `id` while it is being dragged.
+  ##
+  ## `active` is false, and the value zero, when this slider is not the one
+  ## being dragged.
   if self.phase == EventPhase and self.context.draw.sliderDragging == id and
       self.context.draw.sliderValues.hasKey(id):
     return (true, self.context.draw.sliderValues[id])
   (false, 0.0)
 
 proc focused*(self: UI, id: WidgetID): bool =
+  ## Test whether the widget `id` holds keyboard focus.
   self.eventFocusedWidget == id
 
 proc focus*(self: var UI, id: WidgetID) =
+  ## Give keyboard focus to the widget `id`.
   self.context.update.focusedWidget = id
   self.context.draw.focusedWidget = id
   self.eventFocusedWidget = id
 
 proc liveWidget*(self: UI, id: WidgetID): bool =
+  ## Test whether the widget `id` was declared in the current frame.
   id in self.liveWidgetIDs
 
 proc inEventPhase*(self: UI): bool =
+  ## Test whether the UI is dispatching events rather than building widgets.
   self.phase == EventPhase
 
 proc inLayoutPhase*(self: UI): bool =
+  ## Test whether the UI is building widgets rather than dispatching events.
   self.phase == LayoutPhase
 
 proc normalizedKeyName(value: string): string =
@@ -703,6 +866,11 @@ proc normalizedKeyName(value: string): string =
       result.add toLowerAscii(ch)
 
 proc keyPressed*(self: UI, name: string): bool =
+  ## Test whether the key called `name` was pressed this frame.
+  ##
+  ## Names ignore case, spaces, dashes and underscores and may leave off the
+  ## `Key` prefix, so `Escape`, `esc` and `KeyEsc` all match the same key.
+  ## Only reports during the event phase.
   if self.phase != EventPhase:
     return false
   let wanted = normalizedKeyName(name)
@@ -716,6 +884,9 @@ proc keyPressed*(self: UI, name: string): bool =
       return true
 
 proc listKey*(index: int, value: string): string =
+  ## Return the list key identifying the item `value` at `index`.
+  ##
+  ## Used to give list rows stable widget ids.
   $index & ":" & value
 
 proc listItems*[T](
@@ -723,32 +894,49 @@ proc listItems*[T](
     key: proc(item: T, index: int): string,
     filter: proc(item: T, index: int): bool = nil,
 ): seq[ListItem[T]] =
+  ## Turn `items` into list items, each carrying its index, its `key` and the
+  ## item itself.
+  ##
+  ## `filter` selects which items to keep; passing nil keeps them all. The
+  ## keys are what the rows' widget ids are built from, so they should stay
+  ## with an item as the list is reordered.
   for index, item in items:
     if filter.isNil or filter(item, index):
       result.add ListItem[T](index: index, key: key(item, index), value: item)
 
 proc editLineState*(): EditLineState =
+  ## Create the state of an in-place line editor, with nothing being edited.
   EditLineState(input: LineInputState.new(""), inputID: nextWidgetID(), key: "")
 
 proc editing*(state: EditLineState): bool =
+  ## Test whether an in-place edit is in progress.
   state.key.len > 0
 
 proc editing*(state: EditLineState, key: string): bool =
+  ## Test whether the row `key` is the one being edited.
   state.key == key
 
 proc beginEdit*(state: var EditLineState, key, value: string) =
+  ## Begin editing the row `key`, seeding the editor with `value` and putting
+  ## the cursor at its end.
   state.key = key
   state.input.text = value
   state.input.cursor = value.len
 
 proc cancelEdit*(state: var EditLineState) =
+  ## Abandon the edit in progress, discarding what was typed.
   state.key = ""
 
 proc saveEdit*(state: var EditLineState): string =
+  ## Finish the edit and return the edited text.
   result = state.input.text
   state.cancelEdit()
 
 proc reset*(self: var UI) =
+  ## Throw the widget tree away and start over with an empty root.
+  ##
+  ## The root keeps its id, so a UI can be rebuilt from scratch without every
+  ## widget underneath it changing identity.
   let rootID =
     if self.root.id == InvalidWidgetID:
       nextWidgetID()
@@ -777,6 +965,11 @@ proc reset*(self: var UI) =
   self.phase = LayoutPhase
 
 proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
+  ## Begin a frame's layout against a window of `windowWidth` by
+  ## `windowHeight`.
+  ##
+  ## Clears the previous frame's widgets and reopens the root as the current
+  ## parent. Widget declarations go between this and `endLayout`.
   self.autoIDCounter = 0
   self.layout.root(self.root)
   self.parent = self.root
@@ -1238,6 +1431,12 @@ proc assignDirectStack(
         self.assignDirectStack(pendingByParent[child.id], pendingByParent)
 
 proc endLayout*(self: var UI): bool {.discardable.} =
+  ## Finish the frame's layout, solve it, and report whether it worked.
+  ##
+  ## Applies the row, column and overlay arrangements collected while the
+  ## frame was declared, places floating widgets over the rest, and solves
+  ## the constraint system. Returns false when the constraints turned out to
+  ## be unsatisfiable, leaving the previous solution in place.
   if self.frames.len == 1 and self.frames[0].children.len > 0:
     let children = self.frames[0].children
     self.pendingLayouts.add PendingLayout(
@@ -1446,6 +1645,12 @@ proc popFloatingLayout(self: var UI): Widget =
   self.parent = self.currentParent()
 
 template slot*(self: var UI, body: untyped): WidgetSlot =
+  ## Capture the widgets declared in `body` instead of adding them to the
+  ## current parent.
+  ##
+  ## The captured widgets can then be handed to `place`, which is how a
+  ## container fills its named slots. Yields an empty slot during the event
+  ## phase, where no widgets are built.
   block:
     if self.phase == EventPhase:
       body
@@ -1459,6 +1664,10 @@ template slot*(self: var UI, body: untyped): WidgetSlot =
       captured
 
 template singleSlot*(self: var UI, body: untyped): Widget =
+  ## Capture exactly one widget declared in `body`.
+  ##
+  ## Raises `ValueError` when `body` declared anything other than a single
+  ## widget.
   block:
     let captured {.gensym.} = self.slot:
       body
@@ -1469,17 +1678,26 @@ template singleSlot*(self: var UI, body: untyped): Widget =
     captured[0]
 
 proc place*(self: var UI, slot: WidgetSlot) {.layoutOnly.} =
+  ## Add the widgets captured in `slot` to the current parent.
   self.addChildren(slot)
 
 proc place*(self: var UI, widget: Widget) {.layoutOnly.} =
+  ## Add a captured `widget` to the current parent.
   self.addChild(widget)
 
 proc attach*(self: var UI, widget: Widget,
     component: Component) {.layoutOnly.} =
+  ## Attach `component` to `widget`, making it what the widget measures,
+  ## updates and draws as.
   self.components.add((component, widget))
   self.componentByID[widget.id] = component
 
 proc applyIntrinsicSizes*(self: UI, resources: Resources) =
+  ## Measure every component whose widget fits its content and constrain the
+  ## widget to that size.
+  ##
+  ## Call this after the frame's widgets are declared and before solving, so
+  ## `fit` policies have something to resolve to.
   for (component, widget) in self.components:
     if not widget.fitWidth and not widget.fitHeight:
       continue
@@ -1491,6 +1709,10 @@ proc applyIntrinsicSizes*(self: UI, resources: Resources) =
       discard self.layout.constrain(widget.height == size.height)
 
 template events*(self: var UI, body: untyped) =
+  ## Run `body` only while events are being dispatched.
+  ##
+  ## Use it for the frame's event handling, which would otherwise run a
+  ## second time as the widget tree is built.
   if self.phase == EventPhase:
     body
 
@@ -1531,6 +1753,12 @@ template layout*(
     drawContext: var DrawContext,
     blk: untyped,
 ): auto =
+  ## Run one frame of the UI against explicit update and draw contexts.
+  ##
+  ## `blk` is the frame's declarations, and is run twice: once to dispatch
+  ## events and once to build the widget tree, which is then solved, updated
+  ## and drawn. Use the single-context overload unless the caller keeps its
+  ## own contexts.
   # This could totally be done at compile time, the only reason I am
   # avoiding doing that, is I want to allow loading ui from a dynamic module
   let previousDrawCommands {.gensym.} = screen.drawCommands
@@ -1592,6 +1820,13 @@ template layout*(
   ui.reset()
 
 template layout*(ui: var UI, blk: untyped): auto =
+  ## Run one frame of the UI.
+  ##
+  ## `blk` is the frame's declarations, and is run twice: once to dispatch
+  ## events and once to build the widget tree. The tree is then solved,
+  ## updated against this frame's input, and drawn, either fully or as an
+  ## incremental redraw of what changed. Evaluates to whether the layout
+  ## succeeded.
   let previousDrawCommands {.gensym.} = screen.drawCommands
   let previousCommandMeasureText {.gensym.} = screen.commandMeasureText
   let previousCommandMeasureImage {.gensym.} = screen.commandMeasureImage
@@ -1745,11 +1980,17 @@ proc updateWidgetTree(
     self.updateWidgetTree(child, components, context, childClipped)
 
 proc update*(self: var UI, context: var UpdateContext) =
+  ## Update every component in the tree against `context`, floating widgets
+  ## included.
   self.updateWidgetTree(self.root, self.componentByID, context)
   for widget in self.floatingWidgets:
     self.updateWidgetTree(widget, self.componentByID, context)
 
 proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
+  ## Draw the widget tree into `context` and report whether anything was
+  ## drawn.
+  ##
+  ## Returns false without drawing when nothing has been marked dirty.
   if not context.dirtyAll and context.dirtyWidgets.len == 0:
     return false
 
@@ -1843,6 +2084,10 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
   true
 
 proc drawRealtime*(self: var UI): bool {.discardable.} =
+  ## Redraw only the animating widgets of the retained frame, and report
+  ## whether anything was drawn.
+  ##
+  ## Returns false when the retained frame holds no animating widget.
   if self.retainedRealtimeWidgets.len == 0:
     return false
 
@@ -1953,6 +2198,10 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
   self.scrollContainers = scrollContainers
 
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
+  ## Arrange the current parent's children in a row.
+  ##
+  ## The `row` template is the usual way to declare one; this is the
+  ## arrangement step on its own.
   let components = self.takeChildren()
   self.pendingLayouts.add PendingLayout(
     kind: RowLayout,
@@ -1967,6 +2216,10 @@ proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   )
 
 proc column*(self: var UI, config: BoxConfig) {.layoutOnly.} =
+  ## Arrange the current parent's children in a column.
+  ##
+  ## The `column` template is the usual way to declare one; this is the
+  ## arrangement step on its own.
   let components = self.takeChildren()
   self.pendingLayouts.add PendingLayout(
     kind: ColumnLayout,
@@ -1981,6 +2234,10 @@ proc column*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   )
 
 proc overlay*(self: var UI, config: BoxConfig) {.layoutOnly.} =
+  ## Stack the current parent's children on top of each other.
+  ##
+  ## The `overlay` template is the usual way to declare one; this is the
+  ## arrangement step on its own.
   let components = self.takeChildren()
   self.pendingLayouts.add PendingLayout(
     kind: OverlayLayout,
@@ -1995,6 +2252,8 @@ proc overlay*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   )
 
 template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+  ## Declare a row widget with the id `id`, laying the widgets declared in
+  ## `body` out left to right as configured by `config`.
   block:
     if self.phase == EventPhase:
       body
@@ -2012,6 +2271,7 @@ template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard self.popLayout()
 
 template row*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   block:
     if self.phase == EventPhase:
       body
@@ -2022,6 +2282,8 @@ template row*(self: var UI, config: BoxConfig, body: untyped) =
       self.row(config)
 
 template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+  ## Declare a column widget with the id `id`, laying the widgets declared in
+  ## `body` out top to bottom as configured by `config`.
   block:
     if self.phase == EventPhase:
       body
@@ -2039,6 +2301,7 @@ template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard self.popLayout()
 
 template column*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   block:
     if self.phase == EventPhase:
       body
@@ -2050,6 +2313,8 @@ template column*(self: var UI, config: BoxConfig, body: untyped) =
 
 template overlay*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare an overlay widget with the id `id`, stacking the widgets
+  ## declared in `body` on top of each other as configured by `config`.
   block:
     if self.phase == EventPhase:
       body
@@ -2067,6 +2332,7 @@ template overlay*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 template overlay*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   block:
     if self.phase == EventPhase:
       body
@@ -2078,6 +2344,10 @@ template overlay*(self: var UI, config: BoxConfig, body: untyped) =
 
 template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
     body: untyped) =
+  ## Declare a box with the id `id` of size `w` by `h` that centres the single
+  ## widget declared in `body`.
+  ##
+  ## Raises `ValueError` when `body` declared anything other than one widget.
   block:
     if self.phase == EventPhase:
       body
@@ -2103,11 +2373,14 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
       discard self.popLayout()
 
 template center*(self: var UI, w = fill(), h = fill(), body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   self.autoScoped:
     self.center(autoID, w, h):
       body
 
 template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+  ## Declare a panel with the id `id`: a background surface holding the
+  ## widgets declared in `body` as a column.
   block:
     if self.phase == EventPhase:
       body
@@ -2128,11 +2401,16 @@ template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard self.popLayout()
 
 template panel*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   self.autoScoped:
     self.panel(autoID, config):
       body
 
 template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+  ## Declare a card with the id `id`: a raised, bordered surface holding the
+  ## widgets declared in `body` as a column.
+  ##
+  ## A card also swallows pointer presses that land on it.
   block:
     if self.phase == EventPhase:
       body
@@ -2153,6 +2431,7 @@ template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard self.popLayout()
 
 template card*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   self.autoScoped:
     self.card(autoID, config):
       body
@@ -2160,6 +2439,12 @@ template card*(self: var UI, config: BoxConfig, body: untyped) =
 template floatingCardBelow*(
     self: var UI, id: WidgetID, anchorID: WidgetID, config: BoxConfig, body: untyped
 ) =
+  ## Declare a floating card with the id `id`, positioned under the widget
+  ## `anchorID`.
+  ##
+  ## The card is laid out over the rest of the frame rather than among its
+  ## siblings, which is what a dropdown or a popover needs, and holds the
+  ## widgets declared in `body` as a column.
   block:
     if self.phase == EventPhase:
       body
@@ -2186,6 +2471,8 @@ template floatingCardBelow*(
 
 template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare a dialog header with the id `id`, holding the widgets declared in
+  ## `body`.
   block:
     if self.phase == EventPhase:
       body
@@ -2206,6 +2493,7 @@ template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 template dialogHeader*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id, so the widgets inside stay distinct from those of any other unnamed box.
   self.autoScoped:
     self.dialogHeader(autoID, config):
       body
@@ -2213,6 +2501,11 @@ template dialogHeader*(self: var UI, config: BoxConfig, body: untyped) =
 template modalDialog*(
     self: var UI, id: WidgetID, open: bool, config: BoxConfig, body: untyped
 ) =
+  ## Declare a modal dialog with the id `id`, shown while `open` is true.
+  ##
+  ## The dialog is laid out over the rest of the frame and centred in the
+  ## window, holding the widgets declared in `body` as a column. Nothing is
+  ## declared at all while `open` is false.
   block:
     if open:
       if self.phase == EventPhase:
@@ -2242,6 +2535,8 @@ template modalDialog*(
 
 template menuBar*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare a menu bar with the id `id`, laying the entries declared in
+  ## `body` out as a row.
   block:
     if self.phase == EventPhase:
       body
@@ -2262,11 +2557,13 @@ template menuBar*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 template menuBar*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.autoScoped:
     self.menuBar(autoID, config):
       body
 
 template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
+  ## Declare a table with the id `id`, holding the rows declared in `body`.
   block:
     if self.phase == EventPhase:
       body
@@ -2287,12 +2584,15 @@ template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
       discard self.popLayout()
 
 template table*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.autoScoped:
     self.table(autoID, config):
       body
 
 template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare a table header with the id `id`, holding the header cells
+  ## declared in `body` as a row.
   block:
     if self.phase == EventPhase:
       body
@@ -2313,12 +2613,15 @@ template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 template tableHeader*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.autoScoped:
     self.tableHeader(autoID, config):
       body
 
 template tableRow*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare a table row with the id `id`, holding the cells declared in
+  ## `body` as a row.
   block:
     if self.phase == EventPhase:
       body
@@ -2339,12 +2642,15 @@ template tableRow*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 template tableRow*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.autoScoped:
     self.tableRow(autoID, config):
       body
 
 template tableCell*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare a table cell with the id `id`, holding the widgets declared in
+  ## `body`.
   block:
     if self.phase == EventPhase:
       body
@@ -2365,6 +2671,7 @@ template tableCell*(self: var UI, id: WidgetID, config: BoxConfig,
       discard self.popLayout()
 
 template tableCell*(self: var UI, config: BoxConfig, body: untyped) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.autoScoped:
     self.tableCell(autoID, config):
       body
@@ -2372,6 +2679,10 @@ template tableCell*(self: var UI, config: BoxConfig, body: untyped) =
 proc box*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget =
+  ## Create a box widget with the id `id` and mark it live for this frame.
+  ##
+  ## The box is not added to the current parent; the widget helpers do that
+  ## once they have attached a component to it.
   self.liveWidgetIDs.incl id
   self.layout.box(id, width = width, height = height).withAlignSelf(alignSelf)
 
@@ -2382,6 +2693,10 @@ proc container*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): Widget {.discardable, layoutOnly.} =
+  ## Declare a container widget with the id `id` and `component` attached, and
+  ## return it.
+  ##
+  ## Containers hold other widgets in their slots; see `slot` and `place`.
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
   self.setRenderKey(id, renderKey("container", width, height, alignSelf))
   self.attach(result, Component(component))
@@ -2395,6 +2710,11 @@ proc component*(
     alignSelf = AlignAuto,
     renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
+  ## Declare a widget with the id `id` and `component` attached, and return it.
+  ##
+  ## `renderKeyOverride` replaces the key used to decide when the widget
+  ## needs redrawing, which a component whose appearance depends on more than
+  ## its size and alignment needs to supply.
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
   let key =
     if renderKeyOverride.len > 0:
@@ -2408,6 +2728,7 @@ proc component*(
 proc spacer*(
     self: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget {.discardable, layoutOnly.} =
+  ## Declare an empty box that only takes up space.
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
   self.setRenderKey(id, renderKey("spacer", width, height, alignSelf))
   self.addChild(result)
@@ -2423,6 +2744,11 @@ proc button*(
     buttonPadding = insets(-1.0),
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Declare a button with the id `id` labelled `label`.
+  ##
+  ## Returns true on the frame it is clicked. `textScroll` lets a label wider
+  ## than the button scroll, `buttonPadding` overrides the insets around the
+  ## text, and `style` sets an explicit background or opacity.
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -2452,6 +2778,7 @@ proc button*(
     buttonPadding: float64,
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Declare a button with the same `buttonPadding` on every edge.
   ui.button(
     id,
     label,
@@ -2471,6 +2798,10 @@ proc menu*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Declare a menu bar entry with the id `id` labelled `label`.
+  ##
+  ## Returns true on the frame it is clicked, which is when the caller should
+  ## open or close its menu.
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -2480,6 +2811,8 @@ proc menu*(
 
 template menuItem*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
+  ## Declare a menu item with the id `id`, holding the widgets declared in
+  ## `body`.
   block:
     if self.phase == EventPhase:
       body
@@ -2502,6 +2835,7 @@ template menuItem*(self: var UI, id: WidgetID, config: BoxConfig,
 proc menuDivider*(
     ui: var UI, id: WidgetID, width, height: SizePolicy, alignSelf = AlignAuto
 ) {.layoutOnly.} =
+  ## Declare a divider between two groups of menu items.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(id, renderKey("menuDivider", width, height, alignSelf))
   ui.attach(box, Component(MenuDivider.new()))
@@ -2514,6 +2848,7 @@ proc button*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Declare a button whose id is built from the name `key`.
   ui.button(ui.id(key), label, width, height, alignSelf)
 
 proc tabs*(
@@ -2529,6 +2864,10 @@ proc tabs*(
     style = ComponentStyle(),
     tabStyle = TabStyle(),
 ) =
+  ## Declare a row of tabs with the id `id`, one per entry in `labels`.
+  ##
+  ## `selected` indexes the current tab; it is clamped into range and set to
+  ## the tab the user picks. Does nothing when `labels` is empty.
   if labels.len == 0:
     return
   selected = max(min(selected, labels.len - 1), 0)
@@ -2581,6 +2920,10 @@ proc label*(
     alignSelf = AlignAuto,
     textScroll = false,
 ) {.layoutOnly.} =
+  ## Declare a text label with the id `id`.
+  ##
+  ## `textScroll` lets text wider than the widget scroll rather than be
+  ## clipped.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
@@ -2601,6 +2944,10 @@ proc checkbox*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Declare a checkbox with the id `id` labelled `label`, drawn as `checked`.
+  ##
+  ## The caller owns the checked state; use `clicked` on the same id to flip
+  ## it.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
@@ -2623,6 +2970,7 @@ proc coloredLabel*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Declare a text label with the id `id` drawn in `color`.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
@@ -2644,6 +2992,11 @@ proc diagnosticLabel*(
     fontName = "font",
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Declare a diagnostic label with the id `id` drawn in `color`.
+  ##
+  ## With `clickable`, the label highlights under the pointer and returns
+  ## true on the frame it is clicked, which suits a compiler message that
+  ## opens its source location.
   if ui.phase == EventPhase:
     return clickable and ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -2667,6 +3020,7 @@ proc image*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Declare an image widget with the id `id` showing the image at `path`.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(id, renderKey("image:" & path, width, height, alignSelf))
   let img = ImageView.new(path)
@@ -2681,6 +3035,8 @@ proc image*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Declare an image widget with the id `id` showing the `source` region of
+  ## the image at `path`, as one sprite out of a sheet.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(id, renderKey("image:" & path & ":" & $source, width, height, alignSelf))
   let img = ImageView.new(path, source)
@@ -2695,6 +3051,9 @@ proc imageButton*(
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Declare an image button with the id `id` showing the image at `path`.
+  ##
+  ## Returns true on the frame it is clicked.
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -2719,6 +3078,10 @@ proc imageButton*(
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Declare an image button with the id `id` showing the `source` region of
+  ## the image at `path`.
+  ##
+  ## Returns true on the frame it is clicked.
   if ui.phase == EventPhase:
     return ui.clicked(id)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -2741,6 +3104,10 @@ proc mesh2d*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Declare a 2D mesh editor with the id `id` over `state`, drawn on top of
+  ## the image at `imagePath`.
+  ##
+  ## Returns true on a frame where the user changed the mesh.
   if ui.phase == EventPhase:
     result = ui.submitted(id)
     if result:
@@ -2762,6 +3129,12 @@ proc slider*(
     orientation = SliderHorizontal,
     alignSelf = AlignAuto,
 ): tuple[active: bool, value: float64] {.discardable.} =
+  ## Declare a slider with the id `id` showing `value` within `minimum` to
+  ## `maximum`.
+  ##
+  ## `active` is true while the slider is being dragged, and `value` is the
+  ## value under the pointer; the caller owns the value and decides whether
+  ## to keep it.
   if ui.phase == EventPhase:
     let located = ui.widgetFrame(id)
     if located.ok:
@@ -2814,6 +3187,7 @@ proc colorSwatch*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Declare a colour swatch with the id `id` showing `value`.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(id, renderKey("colorSwatch:" & $value, width, height, alignSelf))
   ui.attach(box, Component(ColorSwatch.new(value)))
@@ -2828,6 +3202,11 @@ proc colorInput*(
     height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Declare a colour input with the id `id` labelled `label`: a swatch and
+  ## one slider per channel.
+  ##
+  ## `value` is edited in place, and the call returns true on a frame where
+  ## it changed.
   let previous = value
   if ui.phase == EventPhase:
     let red = ui.slider(ui.id(id, "red"), value.r.float64, 0, 255, fill(),
@@ -2907,6 +3286,13 @@ proc combobox*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): tuple[changed: bool, index: int] {.discardable.} =
+  ## Declare a combo box with the id `id` offering `options`, with `selected`
+  ## as the current index.
+  ##
+  ## Returns the index the user picked and whether it differs from
+  ## `selected`; the caller owns the selection. The list opens on a click and
+  ## closes on the next one, and `index` stays at `selected` for empty
+  ## `options`.
   result.index = selected
   if options.len == 0:
     return
@@ -2976,6 +3362,10 @@ proc lineInput*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) =
+  ## Declare a single-line text input with the id `id` editing `state`.
+  ##
+  ## The text, cursor and selection live on `state`, so it must outlive the
+  ## frame. Use `submitted` on the same id to react to the Enter key.
   discard ui.component(
     id,
     Component(LineInput.new(state, fontName)),
@@ -2999,6 +3389,13 @@ proc textEditor*(
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
 ) {.layoutOnly.} =
+  ## Declare a multi-line text editor with the id `id` editing `state`.
+  ##
+  ## The text, cursor, selection and scroll position live on `state`, so it
+  ## must outlive the frame. `lineNumbers` shows a gutter, `scrollbars` shows
+  ## scrollbars when the content overflows, `syntax` names the highlighter,
+  ## `gutterMarkers` are the lines to mark, and `activeLine` is the line to
+  ## highlight.
   discard ui.component(
     id,
     Component(Editor.new(
@@ -3030,6 +3427,7 @@ proc container*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): Widget {.discardable, layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.container(self.nextAutoID(), component, width, height, alignSelf)
 
 proc component*(
@@ -3039,6 +3437,7 @@ proc component*(
     alignSelf = AlignAuto,
     renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.component(
     self.nextAutoID(), component, width, height, alignSelf, renderKeyOverride
   )
@@ -3046,6 +3445,7 @@ proc component*(
 proc spacer*(
     self: var UI, width, height: SizePolicy, alignSelf = AlignAuto
 ): Widget {.discardable, layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   self.spacer(self.nextAutoID(), width, height, alignSelf)
 
 proc button*(
@@ -3056,6 +3456,7 @@ proc button*(
     textScroll = false,
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.button(
     ui.nextAutoID(), label, width, height, alignSelf,
     textScroll = textScroll, style = style
@@ -3067,11 +3468,13 @@ proc menu*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.menu(ui.nextAutoID(), label, width, height, alignSelf)
 
 proc menuDivider*(
     ui: var UI, width, height: SizePolicy, alignSelf = AlignAuto
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.menuDivider(ui.nextAutoID(), width, height, alignSelf)
 
 proc tabs*(
@@ -3086,6 +3489,7 @@ proc tabs*(
     style = ComponentStyle(),
     tabStyle = TabStyle(),
 ) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.tabs(
     ui.nextAutoID(), labels, selected, width, height, alignSelf, gap, padding,
     style, tabStyle
@@ -3099,6 +3503,7 @@ proc label*(
     alignSelf = AlignAuto,
     textScroll = false,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.label(ui.nextAutoID(), text, width, height, fontName, alignSelf, textScroll)
 
 proc checkbox*(
@@ -3109,6 +3514,7 @@ proc checkbox*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.checkbox(ui.nextAutoID(), label, checked, width, height, fontName, alignSelf)
 
 proc coloredLabel*(
@@ -3119,6 +3525,7 @@ proc coloredLabel*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.coloredLabel(ui.nextAutoID(), text, color, width, height, fontName, alignSelf)
 
 proc diagnosticLabel*(
@@ -3130,6 +3537,7 @@ proc diagnosticLabel*(
     fontName = "font",
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.diagnosticLabel(
     ui.nextAutoID(), text, color, width, height, clickable, fontName, alignSelf
   )
@@ -3140,6 +3548,7 @@ proc image*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.image(ui.nextAutoID(), path, width, height, alignSelf)
 
 proc image*(
@@ -3149,6 +3558,7 @@ proc image*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.image(ui.nextAutoID(), path, source, width, height, alignSelf)
 
 proc imageButton*(
@@ -3158,6 +3568,7 @@ proc imageButton*(
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.imageButton(ui.nextAutoID(), path, width, height, alignSelf, style)
 
 proc imageButton*(
@@ -3168,6 +3579,7 @@ proc imageButton*(
     alignSelf = AlignAuto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.imageButton(ui.nextAutoID(), path, source, width, height, alignSelf, style)
 
 proc mesh2d*(
@@ -3177,6 +3589,7 @@ proc mesh2d*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.mesh2d(ui.nextAutoID(), state, imagePath, width, height, alignSelf)
 
 proc slider*(
@@ -3186,6 +3599,7 @@ proc slider*(
     orientation = SliderHorizontal,
     alignSelf = AlignAuto,
 ): tuple[active: bool, value: float64] {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.slider(
     ui.nextAutoID(), value, minimum, maximum, width, height, orientation, alignSelf
   )
@@ -3196,6 +3610,7 @@ proc colorSwatch*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.colorSwatch(ui.nextAutoID(), value, width, height, alignSelf)
 
 proc colorInput*(
@@ -3206,6 +3621,7 @@ proc colorInput*(
     height = fit(),
     alignSelf = AlignAuto,
 ): bool {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.colorInput(ui.nextAutoID(), label, value, width, height, alignSelf)
 
 proc combobox*(
@@ -3215,6 +3631,7 @@ proc combobox*(
     width, height: SizePolicy,
     alignSelf = AlignAuto,
 ): tuple[changed: bool, index: int] {.discardable.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.combobox(ui.nextAutoID(), selected, options, width, height, alignSelf)
 
 proc lineInput*(
@@ -3224,6 +3641,7 @@ proc lineInput*(
     fontName = "font",
     alignSelf = AlignAuto,
 ) =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.lineInput(ui.nextAutoID(), state, width, height, fontName, alignSelf)
 
 proc textEditor*(
@@ -3238,6 +3656,7 @@ proc textEditor*(
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
 ) {.layoutOnly.} =
+  ## Same as the overload taking an explicit `id`, with a generated id.
   ui.textEditor(
     ui.nextAutoID(), state, width, height, fontName, alignSelf, lineNumbers,
     scrollbars, syntax, gutterMarkers, activeLine

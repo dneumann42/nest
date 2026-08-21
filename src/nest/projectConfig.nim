@@ -14,6 +14,7 @@ type ProjectConfig* = object
   marginTop*, marginRight*, marginBottom*, marginLeft*: int
 
 proc defaultProjectConfig*(): ProjectConfig =
+  ## Return the project settings used when `project.owl` omits a field.
   ProjectConfig(
     main: "main.owl",
     title: "Nest",
@@ -110,6 +111,10 @@ proc collectProjectVariables(
     node.collectDefinedProjectVariables(variables)
 
 proc loadProjectConfig*(projectDir: string): ProjectConfig =
+  ## Read `projectDir/project.owl` and return the project settings.
+  ##
+  ## Fields absent from the file, and the file being absent altogether,
+  ## fall back to `defaultProjectConfig()`.
   result = defaultProjectConfig()
   let configPath = projectDir / "project.owl"
   if not fileExists(configPath):
@@ -198,6 +203,12 @@ proc anchoredAppConfig(config: ProjectConfig; anchors: set[LayerShellEdge]): App
     )
 
 proc appConfig*(config: ProjectConfig): AppConfig =
+  ## Translate project settings into the `AppConfig` used to open the window.
+  ##
+  ## `config.layerShell` selects the surface kind: `top`, `bottom`, `left`
+  ## and `right` dock a layer-shell bar with the project's margins and
+  ## exclusive zone, `overlay` opens an overlay dialog, and anything else
+  ## opens an ordinary window.
   result = case config.layerShell.normalize
   of "top":
     AppConfig.dockTop(positive(config.height), config.title,
@@ -226,6 +237,8 @@ proc appConfig*(config: ProjectConfig): AppConfig =
   result.themeName = config.theme
 
 proc projectMainPath*(projectDir: string, config: ProjectConfig): string =
+  ## Return the absolute path of the project's main `.owl` file, resolving a
+  ## relative `config.main` against `projectDir`.
   if config.main.isAbsolute:
     config.main.normalizedPath
   else:
