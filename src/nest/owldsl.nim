@@ -1707,7 +1707,6 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     runtime.requestRedrawAfter(values[0].asNumber.int)
     nothing()
 
-  # Folder browsing and file / directory picking
   runtime.evaluator.native "pickFile":
     discard layout
     discard bodyNodes

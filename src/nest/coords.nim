@@ -1,5 +1,3 @@
-# Base geometry types for Nest's renderer-facing UI layer.
-
 type
   Rect* = object
     x*, y*: int

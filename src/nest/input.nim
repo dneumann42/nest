@@ -1,5 +1,3 @@
-# Platform independent input events and the backend hook table.
-
 type
   KeyCode* = enum
     KeyNone

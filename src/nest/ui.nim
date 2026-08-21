@@ -956,7 +956,6 @@ proc takePointerSurface(self: var UI, x, y, windowWidth, windowHeight: int) =
   self.pointerSurfaceIDs.clear()
   for widget in self.retainedFloatingWidgets:
     if widget.id in self.retainedModalWidgets:
-      # A modal dialog takes the whole window, which is what makes it modal.
       self.pointerSurfaceWidget = widget.id
       continue
     let located = self.widgetFrame(widget.id)
@@ -2302,8 +2301,6 @@ proc updateWidgetTree(
     shieldOwner = InvalidWidgetID,
     blocked = false,
 ) =
-  # Once the walk reaches the widget that owns the pointer, it and everything
-  # inside it see the pointer again.
   let widgetBlocked = blocked and widget.id != shieldOwner
   if widgetBlocked:
     withoutPointer(context):

@@ -17,12 +17,8 @@ const
   ]
   ComboOptions = ["Solid", "Dashed", "Dotted"]
 
-# --- text tab: no state of its own --------------------------------------
-
 type TextEvent* = enum
   DiagnosticClicked
-
-# --- buttons tab --------------------------------------------------------
 
 type
   Buttons* = object
@@ -43,8 +39,6 @@ proc update*(model: var Buttons, event: ButtonsEvent) =
   case event.kind
   of ButtonBumped: inc model.clicks
   of ButtonNoted: discard
-
-# --- inputs tab ---------------------------------------------------------
 
 type
   Inputs* = object
@@ -93,8 +87,6 @@ proc update*(model: var Inputs, event: InputsEvent) =
   of AccentPicked: model.accent = event.color
   of OptionPicked: model.option = event.index
   of NameSubmitted: discard
-
-# --- editors tab --------------------------------------------------------
 
 type
   Editors* = object
@@ -148,8 +140,6 @@ proc describe*(model: Editors, event: EditorsEvent): string =
     of ActiveLineToggled: ("active line", model.activeLine)
   feature[0] & (if feature[1]: " on" else: " off")
 
-# --- mesh tab -----------------------------------------------------------
-
 type
   Mesh* = object
     state*: Mesh2DState
@@ -173,8 +163,6 @@ proc initMesh*(): Mesh =
     altDragSensitivity: 0.25,
     altDragSnapStep: 0.05,
   ))
-
-# --- overlays tab -------------------------------------------------------
 
 type
   Overlays* = object
@@ -204,8 +192,6 @@ proc update*(model: var Overlays, event: OverlaysEvent) =
     model.modalOpen = true
   of ModalClosed:
     model.modalOpen = false
-
-# --- the application ----------------------------------------------------
 
 type
   Gallery* = object
@@ -424,7 +410,6 @@ widget overlaysTab(model: Overlays) emits OverlaysEvent:
       scrollY = true)):
     ui.heading("menubarHeading", "menuBar, menu, menuItem, menuDivider")
     for event in ui.menuBarRow(model.openMenu):
-      # Nothing to add at this level: the tab passes them straight on.
       emit event
 
     ui.heading("cardHeading", "card and dialogHeader")
@@ -470,11 +455,6 @@ widget view*(model: var Gallery) emits GalleryEvent:
         model.tab = tab
       emit GalleryEvent(status: "tab " & TabLabels[tab])
 
-    # Every tab reports in its own vocabulary; this is where those become the
-    # status line, and where each tab's own state is updated. A widget body
-    # runs twice a frame, so every state change goes inside `ui.events`, which
-    # runs only on the event pass; emitting is safe either way, since the loop
-    # applies what it collected once.
     case model.tab
     of 0:
       for event in ui.textTab():

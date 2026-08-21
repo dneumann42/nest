@@ -59,7 +59,6 @@ suite "widget macro":
     let model = Model()
     ui.frame(proc(ui: var UI) = ui.counter(model, msgs))
 
-    # The same id spelled outside the component does not resolve to its widget.
     check ui.widgetFrame(ui.id("row")).ok == false
     ui.scope("counter"):
       check ui.widgetFrame(ui.id("row")).ok
@@ -169,7 +168,6 @@ suite "runApp":
     var seen = 0
     runApp(AppConfig.init(width = 120, height = 80), Model(), update, rootView):
       inc seen
-      # `msgs` is a seq of the root widget's event type.
       check msgs is seq[Msg]
       ui.requestRedrawAfter(1)
       if seen >= 2:
@@ -178,7 +176,6 @@ suite "runApp":
 
   test "a root widget may collect into a parameter instead of emitting":
     var frames = 0
-    # `counter` takes `msgs: var seq[Msg]` rather than emitting.
     runApp(AppConfig.init(width = 120, height = 80), Model(), update, counter):
       inc frames
       ui.requestRedrawAfter(1)

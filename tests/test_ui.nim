@@ -164,7 +164,6 @@ suite "ui layout nesting":
       ui.applyIntrinsicSizes(resources)
       ui.endLayout()
 
-      # A `fit` button is one standard control tall, and the row fits it.
       checkFrame(ui.widget(HeaderRow), 0, 0, 500, ControlHeight.toFloat)
       checkFrame(ui.widget(HeaderLabel), 0, 0, 460, 18)
       checkFrame(ui.widget(HeaderNewButton), 460, 0, 40, ControlHeight.toFloat)
@@ -1583,7 +1582,6 @@ Stack trace:
     check firstFrame.ok
     check secondFrame.ok
 
-    # Press near the left of the first slider, so its value is low.
     ui.mouseMove((firstFrame.frame.x + firstFrame.frame.width * 0.2).int,
         (firstFrame.frame.y + firstFrame.frame.height / 2).int)
     ui.mouseDown()
@@ -1592,14 +1590,12 @@ Stack trace:
     check first < 30.0
     check second == 0.0
 
-    # Drag onto the second slider: only the first one follows the pointer.
     ui.mouseMove((secondFrame.frame.x + secondFrame.frame.width * 0.8).int,
         (secondFrame.frame.y + secondFrame.frame.height / 2).int)
     frame()
     check first > 70.0
     check second == 0.0
 
-    # After the release the drag is over, so moving alone changes nothing.
     ui.mouseUp()
     frame()
     let settled = first
@@ -1692,7 +1688,6 @@ Stack trace:
             "Three"], fixed(160), fit(), closeOnSelect = closeOnSelect)
         if choice.changed:
           picked = choice.index
-        # Directly under the list, so a click that leaks through lands here.
         if ui.button(ui.id("behind"), "Behind", fixed(160), fixed(32)):
           behind.inc
 
@@ -1714,13 +1709,11 @@ Stack trace:
     let field = ui.widgetFrame(ui.id("combo")).frame
     let behindFrame = ui.widgetFrame(ui.id("behind")).frame
     check field.height == ControlHeight.toFloat
-    # The list is drawn over the button below it.
     check behindFrame.y < field.y + field.height * 3.0
 
     clickAt((field.x + 20).int, (field.y + field.height / 2).int)
     check ui.wantsTextInput
 
-    # Third row of the list, which covers the button.
     clickAt((field.x + 20).int, (field.y + field.height * 2.5).int)
     check picked == 1
     check behind == 0
@@ -1777,7 +1770,6 @@ Stack trace:
     let behindFrame = ui.widgetFrame(ui.id("behind"))
     check itemFrame.ok
     check behindFrame.ok
-    # The item sits on top of the button behind it.
     check itemFrame.frame.y >= behindFrame.frame.y
     check itemFrame.frame.y < behindFrame.frame.y + behindFrame.frame.height
 
@@ -1830,7 +1822,6 @@ Stack trace:
     modalOpen = true
     frame()
     frame()
-    # The dialog covers only its own box, but nothing outside it reacts.
     clickAt((behindFrame.x + 10).int, (behindFrame.y + 4).int)
     check behind == 1
 

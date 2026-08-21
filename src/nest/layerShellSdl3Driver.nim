@@ -1,5 +1,3 @@
-# SDL3 + Wayland layer-shell backend driver.
-
 import sdl3
 import sdl3_ttf
 import std/[atomics, hashes, os, strutils, tables]
@@ -24,8 +22,6 @@ proc ttfOpenFontIO(
 let
   embeddedSansFont = fallbackSansFont
   embeddedMonoFont = fallbackMonoFont
-
-# --- Font handle management ---
 
 type
   LayerShellLayer* = enum
@@ -206,8 +202,6 @@ proc getFontPtr(f: screen.Font): sdl3_ttf.Font {.inline.} =
   else:
     nil
 
-# --- SDL driver state ---
-
 var
   win: sdl3.Window
   ren: sdl3.Renderer
@@ -336,8 +330,6 @@ proc evictTextCacheIfNeeded() =
     if entry.texture != nil:
       destroyTexture(entry.texture)
     textCache.del(oldestKey)
-
-# --- Screen hook implementations ---
 
 proc fontDirectories(): seq[string] =
   ## Return the directories a font file is looked for in, application fonts
@@ -876,8 +868,6 @@ proc sdlMoveWindowBy(dx, dy: int) =
     layerShellConfig.marginLeft,
   )
 
-# --- Input hook implementations ---
-
 proc sdlGetClipboardText(): string =
   let t = sdl3.getClipboardText()
   if t != nil:
@@ -1106,8 +1096,6 @@ proc sdlQuitRequest() =
   resetSdlState()
   sdl3_ttf.quit()
   sdl3.quit()
-
-# --- Init ---
 
 proc selectWaylandVideoDriver() =
   putEnv("SDL_VIDEO_DRIVER", "wayland")

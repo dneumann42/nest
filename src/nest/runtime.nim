@@ -305,52 +305,83 @@ proc appLoop(cfg, initial, update, view, blk: NimNode): NimNode =
   ## Build the frame loop `runApp` expands to.
   ##
   ## `ui`, `model` and `msgs` are spliced as plain identifiers, so the caller's
-  ## block can name them.
+  ## block can name them. `update` may be nil, for a root widget that emits
+  ## nothing and so has no events to apply.
   let
     uiSym = ident"ui"
     modelSym = ident"model"
     msgsSym = ident"msgs"
     msgSym = ident"msg"
     cfgSym = genSym(nskLet, "appCfg")
+
+  let eventlessLoop = quote do:
+    application `cfgSym`, `uiSym`:
+      `uiSym`.layout:
+        `view`(`uiSym`, `modelSym`)
+
+        `uiSym`.events:
+          `blk`
+
+  if update.isNil:
+    return quote do:
+      block:
+        let `cfgSym` = `cfg`
+        var `uiSym` = UI.init()
+        var `modelSym` = `initial`
+        when compiles(`view`(`uiSym`, `modelSym`)):
+          when typeof(`view`(`uiSym`, `modelSym`)) is void:
+            `eventlessLoop`
+          else:
+            {.
+              error:
+                "runApp needs an `update` for a root widget that emits its " &
+                "own events"
+            .}
+        else:
+          {.
+            error:
+              "runApp without an `update` needs a root widget that takes " &
+              "only the model, as `widget name(model: M)`"
+          .}
+
+  let queuedLoop = quote do:
+    application `cfgSym`, `uiSym`:
+      `uiSym`.layout:
+        `uiSym`.events:
+          `msgsSym`.setLen(0)
+
+        when compiles(`msgsSym`.add `view`(`uiSym`, `modelSym`)):
+          `msgsSym`.add `view`(`uiSym`, `modelSym`)
+        else:
+          `view`(`uiSym`, `modelSym`, `msgsSym`)
+
+        `uiSym`.events:
+          for `msgSym` in `msgsSym`:
+            `update`(`modelSym`, `msgSym`)
+          if `msgsSym`.len > 0:
+            `uiSym`.markAllDirty()
+          `blk`
+
   quote do:
     block:
       let `cfgSym` = `cfg`
       var `uiSym` = UI.init()
       var `modelSym` = `initial`
-      # The queue's type comes from the root widget, whichever shape it has.
       when compiles(`view`(`uiSym`, `modelSym`)):
         when typeof(`view`(`uiSym`, `modelSym`)) is void:
-          {.
-            error:
-              "runApp needs a root widget that either emits its own events " &
-              "or takes an `emitted: var seq[E]` parameter"
-          .}
+          `eventlessLoop`
         else:
           var `msgsSym`: typeof(`view`(`uiSym`, `modelSym`))
+          `queuedLoop`
       elif compiles(eventTypeOf(`view`)):
         var `msgsSym`: seq[typeof(eventTypeOf(`view`))]
+        `queuedLoop`
       else:
         {.
           error:
-            "runApp needs a root widget that either emits its own events or " &
-            "takes an `emitted: var seq[E]` parameter"
+            "runApp needs a root widget that emits its own events, takes an " &
+            "`emitted: var seq[E]` parameter, or emits nothing at all"
         .}
-      application `cfgSym`, `uiSym`:
-        `uiSym`.layout:
-          `uiSym`.events:
-            `msgsSym`.setLen(0)
-
-          when compiles(`msgsSym`.add `view`(`uiSym`, `modelSym`)):
-            `msgsSym`.add `view`(`uiSym`, `modelSym`)
-          else:
-            `view`(`uiSym`, `modelSym`, `msgsSym`)
-
-          `uiSym`.events:
-            for `msgSym` in `msgsSym`:
-              `update`(`modelSym`, `msgSym`)
-            if `msgsSym`.len > 0:
-              `uiSym`.markAllDirty()
-            `blk`
 
 macro runApp*(cfg, initial, update, view, blk: untyped): untyped =
   ## Run a Model/Msg/update/view application until its window closes.
@@ -359,15 +390,18 @@ macro runApp*(cfg, initial, update, view, blk: untyped): untyped =
   ## one frame at a time: the message queue is cleared, `view` declares the
   ## interface, then every message it collected is applied with `update`.
   ##
-  ## `view` is the root widget, in either shape: one that emits its own events,
-  ## called as `view(ui, model)` and returning them, or one that collects into a
-  ## parameter, called as `view(ui, model, emitted)`. The queue's type is taken
-  ## from whichever it is. `update` is called as `update(model, event)` for every
-  ## event of the frame, which resolves among as many `update` overloads as the
-  ## application has state types.
+  ## `view` is the root widget, in any of three shapes: one that emits its own
+  ## events, called as `view(ui, model)` and returning them; one that collects
+  ## into a parameter, called as `view(ui, model, emitted)`; or one that emits
+  ## nothing, called as `view(ui, model)` and returning nothing. The queue's
+  ## type is taken from whichever it is. `update` is called as
+  ## `update(model, event)` for every event of the frame, which resolves among
+  ## as many `update` overloads as the application has state types, and is not
+  ## called at all for a root widget that emits nothing.
   ##
-  ## `blk` runs at the end of every event pass, with `ui`, `model`, `msgs` and
-  ## `running` in scope. Setting `running` to false leaves the loop.
+  ## `blk` runs at the end of every event pass, with `ui`, `model` and `running`
+  ## in scope, plus `msgs` unless the root emits nothing. Setting `running` to
+  ## false leaves the loop.
   ##
   ## ```nim
   ## runApp(AppConfig.init(title = "Counter"), Model(), update, counter):
@@ -387,6 +421,31 @@ macro runApp*(cfg, initial, update, view: untyped): untyped =
   ##       Model(), update, counter)
   ## ```
   ##
-  ## Use the overload taking a trailing block to reach `ui`, `model`, `msgs` and
-  ## `running` once per frame.
-  appLoop(cfg, initial, update, view, newStmtList(nnkDiscardStmt.newTree(newEmptyNode())))
+  ## The last argument may also be a trailing block rather than the root widget,
+  ## as in `runApp(cfg, initial, view): ...`, which runs an application whose
+  ## root emits nothing. Use the five-argument overload to pass both an `update`
+  ## and a trailing block.
+  if view.kind == nnkStmtList:
+    appLoop(cfg, initial, nil, update, view)
+  else:
+    appLoop(cfg, initial, update, view,
+      newStmtList(nnkDiscardStmt.newTree(newEmptyNode())))
+
+macro runApp*(cfg, initial, view: untyped): untyped =
+  ## Run an application whose root widget emits nothing, until its window
+  ## closes.
+  ##
+  ## Opens the window described by `cfg`, holds `initial` as the model, and
+  ## calls `view(ui, model)` once per frame. There is no message queue and no
+  ## `update`: a root widget in this shape either draws from the model alone or
+  ## takes it as `var` and changes it in place.
+  ##
+  ## ```nim
+  ## widget root(model: App):
+  ##   ui.label(ui.id("hello"), "Hello, World!")
+  ##
+  ## when isMainModule:
+  ##   runApp(AppConfig.init(width = 360, height = 180, title = "Hello"), App(), root)
+  ## ```
+  appLoop(cfg, initial, nil, view,
+    newStmtList(nnkDiscardStmt.newTree(newEmptyNode())))

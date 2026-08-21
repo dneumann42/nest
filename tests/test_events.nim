@@ -28,8 +28,6 @@ type
   ToggleEvent = enum
     Flipped
 
-# --- a leaf widget with its own event type -------------------------------
-
 widget counter(model: CounterModel) emits CounterEvent:
   ui.row(ui.id("row"), cfg(width = fit(), height = fit(), gap = 6)):
     if ui.button(ui.id("dec"), "-", fixed(30), fixed(24)):
@@ -37,8 +35,6 @@ widget counter(model: CounterModel) emits CounterEvent:
     ui.label(ui.id("count"), $model.count, fixed(40), fixed(24))
     if ui.button(ui.id("inc"), "+", fixed(30), fixed(24)):
       emit Incremented
-
-# --- a parent that handles a child's events and raises its own -----------
 
 widget page(model: CounterModel, log: var seq[string]) emits PageEvent:
   ui.column(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
@@ -50,8 +46,6 @@ widget page(model: CounterModel, log: var seq[string]) emits PageEvent:
     if ui.button(ui.id("reset"), "Reset", fixed(60), fixed(24)):
       emit Reset
 
-# --- a grandparent that handles some events and raises others ------------
-
 widget shell(model: CounterModel, log: var seq[string]) emits ShellEvent:
   ui.column(ui.id("root"), cfg(width = fit(), height = fit(), gap = 6)):
     for event in ui.page(model, log):
@@ -61,22 +55,16 @@ widget shell(model: CounterModel, log: var seq[string]) emits ShellEvent:
       of Reset:
         log.add "shell handled Reset"
 
-# --- a widget that reads a hit directly, rather than through a helper ----
-
 widget toggleRow(value: bool) emits ToggleEvent:
   ui.checkbox(ui.id("flag"), "Flag", value, fit(), fit())
   if ui.clicked(ui.id("flag")):
     emit Flipped
-
-# --- a container that takes children ------------------------------------
 
 widget titledCard(title: string, body: untyped):
   ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 8,
       gap = 6)):
     ui.label(ui.id("title"), title, fill(), fit())
     body
-
-# --- a container that takes children and emits its own events ------------
 
 widget removableRow(rowKey: string, events: var seq[RowEvent],
     body: untyped):
@@ -149,7 +137,6 @@ suite "widget events":
     ui.frame:
       shellEvents.add ui.shell(model, log)
 
-    # The `+` button belongs to `counter`, nested in `page`, nested in `shell`.
     var plus: WidgetID
     ui.scope("shell"):
       ui.scope("page"):
@@ -245,9 +232,6 @@ suite "widget events":
     check counterEvents == @[Incremented]
 
   test "a handler built on ui.clicked runs once a frame":
-    # A widget body runs once for events and once for layout. `ui.clicked`
-    # answers only on the event pass, so a handler written against it does not
-    # run a second time while the widget tree is built.
     var
       handled = 0
       toggleEvents: seq[ToggleEvent]
@@ -265,8 +249,6 @@ suite "widget events":
       toggleEvents.add ui.toggleRow(false)
     check toggleEvents.len == 0
 
-    # The frame that dispatches the click runs the handler once, not once per
-    # pass.
     ui.frame:
       for event in ui.toggleRow(false):
         toggleEvents.add event

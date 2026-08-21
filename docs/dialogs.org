@@ -1,0 +1,396 @@
+#+title: Dialogs And Overlays
+
+A dialog is anything that draws over the rest of the interface and takes the pointer while it is up: a modal, a menu popover, a combo box list, a floating card. Nest has two mechanisms for putting one on screen, and they are unrelated to each other.
+
+An *in-frame overlay* is an ordinary part of the widget tree. It is declared, laid out and drawn in the same frame as everything else, and the only thing that makes it a dialog is that the frame gives it the pointer. ~modalDialog~, ~floatingCardBelow~, ~menuBar~ and the combo box list are all in-frame overlays. They work identically from Nim and from owl.
+
+A *dialog process* is a second Nest project, run as a child process, with its own window and its own program. The parent asks for it by key, keeps rendering while it is up, and reads back a single string when it exits. This is how a layer-shell bar opens a popover that is allowed to leave the bar's surface. Dialog processes are an owl-side feature: they are driven by ~openDialog~ and its siblings, which have no Nim equivalent.
+
+Everything about widget declarations, ids, passes and events is in [[file:ui.org][ui.org]]; this file only covers what is specific to overlays.
+
+* One Surface Owns The Pointer
+
+A surface that covers other widgets takes the pointer for itself. While the pointer is inside it, every widget outside it is updated as though the pointer were nowhere near, so one click lands on one surface only and a click that dismisses a popover does not also press what was under it.
+
+A modal dialog goes further: while it is open it owns the pointer everywhere, not only where its box sits, so nothing behind it reacts at all.
+
+The owner is decided once per frame, from the frame on screen, and holds for the whole frame. ~ui.pointerSurface~ names it and ~ui.pointerReaches(id)~ answers whether a given widget may see the pointer. A widget that reads a press directly, rather than through ~ui.clicked~, has to ask that first.
+
+#+begin_src nim
+import nest
+
+widget colourStrip(value: float64) emits float64:
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 4)):
+    let moved = ui.slider(ui.id("hue"), value, 0.0, 360.0)
+    if moved.active and ui.pointerReaches(ui.id("hue")):
+      emit moved.value
+#+end_src
+
+A component that draws outside its own box reports that area from ~pointerShield~, which is how the combo box list is included.
+
+#+begin_src nim
+import nest
+import nest/coords
+
+type Tooltip = ref object of Component
+  text: string
+
+method pointerShield*(
+    self: Tooltip, widget: Widget, windowWidth, windowHeight: int
+): tuple[has: bool, frame: Frame] =
+  ## The bubble hangs below the widget, and swallows the pointer with it.
+  (
+    true,
+    Frame(x: widget.frame.x, y: widget.frame.y + widget.frame.height, width: 180.0, height: 60.0),
+  )
+#+end_src
+
+* Modal Dialogs
+
+In Nim a dialog is a widget like any other, gated on a flag and declared outside the root container so it is laid out over the whole frame.
+
+#+begin_src nim
+import nest
+
+type
+  ConfirmEvent = enum
+    Confirmed
+    Cancelled
+
+  App = object
+    confirmOpen: bool
+    deleted: bool
+
+  AppEvent = enum
+    DeleteRequested
+    DeleteDone
+    DeleteCancelled
+
+proc update(model: var App, event: AppEvent) =
+  case event
+  of DeleteRequested: model.confirmOpen = true
+  of DeleteDone:
+    model.confirmOpen = false
+    model.deleted = true
+  of DeleteCancelled: model.confirmOpen = false
+
+widget confirmDialog(open: bool) emits ConfirmEvent:
+  ui.modalDialog(ui.id("root"), open, cfg(width = fixed(320), height = fit(), padding = 12, gap = 10)):
+    ui.label(ui.id("text"), "Delete the file?", width = fill())
+    ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd)):
+      if ui.button(ui.id("cancel"), "Cancel"):
+        emit Cancelled
+      if ui.button(ui.id("ok"), "Delete"):
+        emit Confirmed
+
+widget root(model: App) emits AppEvent:
+  ui.column(ui.id("root"), cfg(padding = 12, gap = 8)):
+    if ui.button(ui.id("delete"), "Delete"):
+      emit DeleteRequested
+    ui.label(ui.id("state"), if model.deleted: "deleted" else: "not deleted")
+
+  for event in ui.confirmDialog(model.confirmOpen):
+    case event
+    of Confirmed: emit DeleteDone
+    of Cancelled: emit DeleteCancelled
+#+end_src
+
+The dialog's second argument is the open flag, not a condition around the call: ~modalDialog~ takes it so that the widget keeps its identity, and with it its focus and its editor state, across the frames where it is closed.
+
+In owl the same dialog is a ~fun~ that reads a state flag, which is exactly how ~apps/duck~ declares its four dialogs.
+
+#+begin_src owl
+state "root":
+  showConfirm = false
+  deleted = false
+  deleteID = (id "delete")
+  confirmID = (id "confirm" "ok")
+  cancelID = (id "confirm" "cancel")
+
+fun confirmDialog:
+  modalDialog (id "confirm" "dialog") showConfirm:
+    width = fixed 320
+    height = fit
+    padding = 12
+    gap = 10
+    alignItems = AlignStretch
+    background = color 30 30 30
+    dialogHeader (id "confirm" "header"):
+      width = fill
+      height = fit
+      padding = 6
+      label (id "confirm" "title") "Confirm":
+        width = fill
+        height = fit
+    label (id "confirm" "text") "Delete the file?":
+      width = fill
+      height = fit
+    row (id "confirm" "actions"):
+      width = fill
+      height = fit
+      gap = 8
+      justifyContent = JustifyEnd
+      button cancelID "Cancel":
+        width = fixed 82
+        height = fit
+      button confirmID "Delete":
+        width = fixed 82
+        height = fit
+
+events:
+  when (clicked deleteID):
+    set showConfirm true
+  when (clicked confirmID):
+    set deleted true
+    set showConfirm false
+  when (clicked cancelID):
+    set showConfirm false
+
+column (id "root"):
+  width = fill
+  height = fill
+  padding = 12
+  gap = 8
+  button deleteID "Delete":
+    width = fit
+    height = fit
+  label (id "state") (pick deleted "deleted" "not deleted"):
+    width = fill
+    height = fit
+
+confirmDialog
+#+end_src
+
+* Menus
+
+** By Hand, From Nim
+
+A menu is an entry in a ~menuBar~ plus a floating card anchored under it. Both ids belong to the same widget, which is why they are declared together, and the caller owns the flag that says which menu is open.
+
+#+begin_src nim
+import nest
+
+type
+  MenuEvent = object
+    command: string
+    toggled: bool
+
+widget fileMenu(open: bool) emits MenuEvent:
+  ui.menuBar(ui.id("bar"), cfg(width = fill(), height = fit(), gap = 4)):
+    if ui.menu(ui.id("file"), "File"):
+      emit MenuEvent(toggled: true)
+
+  if open:
+    ui.floatingCardBelow(ui.id("popover"), ui.id("file"), cfg(width = fixed(180), height = fit(), padding = 4, gap = 2)):
+      for item in ["New", "Open"]:
+        ui.menuItem(ui.id("item", item), cfg(width = fill(), height = fit())):
+          ui.label(ui.id("itemText", item), item)
+        if ui.clicked(ui.id("item", item)):
+          emit MenuEvent(command: item)
+      ui.menuDivider(ui.id("divider"), width = fill(), height = fixed(9))
+      ui.menuItem(ui.id("quit"), cfg(width = fill(), height = fit())):
+        ui.label(ui.id("quitText"), "Quit")
+      if ui.clicked(ui.id("quit")):
+        emit MenuEvent(command: "Quit")
+
+widget shell(menuOpen: var bool, lastCommand: var string):
+  ui.column(ui.id("root"), cfg(width = fill(), height = fill(), gap = 6)):
+    for event in ui.fileMenu(menuOpen):
+      if event.toggled:
+        menuOpen = not menuOpen
+      elif event.command.len > 0:
+        lastCommand = event.command
+        menuOpen = false
+    ui.label(ui.id("last"), "last: " & lastCommand, width = fill())
+#+end_src
+
+** Managed, From Owl
+
+Owl's ~menuBar~ is not the thin wrapper the Nim one is. It reads the whole menu structure out of its body, tracks which menu is open itself, draws the popover, and reports the chosen path as a string. There is no open flag to hold and no ~floatingCardBelow~ to declare.
+
+A menu path is built from the ~menu~ and ~menuItem~ keys joined with a dot, so the ~"open"~ item under the ~"file"~ menu is reported as ~"file.open"~.
+
+#+begin_src owl
+state "root":
+  menuID = (id "menubar")
+  status = "Ready"
+
+fun handleMenuAction action:
+  when (= action "file.new"):
+    set status "New"
+  when (= action "file.open"):
+    pickFileEvent "app:filePicked"
+  when (= action "file.exit"):
+    closeDialog ""
+  when (= action "help.about"):
+    set status "About"
+
+events:
+  when (not (= (menuResult "menubar") nothing)):
+    handleMenuAction (menuResult "menubar")
+    clearMenuResult "menubar"
+
+column (id "root"):
+  width = fill
+  height = fill
+  menuBar menuID:
+    width = fill
+    height = fixed 24
+    gap = 4
+    alignItems = AlignStretch
+    menu "file" "File":
+      menuItem "new" "New"
+      menuItem "open" "Open..."
+      menuDivider
+      menuItem "exit" "Exit"
+    menu "help" "Help":
+      menuItem "about" "About"
+  label (id "status") status:
+    width = fill
+    height = fit
+#+end_src
+
+~menuResult~ is read by the same key that named the bar, returns ~nothing~ while no item has been chosen, and keeps returning the last choice until ~clearMenuResult~ is called. Clearing it is not optional: the result is what closes the menu's loop, and a handler that does not clear runs again on every frame.
+
+* File And Directory Pickers
+
+The picker is provided by the host, and it is asynchronous in every front end: start it, then read its result on a later frame.
+
+From Nim, pickers live on ~ui.io~ and are keyed by the widget that started them.
+
+#+begin_src nim
+import nest
+
+type PickerEvent = object
+  path: string
+
+widget filePicker(current: string) emits PickerEvent:
+  ui.row(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8)):
+    if ui.button(ui.id("browse"), "Browse"):
+      ui.io.files.pick(ui.id("browse"))
+
+    ui.events:
+      let picked = ui.io.files.value(ui.id("browse"))
+      if picked.len > 0:
+        ui.io.files.clear(ui.id("browse"))
+        emit PickerEvent(path: picked)
+
+    ui.label(ui.id("path"), current, width = fill())
+#+end_src
+
+Owl has two shapes. ~pickFileEvent name~ and ~pickDirectoryEvent name~ raise an external event under ~name~ when the user chooses, and the chosen path is read with ~pickResult~ and dropped with ~clearPickResult~. Prefer this shape: the handler then sits with every other handler in the ~events~ block.
+
+#+begin_src owl
+state "root":
+  openID = (id "open")
+  path = ""
+
+events:
+  when (clicked openID):
+    pickFileEvent "app:filePicked"
+  when (external "app:filePicked"):
+    set path (pickResult "app:filePicked")
+    clearPickResult "app:filePicked"
+
+row (id "root"):
+  width = fill
+  height = fit
+  gap = 8
+  button openID "Open...":
+    width = fit
+    height = fit
+  label (id "path") path:
+    width = fill
+    height = fit
+#+end_src
+
+~pickFile~ and ~pickDirectory~ take an optional command instead, called with the chosen path once the picker closes. The callback runs at the start of a later frame, before that frame's declarations, so it may set state freely.
+
+#+begin_src owl
+fun openPicked path:
+  set statusText (string "Opened " path)
+
+events:
+  when (clicked openID):
+    pickFile openPicked
+#+end_src
+
+* Dialog Processes
+
+~openDialog key projectDir [data] [anchor]~ starts a second Nest process on another project directory. The parent keeps rendering; the child gets its own window, its own program and its own state.
+
+| Command                       | In        | Effect                                                                       |
+|-------------------------------+-----------+------------------------------------------------------------------------------|
+| ~openDialog key dir data anchor~ | parent    | start the dialog, unless one is already open under ~key~                       |
+| ~toggleDialog key dir data anchor~ | parent  | start it, or close it if it is already open                                  |
+| ~dialogOpen? key~               | parent    | whether a process is running under ~key~                                       |
+| ~closeManagedDialog key~        | parent    | terminate the process under ~key~                                              |
+| ~dialogResult key~              | parent    | the value the dialog closed with, or ~nothing~                                 |
+| ~clearDialogResult key~         | parent    | forget that result                                                           |
+| ~dialogData~                    | dialog    | the ~data~ string the parent passed in                                         |
+| ~closeDialog value~             | dialog    | close this window and hand ~value~ back to the parent                          |
+
+The two sides never share memory. The parent passes one string in through ~dialogData~ and gets one string back from ~closeDialog~, which is written to a temporary file and read when the process is reaped. A dialog that is terminated rather than closed reports an empty result.
+
+The parent side, as ~apps/layerShellBar~ writes it:
+
+#+begin_src owl
+events:
+  when (and (clicked artID) (not (dialogOpen? "media"))):
+    openDialog "media" "./media" "" artID
+  when (not (= (dialogResult "media") nothing)):
+    set lastMediaAction (dialogResult "media")
+    clearDialogResult "media"
+#+end_src
+
+And the dialog's own ~main.owl~, which is an ordinary Nest project with its own ~project.owl~:
+
+#+begin_src owl
+state "root":
+  closeID = (id "close")
+  chooseID = (id "choose")
+
+events:
+  when (clicked closeID):
+    closeDialog ""
+  when (clicked chooseID):
+    closeDialog "chosen"
+
+panel (id "root"):
+  width = fill
+  height = fill
+  padding = 12
+  gap = 8
+  label (id "prompt") (string "Data: " (dialogData)):
+    width = fill
+    height = fit
+  row (id "actions"):
+    width = fill
+    height = fit
+    gap = 8
+    justifyContent = JustifyEnd
+    button closeID "Cancel":
+      width = fixed 82
+      height = fit
+    button chooseID "Choose":
+      width = fixed 82
+      height = fit
+#+end_src
+
+The last argument to ~openDialog~ is a widget id to anchor against. The parent measures that widget's frame in the current frame and passes it to the child as JSON; the child turns it into a layer-shell overlay pinned beside the widget that opened it. Which edges it attaches to comes from where the anchor sits: a widget in the left third of the window gets a popup aligned to its left edge, one in the right third gets its right edge, anything in between is centred, and the popup goes below the anchor when the anchor is in the top half and above it when it is in the bottom half. The popup is kept inside the window either way. Omitting the anchor opens an ordinary window instead.
+
+Running a dialog directly is the same thing the parent does, which makes it the way to develop one:
+
+#+begin_example
+nest dialog apps/layerShellBar/media "" /tmp/result
+#+end_example
+
+* Error Dialogs
+
+An owl program that fails to evaluate does not take the window down. The runtime keeps the last good frame, records the error, and opens the built-in error dialog in its own process with the message, the source line and the stack of owl frames that reached it. Clicking a frame opens that file at that line in the user's editor. Fixing the file closes the dialog, because the file watcher reloads the program on the next frame.
+
+It renders standalone:
+
+#+begin_example
+nest error-dialog example
+#+end_example
