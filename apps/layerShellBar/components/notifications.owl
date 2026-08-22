@@ -21,7 +21,7 @@ component notificationWidget key:
 
   button buttonID (string "✉ " count):
     width = fit
-    height = fit
+    height = fixed BarWidgetHeight
     textScroll = true
     fontSize = BarWidgetFontSize
     buttonPadding = BarWidgetPadding

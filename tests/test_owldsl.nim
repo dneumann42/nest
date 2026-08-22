@@ -639,6 +639,172 @@ button hoverID "Hover":
       drawRelays = originalDrawRelays
       fontRelays = originalFontRelays
 
+  test "wallpaper switcher app renders across repeated frames":
+    let originalDrawRelays = drawRelays
+    let originalFontRelays = fontRelays
+    var rects = 0
+    var texts = 0
+
+    proc countRect(r: Rect; color: Color) =
+      discard color
+      if r.w > 0 and r.h > 0:
+        inc rects
+
+    proc countText(f: Font; x, y: int; text: string; fg,
+        bg: Color): TextExtent =
+      discard f
+      discard x
+      discard y
+      discard fg
+      discard bg
+      if text.len > 0:
+        inc texts
+      TextExtent(w: max(text.len, 1) * 9, h: 18)
+
+    drawRelays = DrawRelays(
+      fillRect: countRect,
+      drawLine: proc(x1, y1, x2, y2: int; color: Color) =
+      discard,
+      drawPoint: proc(x, y: int; color: Color) =
+      discard,
+      loadImage: proc(path: string): Image =
+      Image(0),
+      freeImage: proc(img: Image) =
+      discard,
+      drawImage: proc(img: Image; src, dst: Rect) =
+      discard,
+      imageSize: proc(img: Image): TextExtent =
+      TextExtent(),
+    )
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 9, h: 18),
+      drawText: countText,
+    )
+
+    try:
+      let app = NestOwlApp.init("apps/wallpaperSwitcher/main.owl")
+      var ui = UI.init()
+      ui.initContext(420, 240)
+      ui.loadFont("font", "", 18)
+
+      app.render(ui)
+      check app.lastError == ""
+      app.render(ui)
+      check app.lastError == ""
+      check rects > 0
+      check texts >= 4
+
+      var layoutUi = UI.init()
+      layoutUi.initContext(420, 240)
+      layoutUi.loadFont("font", "", 18)
+      app.runtime.renderLayoutOnly(layoutUi, app.program, 420, 240)
+      check app.runtime.lastError == ""
+
+      layoutUi = UI.init()
+      layoutUi.initContext(420, 240)
+      layoutUi.loadFont("font", "", 18)
+      app.runtime.renderLayoutOnly(layoutUi, app.program, 420, 240)
+      check app.runtime.lastError == ""
+
+      if app.runtime.lastError == "":
+        check layoutUi.widget(layoutUi.id("wallpaper", "panel")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper", "duration")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper", "enabled")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper", "random")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper", "picker")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper", "footer")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper", "status")).frame.width > 0
+    finally:
+      drawRelays = originalDrawRelays
+      fontRelays = originalFontRelays
+
+  test "wallpaper switcher checkbox toggles timer command":
+    let app = NestOwlApp.init("apps/wallpaperSwitcher/main.owl")
+    var ui = UI.init()
+    ui.initContext(420, 240)
+    ui.loadFont("font", "", 18)
+    var
+      timerEnabled = true
+      disableCalls = 0
+      enableCalls = 0
+      checkboxClicked = false
+
+    app.runtime.evaluator.native "shell":
+      discard layout
+      discard bodyNodes
+      let command = env.eval(arguments[0]).text
+      if command.contains("disable --now wallpaper-switch.timer"):
+        timerEnabled = false
+        inc disableCalls
+        text("")
+      elif command.contains("enable --now wallpaper-switch.timer"):
+        timerEnabled = true
+        inc enableCalls
+        text("")
+      elif command.contains("is-enabled"):
+        text(if timerEnabled: "enabled" else: "disabled")
+      elif command.contains("OnUnitInactiveSec"):
+        text("1")
+      elif command.contains("is-active") or command.contains("show wallpaper-switch.timer"):
+        text(if timerEnabled: "enabled, active, every 10m" else: "disabled, inactive, every 10m")
+      else:
+        text("")
+
+    app.runtime.evaluator.native "clicked":
+      discard layout
+      discard bodyNodes
+      if arguments.len == 0:
+        return boolean(false)
+      let value = env.eval(arguments[0])
+      let matched = checkboxClicked and value.kind == Native and
+        value.native of WidgetIDValue and
+        WidgetIDValue(value.native).value == ui.id("wallpaper", "enabled")
+      if matched:
+        checkboxClicked = false
+      boolean(matched)
+
+    app.render(ui)
+    check app.lastError == ""
+    check app.runtime.get("switchEnabled").kind == Boolean
+    check app.runtime.get("switchEnabled").boolean
+    let enabledFrame = ui.widgetFrame(ui.id("wallpaper", "enabled"))
+    check enabledFrame.ok
+
+    checkboxClicked = true
+    app.render(ui)
+
+    check app.lastError == ""
+    check disableCalls == 1
+    check enableCalls == 0
+    check app.runtime.get("switchEnabled").kind == Boolean
+    check not app.runtime.get("switchEnabled").boolean
+
+  test "owl if else inside event-style block runs only one branch":
+    let runtime = NestOwlRuntime.init()
+    let value = runtime.evaluator.exec(parse("""
+define:
+  wasClicked = true
+  enabled = true
+  actions = ""
+when wasClicked:
+  if enabled:
+    set actions (string actions "disable")
+  else:
+    set actions (string actions "enable")
+actions
+"""))
+
+    check value.kind == Text
+    check value.text == "disable"
+
   test "layer shell bar example renders clock and widgets":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(

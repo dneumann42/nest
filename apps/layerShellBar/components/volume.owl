@@ -45,7 +45,7 @@ component volumeWidget key:
 
   button buttonID (string "♫ " status):
     width = fit
-    height = fit
+    height = fixed BarWidgetHeight
     textScroll = true
     fontSize = BarWidgetFontSize
     buttonPadding = BarWidgetPadding

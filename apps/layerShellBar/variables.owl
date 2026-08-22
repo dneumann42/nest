@@ -5,16 +5,20 @@ define:
   StoragePollInterval = 8000
   NoSpacing = 0
 
-  BarHeight = 42
-  BarIconSize = - BarHeight 4
+  BarHeight = 30
   BarOpacity = 0.8
   BarPadding = 4
+  BarWidgetHeight = - BarHeight (* BarPadding 2)
+  BarIconSize = BarWidgetHeight
   BarWidgetFontSize = 10
-  BarWidgetPadding = (insets 8 0 8 0)
+  BarWidgetPaddingAll = 0
+  BarWidgetPaddingX = 8
+  BarWidgetPaddingY = 0
+  BarWidgetPadding = (insets (+ BarWidgetPaddingX BarWidgetPaddingAll) (+ BarWidgetPaddingY BarWidgetPaddingAll) (+ BarWidgetPaddingX BarWidgetPaddingAll) (+ BarWidgetPaddingY BarWidgetPaddingAll))
   BarLeftGap = 14
   BarRightGap = 8
 
-  DialogPadding = 10
+  DialogPadding = 8
   DialogPaddingWide = 8
   DialogGap = 8
   DialogSectionGap = 12
@@ -45,7 +49,7 @@ define:
   NetworkSelectedOpacity = 0.95
 
   MediaBarButtonWidth = 28
-  MediaBarArtSize = - BarHeight 4
+  MediaBarArtSize = BarWidgetHeight
   MediaBarTitleWidth = 150
   MediaBarPlayButtonWidth = 56
   MediaPopoverLeftWidth = 260

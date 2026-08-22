@@ -30,13 +30,13 @@ component workspaces key:
 
   row (id keyText "workspaces"):
     width = fit
-    height = fit
+    height = fixed BarWidgetHeight
     gap = WorkspaceGap
     alignItems = AlignCenter
     if (empty? workspaceList):
       label (id keyText "empty") "-":
         width = (fixed WorkspaceEmptyWidth)
-        height = fit
+        height = fixed BarWidgetHeight
         fontSize = BarWidgetFontSize
     else:
       for workspace (iter workspaceList):
@@ -48,7 +48,7 @@ component workspaces key:
             shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) ImmediateInterval
         button workspaceID (workspaceLabel workspace):
           width = fit
-          height = fit
+          height = fixed BarWidgetHeight
 	  fontSize = BarWidgetFontSize
 	  buttonPadding = BarWidgetPadding
 	  background = (workspaceBackgroundColor workspace)

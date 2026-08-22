@@ -8,9 +8,9 @@ state "root":
       cmd = "shelly-ui"
       place = "left"
     {}:
-      label = "Pick Wallpaper"
+      label = "Wallpaper"
       name = (id "menu" "wallpaper")
-      cmd = "~/.config/sway/scripts/wallpapers pick"
+      cmd = "$HOME/.nimble/bin/nest run $HOME/.workspace/nest/apps/wallpaperSwitcher"
       place = "left"
     {}:
       label = "Monitor On/Off"

@@ -1633,6 +1633,34 @@ Stack trace:
     check tab.ok
     check tab.frame.height == ControlHeight.toFloat
 
+  test "checkbox reports clicked through UI":
+    var ui = UI.init()
+    ui.initContext(240, 120)
+    ui.loadFont("font", "", 18)
+    let checkboxID = ui.id("checkbox")
+    var clicked = false
+
+    template frame() =
+      ui.beginInputFrame()
+      ui.markAllDirty()
+      ui.layout:
+        if ui.clicked(checkboxID):
+          clicked = true
+        ui.checkbox(checkboxID, "On", false, fit(), fit())
+      ui.finishInputFrame()
+
+    frame()
+    let located = ui.widgetFrame(checkboxID)
+    check located.ok
+    ui.mouseMove((located.frame.x + located.frame.width / 2).int,
+        (located.frame.y + located.frame.height / 2).int)
+    ui.mouseDown()
+    frame()
+    ui.mouseUp()
+    frame()
+
+    check clicked
+
   test "tab labels sit at the same height whether or not the tab is selected":
     let originalFontRelays = fontRelays
     var drawnLabels: seq[tuple[text: string, y: int]]

@@ -93,31 +93,3 @@ macro variant*(typeDef: untyped): untyped =
   result = nnkTypeSection.newTree(
     nnkTypeDef.newTree(enumName, newEmptyNode(), enumTy),
     nnkTypeDef.newTree(typeName, typeDef[1], body))
-
-type
-  ToolID = distinct string
-  MenuID = distinct string
-
-  ToolbarEvent* {.variant.} = object
-    case kind*: ToolbarEventKind
-    of ToolPressed:
-      id*: ToolID
-    of MenuPressed:
-      menuID*: MenuID
-      action*: MenuID
-
-when isMainModule:
-  let toolEvent = ToolbarEvent(kind: ToolPressed, id: ToolID"paint")
-  let menuEvent = ToolbarEvent(
-    kind: MenuPressed,
-    menuID: MenuID"file",
-    action: MenuID"open")
-
-  doAssert toolEvent.kind == ToolPressed
-  doAssert toolEvent.id.string == "paint"
-  doAssert menuEvent.kind == MenuPressed
-  doAssert menuEvent.menuID.string == "file"
-  doAssert menuEvent.action.string == "open"
-  doAssert $ToolbarEventKind == "ToolbarEventKind"
-
-  echo "variant pragma generated ToolbarEventKind"

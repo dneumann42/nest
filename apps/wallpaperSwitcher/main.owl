@@ -1,0 +1,126 @@
+fun timerEnabledCommand:
+  string "systemctl --user is-enabled --quiet wallpaper-switch.timer && printf enabled || printf disabled"
+
+fun durationIndexCommand:
+  string "file=" (shellQuote "/home/dneumann/.config/systemd/user/wallpaper-switch.timer") "; minutes=$(grep '^OnUnitInactiveSec=' \"$file\" | head -n1 | cut -d= -f2 | tr -cd 0123456789); [ -n \"$minutes\" ] || minutes=10; index=$(( (minutes + 2) / 5 - 1 )); [ \"$index\" -lt 0 ] && index=0; [ \"$index\" -gt 23 ] && index=23; printf '%s' \"$index\""
+
+fun applyDurationCommand index:
+  string "index=" (shellQuote index) "; file=" (shellQuote "/home/dneumann/.config/systemd/user/wallpaper-switch.timer") "; minutes=$(( (index + 1) * 5 )); grep -q '^OnActiveSec=' \"$file\" || sed -i '/^OnBootSec=/a OnActiveSec=10m' \"$file\"; perl -0pi -e \"s/^OnBootSec=\\d+m$/OnBootSec=${minutes}m/m; s/^OnActiveSec=\\d+m$/OnActiveSec=${minutes}m/m; s/^OnUnitInactiveSec=\\d+m$/OnUnitInactiveSec=${minutes}m/m; s/^RandomizedDelaySec=\\d+m$/RandomizedDelaySec=${minutes}m/m\" \"$file\"; systemctl --user daemon-reload; if systemctl --user is-enabled --quiet wallpaper-switch.timer; then systemctl --user restart wallpaper-switch.timer; fi"
+
+fun enableSwitchingCommand:
+  string "systemctl --user daemon-reload; systemctl --user enable --now wallpaper-switch.timer; systemctl --user restart wallpaper-switch.timer"
+
+fun disableSwitchingCommand:
+  string "systemctl --user disable --now wallpaper-switch.timer"
+
+fun statusCommand:
+  string "enabled=$(systemctl --user is-enabled wallpaper-switch.timer 2>/dev/null || printf disabled); active=$(systemctl --user is-active wallpaper-switch.timer 2>/dev/null || printf inactive); next=$(systemctl --user show wallpaper-switch.timer -P NextElapseUSecRealtime 2>/dev/null); minutes=$(grep '^OnUnitInactiveSec=' /home/dneumann/.config/systemd/user/wallpaper-switch.timer | head -n1 | cut -d= -f2); printf '%s, %s, every %s' \"$enabled\" \"$active\" \"$minutes\"; [ -n \"$next\" ] && printf ', next %s' \"$next\""
+
+state "root":
+  closeID = (id "wallpaper" "close")
+  durationID = (id "wallpaper" "duration")
+  enabledID = (id "wallpaper" "enabled")
+  randomID = (id "wallpaper" "random")
+  pickerID = (id "wallpaper" "picker")
+  durationOptions = []:
+    "5 minutes"
+    "10 minutes"
+    "15 minutes"
+    "20 minutes"
+    "25 minutes"
+    "30 minutes"
+    "35 minutes"
+    "40 minutes"
+    "45 minutes"
+    "50 minutes"
+    "55 minutes"
+    "60 minutes"
+    "65 minutes"
+    "70 minutes"
+    "75 minutes"
+    "80 minutes"
+    "85 minutes"
+    "90 minutes"
+    "95 minutes"
+    "100 minutes"
+    "105 minutes"
+    "110 minutes"
+    "115 minutes"
+    "120 minutes"
+  durationIndex = (shell (durationIndexCommand))
+  switchEnabled = (= (shell (timerEnabledCommand)) "enabled")
+  pickedDuration = nothing
+  status = (shell (statusCommand))
+
+events:
+  when (keyPressed "escape"):
+    closeDialog ""
+  when (clicked closeID):
+    closeDialog ""
+  set pickedDuration (combobox durationID durationIndex durationOptions)
+  when (not (= pickedDuration nothing)):
+    set status (shell (applyDurationCommand pickedDuration))
+    set durationIndex (shell (durationIndexCommand))
+    set status (shell (statusCommand))
+  when (clicked enabledID):
+    if switchEnabled:
+      set status (shell (disableSwitchingCommand))
+    else:
+      set status (shell (enableSwitchingCommand))
+    set switchEnabled (= (shell (timerEnabledCommand)) "enabled")
+    set status (shell (statusCommand))
+  when (clicked randomID):
+    shellLaunch "/home/dneumann/.config/sway/scripts/wallpapers random"
+    set status "Random wallpaper requested"
+  when (clicked pickerID):
+    shellLaunch "/home/dneumann/.config/sway/scripts/wallpapers pick"
+    closeDialog ""
+
+card (id "wallpaper" "panel"):
+  width = fill
+  height = fill
+  padding = 8
+  gap = 12
+  alignItems = AlignStretch
+  background = theme-color "panel"
+  opacity = 0.9
+  dialogHeader (id "wallpaper" "header"):
+    width = fill
+    height = fixed 34
+    padding = 8
+    alignItems = AlignCenter
+    label (id "wallpaper" "title") "Wallpaper Switcher":
+      width = fill
+      height = fit
+    button closeID "x":
+      width = fixed 32
+      height = fit
+  column (id "wallpaper" "body"):
+    width = fill
+    height = fill
+    gap = 12
+    alignItems = AlignStretch
+    label (id "wallpaper" "duration-label") "Switch interval":
+      width = fill
+      height = fit
+    combobox durationID durationIndex durationOptions:
+      width = fill
+      height = fit
+    checkbox enabledID "Automatic switching" switchEnabled:
+      width = fill
+      height = fit
+    button randomID "Random Wallpaper":
+      width = fill
+      height = fit
+    button pickerID "Pick wallpaper now":
+      width = fill
+      height = fit
+  row (id "wallpaper" "footer"):
+    width = fill
+    height = fit
+    padding = 8
+    alignItems = AlignCenter
+    label (id "wallpaper" "status") status:
+      width = fill
+      height = fit
+      textScroll = true

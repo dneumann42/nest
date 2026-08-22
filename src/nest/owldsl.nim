@@ -2860,6 +2860,33 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     )
     boolean(runtime.requireUi().inEventPhase() and runtime.requireUi().clicked(id))
 
+  runtime.evaluator.native "combobox":
+    discard layout
+    let values = env.evalArgs(arguments)
+    if values.len < 3:
+      raise newException(EvaluatorError, "combobox expects id, selected, and options")
+    if values[2].kind != List:
+      raise newException(EvaluatorError, "combobox options must be a list")
+    let
+      id = runtime.asWidgetID(values[0])
+      selected = values[1].asNumber.int
+      config = env.evalConfig(bodyNodes)
+    var options: seq[string]
+    for item in values[2].items:
+      options.add item.asString
+    let picked = runtime.currentUi[].combobox(
+      id,
+      selected,
+      options,
+      config.width,
+      config.height,
+      config.alignSelf,
+    )
+    if runtime.requireUi().inEventPhase() and picked.changed:
+      number(picked.index.float64)
+    else:
+      nothing()
+
   runtime.evaluator.native "lineInput":
     discard layout
     let values = env.evalArgs(arguments)

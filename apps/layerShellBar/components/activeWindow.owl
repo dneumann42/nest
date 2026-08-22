@@ -8,12 +8,12 @@ component activeWindow key:
   if (= title ""):
     label (id keyText "active-window") " ":
       width = fixed ActiveWindowWidth
-      height = fit
+      height = fixed BarWidgetHeight
       textScroll = true
       fontSize = BarWidgetFontSize
   else:
     label (id keyText "active-window") title:
       width = fixed ActiveWindowWidth
-      height = fit
+      height = fixed BarWidgetHeight
       textScroll = true
       fontSize = BarWidgetFontSize

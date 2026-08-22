@@ -43,12 +43,12 @@ component mediaWidget key:
 
   row (id keyText "media"):
     width = fit
-    height = fit
+    height = fixed BarWidgetHeight
     gap = NoSpacing
     alignItems = AlignCenter
     button previousID "◀":
       width = (fixed MediaBarButtonWidth)
-      height = fit
+      height = fixed BarWidgetHeight
       fontSize = BarWidgetFontSize
       buttonPadding = BarWidgetPadding
     imageButton artID art:
@@ -56,17 +56,17 @@ component mediaWidget key:
       height = (fixed MediaBarArtSize)
     button titleID title:
       width = (fixed MediaBarTitleWidth)
-      height = fit
+      height = fixed BarWidgetHeight
       textScroll = true
       fontSize = BarWidgetFontSize
       buttonPadding = BarWidgetPadding
     button playPauseID playPauseLabel:
       width = (fixed MediaBarPlayButtonWidth)
-      height = fit
+      height = fixed BarWidgetHeight
       fontSize = BarWidgetFontSize
       buttonPadding = BarWidgetPadding
     button nextID "▶":
       width = (fixed MediaBarButtonWidth)
-      height = fit
+      height = fixed BarWidgetHeight
       fontSize = BarWidgetFontSize
       buttonPadding = BarWidgetPadding

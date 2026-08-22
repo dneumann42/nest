@@ -13,7 +13,7 @@ fun startMenu lbl:
 fun dateTime:
   button clockID (clock "MMM d, yyyy   hh:mm:ss tt"):
     width = fit
-    height = fit
+    height = fixed BarWidgetHeight
     fontSize = BarWidgetFontSize
     buttonPadding = BarWidgetPadding
 

@@ -24,7 +24,7 @@ fun tint col-name:
 component cpuMeter key:
   button (id (eval key) "cpu") (string "◉ " (shellAsync (id (eval key) "cpu-query") (cpuCommand) FastPollInterval)):
     width = fixed MetricCpuWidth
-    height = fit
+    height = fixed BarWidgetHeight
     background = tint "primary"
     textScroll = true
     fontSize = BarWidgetFontSize
@@ -33,7 +33,7 @@ component cpuMeter key:
 component memoryMeter key:
   button (id (eval key) "memory") (string "▣ " (shellAsync (id (eval key) "memory-query") (memoryCommand) MediaPollInterval)):
     width = fixed MetricMemoryWidth
-    height = fit
+    height = fixed BarWidgetHeight
     background = tint "rose"
     textScroll = true
     fontSize = BarWidgetFontSize
@@ -42,7 +42,7 @@ component memoryMeter key:
 component storageMeter key:
   button (id (eval key) "storage") (string "▤ " (shellAsync (id (eval key) "storage-query") (storageCommand) StoragePollInterval)):
     width = fixed MetricStorageWidth
-    height = fit
+    height = fixed BarWidgetHeight
     background = tint "mauve"
     textScroll = true
     fontSize = BarWidgetFontSize
@@ -60,7 +60,7 @@ component networkMeter key:
 
   button buttonID (string "⇅ " status):
     width = fixed MetricNetworkWidth
-    height = fit
+    height = fixed BarWidgetHeight
     background = tint "sky"
     textScroll = true
     fontSize = BarWidgetFontSize

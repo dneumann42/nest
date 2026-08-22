@@ -1,0 +1,6 @@
+main = "main.owl"
+title = "Wallpaper Switcher"
+width = 420
+height = 320
+layerShell = "none"
+namespace = "nest-wallpaper-switcher"

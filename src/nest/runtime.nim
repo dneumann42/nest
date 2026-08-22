@@ -6,6 +6,34 @@ import nest/[input, screen]
 const
   FixedFrameNumerator = 1000
   FixedFrameDenominator = 60
+  ResizeDrainBudgetMs = 2
+  MaxResizeEventsPerFrame = 256
+
+proc shouldYieldResizeDrain(
+    sawResize: bool; eventCount, drainStartTicks: int
+): bool {.inline.} =
+  ## Resize events can arrive faster than a frame can be laid out and
+  ## presented. Stop draining periodically so the latest consumed size reaches
+  ## the screen instead of waiting behind an unbounded event burst.
+  sawResize and (
+    eventCount >= MaxResizeEventsPerFrame or
+    input.getTicks() - drainStartTicks >= ResizeDrainBudgetMs
+  )
+
+template drainPendingEvents(
+    e: var Event; inputFlags: set[InputFlag]; running: var bool;
+    firstEventHandled: bool; handle: untyped
+) =
+  let drainStartTicks = input.getTicks()
+  var
+    eventCount = if firstEventHandled: 1 else: 0
+    sawResize = firstEventHandled and e.kind == WindowResizeEvent
+  while running and not shouldYieldResizeDrain(
+      sawResize, eventCount, drainStartTicks
+  ) and pollEvent(e, inputFlags):
+    inc eventCount
+    sawResize = sawResize or e.kind == WindowResizeEvent
+    handle
 
 proc scheduleNextFrame(nextFrameTicks: var int; frameRemainder: var int; now: int) =
   frameRemainder += FixedFrameNumerator
@@ -173,10 +201,10 @@ template application*(cfg: AppConfig; blk: untyped) =
       while running and now < nextFrameTicks:
         if input.waitEvent(e, nextFrameTicks - now, inputFlags):
           handleEvent(e, running, updateContext, drawContext)
-          while pollEvent(e, inputFlags):
+          drainPendingEvents(e, inputFlags, running, true):
             handleEvent(e, running, updateContext, drawContext)
         now = input.getTicks()
-      while pollEvent(e, inputFlags):
+      drainPendingEvents(e, inputFlags, running, false):
         handleEvent(e, running, updateContext, drawContext)
       drawContext.ticks = input.getTicks()
       blk
@@ -204,8 +232,11 @@ template application*(cfg: AppConfig; blk: untyped) =
     updateContext.sliderValues.clear()
     if frameEvent:
       handleEvent(e, running, updateContext, drawContext)
-    while pollEvent(e, inputFlags):
-      handleEvent(e, running, updateContext, drawContext)
+      drainPendingEvents(e, inputFlags, running, true):
+        handleEvent(e, running, updateContext, drawContext)
+    else:
+      drainPendingEvents(e, inputFlags, running, false):
+        handleEvent(e, running, updateContext, drawContext)
     drawContext.ticks = input.getTicks()
     blk
     updateContext.mouseLeftPressed = false
@@ -245,10 +276,10 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       while running and now < nextFrameTicks:
         if input.waitEvent(e, nextFrameTicks - now, inputFlags):
           handleEvent(e, running, ui)
-          while pollEvent(e, inputFlags):
+          drainPendingEvents(e, inputFlags, running, true):
             handleEvent(e, running, ui)
         now = input.getTicks()
-      while pollEvent(e, inputFlags):
+      drainPendingEvents(e, inputFlags, running, false):
         handleEvent(e, running, ui)
       ui.setDrawTicks(input.getTicks())
       blk
@@ -276,8 +307,11 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
     ui.beginInputFrame()
     if frameEvent:
       handleEvent(e, running, ui)
-    while pollEvent(e, inputFlags):
-      handleEvent(e, running, ui)
+      drainPendingEvents(e, inputFlags, running, true):
+        handleEvent(e, running, ui)
+    else:
+      drainPendingEvents(e, inputFlags, running, false):
+        handleEvent(e, running, ui)
     ui.setDrawTicks(input.getTicks())
     blk
     ui.finishInputFrame()
