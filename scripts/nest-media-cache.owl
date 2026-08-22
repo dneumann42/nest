@@ -1,0 +1,200 @@
+#!/home/dneumann/.workspace/nest/nest script
+
+setEnv "XDG_RUNTIME_DIR" (env "XDG_RUNTIME_DIR" (string "/run/user/" (trim (shell "id -u"))))
+setEnv "DBUS_SESSION_BUS_ADDRESS" (env "DBUS_SESSION_BUS_ADDRESS" (string "unix:path=" (env "XDG_RUNTIME_DIR") "/bus"))
+
+define:
+  cachePrefix = "/tmp/nest-media-"
+  retries = (toNumber (env "NEST_MEDIA_QUERY_RETRIES" "1") 1)
+  cliCommand = (arg 0 "")
+
+fun cachePath name:
+  string cachePrefix name ".cache"
+
+fun cachedFileValue cacheName fallback:
+  if (fileExists (cachePath cacheName)):
+    readFile (cachePath cacheName) fallback
+  else:
+    fallback
+
+fun rememberSelectedPlayer player:
+  when (not (= player "")):
+    writeFile (cachePath "selected-player") player
+  player
+
+fun playerList:
+  define:
+    result = (run "playerctl -l 2>/dev/null")
+  if (dict-get result "ok"):
+    dict-get result "output"
+  else:
+    ""
+
+fun playerStatus player:
+  trim (dict-get (run (string "playerctl -p " (shellQuote player) " status 2>/dev/null")) "output")
+
+fun playerListed player:
+  = (status (string "playerctl -l 2>/dev/null | grep -Fxq " (shellQuote player))) 0
+
+fun playableCachedPlayer players cached:
+  and
+    (not (= cached ""))
+    (playerListed cached)
+    (or (= (playerStatus cached) "Playing") (= (playerStatus cached) "Paused"))
+
+fun firstPlayingPlayer rows:
+  cond:
+    when (empty? rows):
+      ""
+    when (= (playerStatus (first rows)) "Playing"):
+      first rows
+    when true:
+      firstPlayingPlayer (rest rows)
+
+fun selectedPlayerAttempt remaining:
+  define:
+    players = (playerList)
+    cached = (cachedFileValue "selected-player" "")
+    playing = (firstPlayingPlayer (textLines players))
+  cond:
+    when (playableCachedPlayer players cached):
+      cached
+    when (not (= playing "")):
+      rememberSelectedPlayer playing
+    when (not (= (firstLine players) "")):
+      rememberSelectedPlayer (firstLine players)
+    when (> remaining 1):
+      sleepMs 100
+      selectedPlayerAttempt (- remaining 1)
+    when true:
+      ""
+
+fun selectedPlayer:
+  selectedPlayerAttempt retries
+
+fun playerctlSelected commandText:
+  define:
+    player = (selectedPlayer)
+  if (not (= player "")):
+    run (string "playerctl -p " (shellQuote player) " " commandText)
+  else:
+    run (string "playerctl " commandText)
+
+fun cachedValue cacheName fallback commandText:
+  define:
+    player = (selectedPlayer)
+  if (= player ""):
+    cachedFileValue cacheName fallback
+  else:
+    define:
+      result = (run (string "playerctl -p " (shellQuote player) " " commandText))
+      value = (trim (firstLine (dict-get result "output")))
+    if (and (dict-get result "ok") (not (= value ""))):
+      writeFile (cachePath cacheName) value
+      value
+    else:
+      cachedFileValue cacheName fallback
+
+fun cacheValue cacheName fallback:
+  cachedFileValue cacheName fallback
+
+fun checksum textValue:
+  trim (dict-get (run (string "printf %s " (shellQuote textValue) " | cksum | awk '{print $1}'")) "output")
+
+fun fileUrlPath url:
+  textReplace (textReplace (textReplace (textSlice url 7 (length url)) "%20" " ") "%23" "#") "%25" "%"
+
+fun convertImage source tmp bmp:
+  if (= (status (string "magick " (shellQuote source) " " (shellQuote tmp) " >/dev/null 2>&1")) 0):
+    moveFile tmp bmp
+  else:
+    false
+
+fun cachedArtworkPath cache:
+  define:
+    path = (cacheValue cache "")
+  if (and (not (= path "")) (fileExists path)):
+    path
+  else:
+    ""
+
+fun localArtwork url cache bmp tmp:
+  define:
+    source = (fileUrlPath url)
+  cond:
+    when (and (fileExists bmp) (>= (fileMTime bmp) (fileMTime source))):
+      writeFile (cachePath cache) bmp
+      bmp
+    when (convertImage source tmp bmp):
+      writeFile (cachePath cache) bmp
+      bmp
+    when (fileExists bmp):
+      writeFile (cachePath cache) bmp
+      bmp
+    when true:
+      ""
+
+fun remoteArtwork url cache bmp tmp src:
+  define:
+    needsRefresh = (or (not (fileExists bmp)) (and (fileExists src) (> (fileMTime src) (fileMTime bmp))))
+  when needsRefresh:
+    status (string "curl -L -s --max-time 10 -o " (shellQuote src) " " (shellQuote url) " >/dev/null 2>&1")
+    convertImage src tmp bmp
+  if (fileExists bmp):
+    writeFile (cachePath cache) bmp
+    bmp
+  else:
+    ""
+
+fun artwork:
+  define:
+    cache = "art"
+    url = (trim (firstLine (dict-get (playerctlSelected "metadata mpris:artUrl 2>/dev/null") "output")))
+    key = (checksum url)
+    bmp = (string "/tmp/nest-media-art-" key ".bmp")
+    tmp = (string "/tmp/nest-media-art-" key ".tmp.bmp")
+    src = (string "/tmp/nest-media-art-" key ".src")
+    result = ""
+  cond:
+    when (= url ""):
+      cachedArtworkPath cache
+    when (textStartsWith url "file://"):
+      set result (localArtwork url cache bmp tmp)
+      removeFile tmp
+      result
+    when (or (textStartsWith url "http://") (textStartsWith url "https://")):
+      set result (remoteArtwork url cache bmp tmp src)
+      removeFile tmp
+      result
+    when true:
+      ""
+
+fun quotedArgsFrom index:
+  if (>= index (argc)):
+    ""
+  else:
+    string " " (shellQuote (arg index)) (quotedArgsFrom (+ index 1))
+
+fun prime:
+  setEnv "NEST_MEDIA_QUERY_RETRIES" (env "NEST_MEDIA_PRIME_RETRIES" "15")
+  cachedValue "bar-title" "No media" "metadata --format '{{artist}} - {{title}}'"
+  cachedValue "bar-status" "Stopped" "status"
+  artwork
+  nothing
+
+cond:
+  when (= cliCommand "cached"):
+    print (cachedValue (arg 1 "") (arg 2 "") (string (arg 3 "") (quotedArgsFrom 4)))
+  when (= cliCommand "cache"):
+    print (cacheValue (arg 1 "") (arg 2 ""))
+  when (= cliCommand "artwork"):
+    print (artwork)
+  when (= cliCommand "art-cache"):
+    print (cacheValue "art" "")
+  when (= cliCommand "playerctl"):
+    print (dict-get (playerctlSelected (string (arg 1 "") (quotedArgsFrom 2))) "output")
+  when (= cliCommand "prime"):
+    prime
+  when true:
+    eprintln "usage: scripts/nest-media-cache.owl {cached|cache|artwork|art-cache|playerctl|prime} ..."
+    exit 64

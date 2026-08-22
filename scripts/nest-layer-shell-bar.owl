@@ -1,0 +1,106 @@
+#!/home/dneumann/.workspace/nest/nest script
+
+define:
+  repoDir = "/home/dneumann/.workspace/nest"
+  logFile = (env "NEST_LAYER_SHELL_BAR_LOG_FILE" "/tmp/nest-layer-shell-bar.log")
+  cliCommand = (arg 0 "start")
+
+fun swayPids:
+  dict-get (run "if command -v swaymsg >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then swaymsg -t get_tree 2>/dev/null | jq -r 'def children: .nodes[]?, .floating_nodes[]?; [recurse(children) | select(.app_id? == \"io.highpoint.alatar\" or .name? == \"alatar\" or .name? == \"Nest Layer Shell Bar\" or .app_id? == \"nest-layer-shell-bar\") | .pid?] | map(select(. != null)) | unique | .[]?'; fi") "output"
+
+fun pgrepPids:
+  dict-get (run "if command -v pgrep >/dev/null 2>&1; then pgrep -f '[.]/nest run apps/layerShellBar' 2>/dev/null || true; fi") "output"
+
+fun findBarPids:
+  textLines (dict-get (run (string "printf '%s\n%s\n' " (shellQuote (swayPids)) " " (shellQuote (pgrepPids)) " | awk 'NF && !seen[$0]++'")) "output")
+
+fun signalPids pids:
+  cond:
+    when (empty? pids):
+      false
+    when (killPid (first pids) "USR1"):
+      signalPids (rest pids)
+      true
+    when true:
+      signalPids (rest pids)
+
+fun signalBar:
+  define:
+    pids = (findBarPids)
+  if (empty? pids):
+    false
+  else:
+    signalPids pids
+
+fun killPids pids signal:
+  if (empty? pids):
+    nothing
+  else:
+    killPid (first pids) signal
+    killPids (rest pids) signal
+
+fun anyAlive pids:
+  cond:
+    when (empty? pids):
+      false
+    when (pidAlive (first pids)):
+      true
+    when true:
+      anyAlive (rest pids)
+
+fun waitDead pids attempts:
+  cond:
+    when (empty? pids):
+      true
+    when (not (anyAlive pids)):
+      true
+    when (<= attempts 0):
+      false
+    when true:
+      sleepMs 50
+      waitDead pids (- attempts 1)
+
+fun killExistingBar:
+  define:
+    pids = (findBarPids)
+  when (not (empty? pids)):
+    killPids pids "TERM"
+    when (not (waitDead pids 40)):
+      killPids pids "KILL"
+  nothing
+
+fun startCommand:
+  string "scripts/nest-media-cache.owl prime >/dev/null 2>&1 || true; exec ./nest run apps/layerShellBar >>" (shellQuote logFile) " 2>&1"
+
+fun startBarBackground:
+  launch (startCommand) repoDir
+
+fun waitForSignal attempts:
+  cond:
+    when (signalBar):
+      true
+    when (<= attempts 0):
+      false
+    when true:
+      sleepMs 50
+      waitForSignal (- attempts 1)
+
+fun toggleStartPopover:
+  if (signalBar):
+    nothing
+  else:
+    startBarBackground
+    waitForSignal 300
+    nothing
+
+cond:
+  when (= cliCommand "toggle-start-popover"):
+    toggleStartPopover
+  when (or (= cliCommand "start") (= cliCommand "restart")):
+    killExistingBar
+    setCurrentDir repoDir
+    status "scripts/nest-media-cache.owl prime >/dev/null 2>&1 || true"
+    exit (status (startCommand))
+  when true:
+    eprintln "usage: scripts/nest-layer-shell-bar.owl [start|restart|toggle-start-popover]"
+    exit 64

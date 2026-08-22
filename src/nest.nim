@@ -14,6 +14,9 @@ export dockTop, dockBottom, dockLeft, dockRight
 import owl
 export owl
 
+import variants
+export variants
+
 when isMainModule:
   import nest/cli
 

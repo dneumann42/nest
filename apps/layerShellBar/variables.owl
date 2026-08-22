@@ -5,10 +5,10 @@ define:
   StoragePollInterval = 8000
   NoSpacing = 0
 
-  BarHeight = 30
+  BarHeight = 42
   BarIconSize = - BarHeight 4
   BarOpacity = 0.8
-  BarPadding = 0
+  BarPadding = 4
   BarWidgetFontSize = 10
   BarWidgetPadding = (insets 8 0 8 0)
   BarLeftGap = 14

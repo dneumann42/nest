@@ -1093,11 +1093,11 @@ widget sourceView(editor: EditorState):
 
 A container takes a ~BoxConfig~ from ~cfg~ and a body of declarations. Constraint details are in [[file:layout.org][layout.org]].
 
-| Size policy      | Meaning                                             |
-|------------------+-----------------------------------------------------|
+| Size policy    | Meaning                                           |
+|----------------+---------------------------------------------------|
 | ~fixed(n)~       | exactly ~n~ pixels                                  |
-| ~fill(min, max)~ | take the available space, within bounds             |
-| ~fit(min, max)~  | shrink to the content's measured size               |
+| ~fill(min, max)~ | take the available space, within bounds           |
+| ~fit(min, max)~  | shrink to the content's measured size             |
 | ~prefer(n, ...)~ | ask for ~n~, yield when constraints require another |
 | ~hug(n, ...)~    | same as ~prefer~                                    |
 
@@ -1120,18 +1120,18 @@ widget threePane():
 
 Every widget already has a size. Name one only to change it: a widget that draws its own content fits that content, a field or a pane takes the space it is given, and a container fills its parent.
 
-| Widget                                      | width           | height          |
-|---------------------------------------------+-----------------+-----------------|
-| ~label~, ~coloredLabel~, ~diagnosticLabel~  | ~fit~           | ~fit~           |
-| ~button~, ~imageButton~, ~image~            | ~fit~           | ~fit~           |
-| ~checkbox~, ~combobox~, ~colorSwatch~       | ~fit~           | ~fit~           |
-| ~menu~, ~mesh2d~, ~component~, ~container~  | ~fit~           | ~fit~           |
-| ~slider~                                    | ~fill(min 120)~ | ~fit~           |
-| ~lineInput~                                 | ~fill(min 160)~ | ~fit~           |
-| ~textEditor~                                | ~fill(min 240)~ | ~fill(min 160)~ |
-| ~tabs~, ~menuDivider~                       | ~fill~          | ~fit~           |
-| ~spacer~                                    | ~fill~          | ~fill~          |
-| containers, through ~cfg~                   | ~fill~          | ~fill~          |
+| Widget                               | width         | height        |
+|--------------------------------------+---------------+---------------|
+| ~label~, ~coloredLabel~, ~diagnosticLabel~ | ~fit~           | ~fit~           |
+| ~button~, ~imageButton~, ~image~           | ~fit~           | ~fit~           |
+| ~checkbox~, ~combobox~, ~colorSwatch~      | ~fit~           | ~fit~           |
+| ~menu~, ~mesh2d~, ~component~, ~container~   | ~fit~           | ~fit~           |
+| ~slider~                               | ~fill(min 120)~ | ~fit~           |
+| ~lineInput~                            | ~fill(min 160)~ | ~fit~           |
+| ~textEditor~                           | ~fill(min 240)~ | ~fill(min 160)~ |
+| ~tabs~, ~menuDivider~                    | ~fill~          | ~fit~           |
+| ~spacer~                               | ~fill~          | ~fill~          |
+| containers, through ~cfg~              | ~fill~          | ~fill~          |
 
 #+begin_src nim
 import nest
@@ -1225,8 +1225,8 @@ A drag belongs to the slider the press landed on until the button comes up. Drag
 
 ** Containers
 
-| Container              | Arrangement                                       |
-|------------------------+---------------------------------------------------|
+| Container            | Arrangement                                       |
+|----------------------+---------------------------------------------------|
 | ~ui.row~               | children left to right                            |
 | ~ui.column~            | children top to bottom                            |
 | ~ui.overlay~           | children stacked                                  |
@@ -1313,11 +1313,11 @@ widget logView(lines: seq[string]):
 
 ~widget~ composes existing widgets. A component is the other extension point: a ~Component~ subclass that measures, updates and draws itself, attached to a widget with ~ui.component~. Write one when nothing built in draws what is needed.
 
-| Method        | Called                          | Purpose                         |
-|---------------+---------------------------------+---------------------------------|
+| Method      | Called                        | Purpose                         |
+|-------------+-------------------------------+---------------------------------|
 | ~measure~     | before solving, for ~fit~ boxes | report the content's size       |
-| ~update~      | once per frame, after solving   | react to input                  |
-| ~draw~        | when the widget is dirty        | paint inside the widget's frame |
+| ~update~      | once per frame, after solving | react to input                  |
+| ~draw~        | when the widget is dirty      | paint inside the widget's frame |
 | ~drawOverlay~ | after every ~draw~              | paint above sibling widgets     |
 
 A component that only draws:
@@ -1692,8 +1692,8 @@ widget buildPanel(model: Build) emits BuildEvent:
 
 Frames are event driven. Without input, nothing is drawn. Four calls change that.
 
-| Call                        | Effect                                     |
-|-----------------------------+--------------------------------------------|
+| Call                      | Effect                                     |
+|---------------------------+--------------------------------------------|
 | ~ui.requestRedrawAfter(ms)~ | schedule a frame; the soonest request wins |
 | ~ui.markDirty(id)~          | repaint one widget on the next frame       |
 | ~ui.markAllDirty()~         | repaint the whole frame                    |
@@ -1757,15 +1757,15 @@ nest generate apps/hello                 # scaffold a project.owl and a main.owl
 
 ~project.owl~ is a flat list of bindings, read before the window opens. Every field has a default, and the file may be omitted entirely.
 
-| Field                                                   | Meaning                                                              |
-|---------------------------------------------------------+----------------------------------------------------------------------|
-| ~main~                                                  | entry point, relative to the project directory (~"main.owl"~)         |
-| ~title~                                                 | window title                                                         |
-| ~width~, ~height~                                       | window size, or the thickness of a docked bar                        |
-| ~layerShell~                                            | ~none~, ~top~, ~bottom~, ~left~, ~right~, or an anchored corner        |
-| ~namespace~                                             | layer-shell namespace, and the single-instance lock's name           |
-| ~theme~                                                 | palette name                                                         |
-| ~exclusiveZone~, ~marginTop~ … ~marginLeft~             | layer-shell geometry                                                 |
+| Field                                 | Meaning                                                     |
+|---------------------------------------+-------------------------------------------------------------|
+| ~main~                                  | entry point, relative to the project directory (~"main.owl"~) |
+| ~title~                                 | window title                                                |
+| ~width~, ~height~                         | window size, or the thickness of a docked bar               |
+| ~layerShell~                            | ~none~, ~top~, ~bottom~, ~left~, ~right~, or an anchored corner       |
+| ~namespace~                             | layer-shell namespace, and the single-instance lock's name  |
+| ~theme~                                 | palette name                                                |
+| ~exclusiveZone~, ~marginTop~ … ~marginLeft~ | layer-shell geometry                                        |
 
 #+begin_src owl
 main = "main.owl"
@@ -1901,27 +1901,27 @@ A command is a callable value. User-defined ones come in two kinds, which differ
 
 ~command~, ~component~ and ~block-command~ define raw-syntax commands. A parameter is bound to the unevaluated argument syntax, paired with the caller's environment, and the body runs in a child of the *caller's* environment rather than the definition's. They are not closures — a raw-syntax command resolves free names at the call site, which is why a component can read the ~state~ fields of the program that declared it without taking them as parameters. Getting an argument's value takes an explicit ~(eval key)~.
 
-| Form                       | Parameter bound to  | Body runs in        | Takes a body    | Use for                        |
-|----------------------------+---------------------+---------------------+-----------------+--------------------------------|
-| ~fun name args:~           | evaluated value     | its defining scope  | no              | computation                    |
-| ~fn~ / ~lambda~            | evaluated value     | its defining scope  | no              | an anonymous function          |
-| ~command name args:~       | raw argument syntax | the caller's scope  | no              | anything that needs the syntax |
-| ~component name args:~     | raw argument syntax | the caller's scope  | no              | a widget                       |
-| ~block-command name args:~ | raw argument syntax | the caller's scope  | yes, as ~block~ | a container widget             |
+| Form                     | Parameter bound to  | Body runs in       | Takes a body  | Use for                        |
+|--------------------------+---------------------+--------------------+---------------+--------------------------------|
+| ~fun name args:~           | evaluated value     | its defining scope | no            | computation                    |
+| ~fn~ / ~lambda~              | evaluated value     | its defining scope | no            | an anonymous function          |
+| ~command name args:~       | raw argument syntax | the caller's scope | no            | anything that needs the syntax |
+| ~component name args:~     | raw argument syntax | the caller's scope | no            | a widget                       |
+| ~block-command name args:~ | raw argument syntax | the caller's scope | yes, as ~block~ | a container widget             |
 
 ~component~ is exactly ~command~ under another name; the two exist so that a widget declaration reads as one. Every call also binds ~block~ to the call's body and ~layout~ to the text form of how that body was attached, so a raw-syntax command can be handed a whole subtree as data.
 
 The control-flow and data commands are ordinary commands, most of them defined in owl's own prelude:
 
-| Commands                                                              | Purpose                          |
-|-----------------------------------------------------------------------+----------------------------------|
-| ~if~ / ~else~, ~when~, ~while~, ~cond~, ~pick~, ~and~, ~or~, ~not~     | control flow                     |
-| ~for item (iter values):~                                             | iteration                        |
-| ~define~, ~set~, ~+=~, ~-=~, ~*=~, ~/=~                               | binding and assignment           |
-| ~list~, ~[]~, ~cons~, ~first~, ~rest~, ~nth~, ~empty?~, ~length~      | lists                            |
-| ~dict~, ~{ }~, ~dict-get~, ~dict-put~, ~record~                       | keyed data                       |
-| ~a.b~, ~xs.[0]~                                                       | field and index selectors        |
-| ~open-file~, ~with~, ~read-all~, ~write~                              | files                            |
+| Commands                                         | Purpose                   |
+|--------------------------------------------------+---------------------------|
+| ~if~ / ~else~, ~when~, ~while~, ~cond~, ~pick~, ~and~, ~or~, ~not~ | control flow              |
+| ~for item (iter values):~                          | iteration                 |
+| ~define~, ~set~, ~+=~, ~-=~, ~*=~, ~/=~                      | binding and assignment    |
+| ~list~, ~[]~, ~cons~, ~first~, ~rest~, ~nth~, ~empty?~, ~length~ | lists                     |
+| ~dict~, ~{ }~, ~dict-get~, ~dict-put~, ~record~            | keyed data                |
+| ~a.b~, ~xs.[0]~                                      | field and index selectors |
+| ~open-file~, ~with~, ~read-all~, ~write~                 | files                     |
 
 Nest adds ~string~ for concatenating anything into text, along with ~listAppend~, ~textLines~, ~textFind~, ~textSlice~, ~lineCount~ and ~pathBaseName~, since the prelude is deliberately small.
 
@@ -1979,15 +1979,15 @@ Ids are usually bound in ~state~ as well, so that the handler and the declaratio
 
 ~events:~ is ~ui.events~. Its body runs on the event pass only, and everything that changes state belongs inside one.
 
-| Predicate                | True when                                    |
-|--------------------------+----------------------------------------------|
-| ~clicked id~             | the widget was clicked                       |
-| ~middleClicked id~       | it was middle-clicked                        |
-| ~submitted id~           | a line input was submitted                   |
-| ~focused id~             | it holds focus                               |
-| ~keyPressed "escape"~    | a key was pressed this frame                 |
-| ~external "name"~        | an out-of-frame event was queued under ~name~ |
-| ~received "topic"~       | a message is waiting on ~topic~               |
+| Predicate           | True when                                   |
+|---------------------+---------------------------------------------|
+| ~clicked id~          | the widget was clicked                      |
+| ~middleClicked id~    | it was middle-clicked                       |
+| ~submitted id~        | a line input was submitted                  |
+| ~focused id~          | it holds focus                              |
+| ~keyPressed "escape"~ | a key was pressed this frame                |
+| ~external "name"~     | an out-of-frame event was queued under ~name~ |
+| ~received "topic"~    | a message is waiting on ~topic~               |
 
 *** Widget Commands
 
@@ -2108,18 +2108,18 @@ Choose ~import~ when the file is a shared header of definitions, and ~use~ when 
 
 Most of what the owl vocabulary adds beyond the widget commands is access to the system around the frame.
 
-| Commands                                                                              | Purpose                             |
-|---------------------------------------------------------------------------------------+-------------------------------------|
-| ~shell~, ~shellQuote~                                                                 | run a command and read its output   |
-| ~shellAsync~, ~shellLaunch~                                                           | run one without blocking the frame  |
-| ~clipboardText~, ~copyText~                                                           | the clipboard                       |
-| ~clock~, ~formatNow~, ~today-date~, ~date~ and the ~date-*~ helpers                    | time and dates                      |
-| ~swayWorkspaces~, ~swayWorkspaceSubscription~, ~swayActiveWindowSubscription~          | live Wayland compositor state       |
-| ~pickFile~, ~pickDirectory~, ~pickFileEvent~, ~pickResult~                             | host file pickers                   |
-| ~openDialog~, ~toggleDialog~, ~dialogResult~, ~dialogData~, ~closeDialog~               | dialogs as separate processes       |
-| ~editorText~, ~setEditorText~, ~editorLine~, ~undoEditor~ and the rest of ~*Editor*~   | drive a text editor widget          |
-| ~redrawAfter ms~                                                                      | ask for another frame               |
-| ~external "name"~                                                                     | test for a queued out-of-frame event |
+| Commands                                                                   | Purpose                              |
+|----------------------------------------------------------------------------+--------------------------------------|
+| ~shell~, ~shellQuote~                                                          | run a command and read its output    |
+| ~shellAsync~, ~shellLaunch~                                                    | run one without blocking the frame   |
+| ~clipboardText~, ~copyText~                                                    | the clipboard                        |
+| ~clock~, ~formatNow~, ~today-date~, ~date~ and the ~date-*~ helpers                  | time and dates                       |
+| ~swayWorkspaces~, ~swayWorkspaceSubscription~, ~swayActiveWindowSubscription~    | live Wayland compositor state        |
+| ~pickFile~, ~pickDirectory~, ~pickFileEvent~, ~pickResult~                         | host file pickers                    |
+| ~openDialog~, ~toggleDialog~, ~dialogResult~, ~dialogData~, ~closeDialog~            | dialogs as separate processes        |
+| ~editorText~, ~setEditorText~, ~editorLine~, ~undoEditor~ and the rest of ~*Editor*~ | drive a text editor widget           |
+| ~redrawAfter ms~                                                             | ask for another frame                |
+| ~external "name"~                                                            | test for a queued out-of-frame event |
 
 ~shell~ blocks the frame and is fine for something short. ~shellAsync key command [intervalMs]~ does not block: it starts the process, returns the last output it has for that key — empty on the very first frame — and re-runs the command once the interval has elapsed. It also asks for the frames it needs to notice that the process finished, so there is no ~redrawAfter~ to pair it with.
 
@@ -2147,22 +2147,22 @@ An error does not end the process. The runtime keeps the last frame that rendere
 
 The correspondence is close enough to translate mechanically:
 
-| Nim                              | Owl                                              |
-|----------------------------------+--------------------------------------------------|
-| ~widget name(...)~               | ~component name ...~                             |
-| ~widget name(..., body: untyped)~ | ~block-command name ...~ plus ~eval block~        |
-| a plain ~proc~                    | ~fun~                                            |
-| a state ~object~                  | a ~state~ block                                   |
-| ~proc update(model, event)~      | the body of an ~events~ block                     |
-| ~emits E~ and ~emit~             | ~send topic payload~                             |
+| Nim                               | Owl                                           |
+|-----------------------------------+-----------------------------------------------|
+| ~widget name(...)~                  | ~component name ...~                            |
+| ~widget name(..., body: untyped)~   | ~block-command name ...~ plus ~eval block~        |
+| a plain ~proc~                      | ~fun~                                           |
+| a state ~object~                    | a ~state~ block                                 |
+| ~proc update(model, event)~         | the body of an ~events~ block                   |
+| ~emits E~ and ~emit~                  | ~send topic payload~                            |
 | reading a child's returned events | ~received~ and ~receive~                          |
-| ~ui.events:~                     | ~events:~                                        |
-| ~ui.scope("key"):~               | ~scope "key":~                                   |
-| ~ui.id("a", "b")~                | ~id "a" "b"~                                     |
-| ~cfg(width = fill(), gap = 8)~   | ~width = fill~ and ~gap = 8~ in the widget's body |
-| ~runApp(cfg, model, update, root)~ | ~project.owl~ plus ~main.owl~                    |
-| ~ui.requestRedrawAfter(ms)~      | ~redrawAfter ms~                                 |
-| ~import module~                  | ~import "module.owl"~ or ~use module:~            |
+| ~ui.events:~                        | ~events:~                                       |
+| ~ui.scope("key"):~                  | ~scope "key":~                                  |
+| ~ui.id("a", "b")~                   | ~id "a" "b"~                                    |
+| ~cfg(width = fill(), gap = 8)~      | ~width = fill~ and ~gap = 8~ in the widget's body |
+| ~runApp(cfg, model, update, root)~  | ~project.owl~ plus ~main.owl~                     |
+| ~ui.requestRedrawAfter(ms)~         | ~redrawAfter ms~                                |
+| ~import module~                     | ~import "module.owl"~ or ~use module:~            |
 
 Differences that matter in practice:
 
