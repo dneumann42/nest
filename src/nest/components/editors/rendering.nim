@@ -1,4 +1,4 @@
-import std/[math, sets, strutils]
+import std/[math, re, sets, strutils]
 
 import ../../[resources, widgets2]
 import nest/[coords, screen]
@@ -33,58 +33,67 @@ proc editorSnapTarget(value, lo, hi: float64): float64 =
 proc expandTabs(text: string): string =
   text.replace("\t", "    ")
 
-type EditorTokenKind = enum
-  EditorTokenPlain
-  EditorTokenKeyword
-  EditorTokenType
-  EditorTokenString
-  EditorTokenNumber
-  EditorTokenComment
-  EditorTokenOperator
-
 proc isIdentStart(ch: char): bool =
   ch == '_' or ch.isAlphaAscii
 
 proc isIdentPart(ch: char): bool =
   ch == '_' or ch.isAlphaNumeric
 
-proc nimTokenKind(token: string): EditorTokenKind =
-  case token
-  of "addr", "and", "as", "asm", "bind", "block", "break", "case", "cast",
-      "concept", "const", "continue", "converter", "defer", "discard",
-          "distinct", "do", "elif",
-      "else", "end", "enum", "except", "export", "finally", "for", "from",
-          "func",
-      "if", "import", "in", "include", "interface", "is", "isnot", "iterator",
-          "let",
-      "macro", "method", "mixin", "nil", "not", "notin", "object", "of", "or",
-          "out",
-      "proc", "ptr", "raise", "ref", "return", "shl", "shr", "static",
-          "template",
-      "try", "tuple", "type", "using", "var", "when", "while", "xor", "yield":
-    EditorTokenKeyword
-  of "bool", "char", "cstring", "float", "float32", "float64", "int", "int8",
-      "int16", "int32", "int64", "string", "uint", "uint8", "uint16", "uint32", "uint64":
-    EditorTokenType
-  else:
-    EditorTokenPlain
+proc wordMatch(line: string, cursor: int, word: string): bool =
+  if word.len == 0 or cursor + word.len > line.len:
+    return false
+  if line[cursor ..< cursor + word.len] != word:
+    return false
+  let beforeOk = cursor == 0 or not line[cursor - 1].isIdentPart
+  let after = cursor + word.len
+  let afterOk = after >= line.len or not line[after].isIdentPart
+  beforeOk and afterOk
 
-proc tokenColor(ctx: var DrawContext, kind: EditorTokenKind): Color =
-  case kind
-  of EditorTokenKeyword:
-    ctx.palette.mauve
-  of EditorTokenType:
-    ctx.palette.sky
-  of EditorTokenString:
-    ctx.palette.butter
-  of EditorTokenNumber:
-    ctx.palette.peach
-  of EditorTokenComment:
-    ctx.palette.foreground
-  of EditorTokenOperator:
-    ctx.palette.rose
-  of EditorTokenPlain:
-    ctx.palette.textColor
+proc matchRule(line: string, cursor: int, rule: SyntaxRule): int =
+  case rule.kind
+  of SyntaxRegex:
+    try:
+      result = line.matchLen(re(rule.pattern), cursor)
+      if result < 0:
+        result = 0
+    except CatchableError:
+      result = 0
+  of SyntaxWord:
+    if line.wordMatch(cursor, rule.pattern):
+      result = rule.pattern.len
+  of SyntaxStartsWith:
+    if rule.pattern.len > 0 and cursor + rule.pattern.len <= line.len and
+        line[cursor ..< cursor + rule.pattern.len] == rule.pattern:
+      result = line.len - cursor
+  of SyntaxContains:
+    if rule.pattern.len > 0 and cursor + rule.pattern.len <= line.len and
+        line[cursor ..< cursor + rule.pattern.len] == rule.pattern:
+      result = rule.pattern.len
+  of SyntaxSpan:
+    if rule.pattern.len > 0 and cursor + rule.pattern.len <= line.len and
+        line[cursor ..< cursor + rule.pattern.len] == rule.pattern:
+      let contentStart = cursor + rule.pattern.len
+      let stop =
+        if rule.stopPattern.len == 0:
+          -1
+        else:
+          line.find(rule.stopPattern, contentStart)
+      result =
+        if stop < 0:
+          line.len - cursor
+        else:
+          stop + rule.stopPattern.len - cursor
+
+proc firstSyntaxMatch(
+    syntax: SyntaxDefinition,
+    line: string,
+    cursor: int,
+): tuple[length: int, color: Color] =
+  for rule in syntax.rules:
+    let length = line.matchRule(cursor, rule)
+    if length > 0:
+      return (length, rule.color)
+  (0, Color())
 
 proc drawHighlightedLine(
     self: Editor,
@@ -94,61 +103,28 @@ proc drawHighlightedLine(
     line: string,
     bg: Color,
 ) =
-  if self.syntax.len == 0:
+  if self.state.syntax.rules.len == 0:
     discard drawText(font, x, y, line.expandTabs, ctx.palette.textColor, bg)
     return
 
   var
     cursor = 0
     drawX = x
-  template drawSegment(segment: string, kind: EditorTokenKind) =
+  template drawSegment(segment: string, color: Color) =
     block:
       let rendered = segment.expandTabs
       if rendered.len > 0:
-        let extent = drawText(font, drawX, y, rendered, ctx.tokenColor(kind), bg)
+        let extent = drawText(font, drawX, y, rendered, color, bg)
         drawX += extent.w
 
   while cursor < line.len:
-    let ch = line[cursor]
-    if ch == '#':
-      drawSegment(line[cursor .. ^1], EditorTokenComment)
-      return
-    elif ch in {'"', '\''}:
-      let quote = ch
-      var stop = cursor + 1
-      while stop < line.len:
-        if line[stop] == quote and (stop == cursor + 1 or line[stop - 1] != '\\'):
-          inc stop
-          break
-        inc stop
-      drawSegment(line[cursor ..< min(stop, line.len)], EditorTokenString)
-      cursor = min(stop, line.len)
-    elif ch.isDigit:
-      var stop = cursor + 1
-      while stop < line.len and (line[stop].isAlphaNumeric or line[stop] in {
-          '_', '.'}):
-        inc stop
-      drawSegment(line[cursor ..< stop], EditorTokenNumber)
+    let matched = self.state.syntax.firstSyntaxMatch(line, cursor)
+    if matched.length > 0:
+      let stop = min(cursor + matched.length, line.len)
+      drawSegment(line[cursor ..< stop], matched.color)
       cursor = stop
-    elif ch.isIdentStart:
-      var stop = cursor + 1
-      while stop < line.len and line[stop].isIdentPart:
-        inc stop
-      let token = line[cursor ..< stop]
-      let kind =
-        case self.syntax
-        of "nim":
-          nimTokenKind(token)
-        else:
-          EditorTokenPlain
-      drawSegment(token, kind)
-      cursor = stop
-    elif ch in {'=', '+', '-', '*', '/', '<', '>', '!', '?', ':', '.', ',', ';',
-        '|', '&', '^', '%', '@', '~'}:
-      drawSegment($ch, EditorTokenOperator)
-      inc cursor
     else:
-      drawSegment($ch, EditorTokenPlain)
+      drawSegment($line[cursor], ctx.palette.textColor)
       inc cursor
 
 proc nearlyEqual(a, b: float64): bool =

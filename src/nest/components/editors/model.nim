@@ -1,5 +1,6 @@
 import std/[math, sets, strutils]
 
+import ../../screen
 import ../../widgets2
 import ../component
 
@@ -18,6 +19,23 @@ type
   EditorCursor* = object
     index*: int
 
+  SyntaxMatchKind* = enum
+    SyntaxRegex
+    SyntaxWord
+    SyntaxStartsWith
+    SyntaxContains
+    SyntaxSpan
+
+  SyntaxRule* = object
+    kind*: SyntaxMatchKind
+    pattern*: string
+    stopPattern*: string
+    color*: Color
+
+  SyntaxDefinition* = object
+    name*: string
+    rules*: seq[SyntaxRule]
+
   EditorState* = ref object
     text*: string
     cursor*: int
@@ -32,6 +50,7 @@ type
     dragStartMouse*: float64
     dragStartScroll*: float64
     ensureCursorVisible*: bool
+    syntax*: SyntaxDefinition
 
   Editor* = ref object of Interactive
     state*: EditorState
@@ -47,6 +66,14 @@ proc new*(T: typedesc[EditorState], text = ""): T =
   ## Create editor state holding `text`, with the cursor at its end and
   ## nothing selected.
   T(text: text, cursor: text.len, selectionAnchor: -1, preferredColumn: -1)
+
+proc clearSyntax*(state: EditorState) =
+  ## Remove syntax highlighting from this editor state.
+  state.syntax = SyntaxDefinition()
+
+proc setSyntax*(state: EditorState, syntax: SyntaxDefinition) =
+  ## Replace this editor state's syntax highlighting definition.
+  state.syntax = syntax
 
 proc clampCursor*(state: EditorState) =
   ## Pull the cursor, and the selection anchor when there is one, back inside
