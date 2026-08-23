@@ -921,7 +921,9 @@ proc getCachedTextEntry(
   if key in textCache:
     textCache[key].lastUsed = nextTextCacheGeneration()
     return textCache[key]
-  let surf = sdl3_ttf.renderTextBlended(fp, cstring(text), 0, toColor(fg))
+  var glyphColor = fg
+  glyphColor.a = 255
+  let surf = sdl3_ttf.renderTextBlended(fp, cstring(text), 0, toColor(glyphColor))
   if surf == nil:
     return TextCacheEntry()
   let tex = createTextureFromSurface(ren, surf)
@@ -951,12 +953,18 @@ proc sdlDrawText(
     )
     ensureDrawColor(bg)
     discard renderFillRect(ren, addr bgRect)
+  if fg.a == 0:
+    return entry.extent
   var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat,
       h: entry.extent.h.cfloat)
   var dst =
     FRect(x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat,
         h: entry.extent.h.cfloat)
+  var previousAlpha: uint8 = 255
+  discard getTextureAlphaMod(entry.texture, previousAlpha)
+  discard setTextureAlphaMod(entry.texture, fg.a)
   discard renderTexture(ren, entry.texture, addr src, addr dst)
+  discard setTextureAlphaMod(entry.texture, previousAlpha)
   result = entry.extent
 
 proc sdlGetFontMetrics(f: screen.Font): FontMetrics =

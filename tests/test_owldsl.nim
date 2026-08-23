@@ -412,6 +412,75 @@ tabs (id "tabs") labels selected:
     finally:
       fontRelays = originalFontRelays
 
+  test "owl widget commands share Nim UI driver sizing defaults":
+    let originalFontRelays = fontRelays
+    fontRelays = FontRelays(
+      openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
+      metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+      Font(size),
+      closeFont: proc(f: Font) =
+      discard,
+      getFontMetrics: proc(f: Font): FontMetrics =
+      FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+      measureText: proc(f: Font; text: string): TextExtent =
+      TextExtent(w: max(text.len, 1) * 8, h: 18),
+      drawText: proc(f: Font; x, y: int; text: string; fg,
+          bg: Color): TextExtent =
+      TextExtent(w: max(text.len, 1) * 8, h: 18),
+    )
+    try:
+      let runtime = NestOwlRuntime.init()
+      var ui = UI.init()
+      ui.initContext(420, 260)
+      ui.loadFont("font", "", 18)
+
+      runtime.renderLayoutOnly(ui, parse(
+          """
+state "root":
+  selected = 0
+  options = []:
+    "one"
+    "two"
+row (id "leaf-row"):
+  width = (fixed 420)
+  height = (fixed 60)
+  gap = 8
+  alignItems = AlignStart
+  label (id "label") "Label"
+  button (id "button") "Button"
+  checkbox (id "checkbox") "Check" true
+  combobox (id "combo") selected options
+row (id "fill-row"):
+  width = (fixed 420)
+  height = (fixed 60)
+  gap = 8
+  alignItems = AlignStart
+  lineInput (id "input") ""
+  horizontalSlider (id "slider") 20 0 100
+  tabs (id "tabs") options selected
+editor (id "editor")
+"""), 420, 260)
+
+      check not runtime.hasError
+      for id in ["label", "button", "checkbox", "combo"]:
+        let frame = ui.widget(ui.id(id)).frame
+        check frame.width > 0
+        check frame.width < 120
+        check frame.height > 0
+        check frame.height < 60
+
+      check ui.widget(ui.id("input")).frame.width >= 160
+      check ui.widget(ui.id("slider")).frame.width >= 120
+      check ui.widget(ui.id("tabs")).frame.width > 0
+      for id in ["input", "slider", "tabs"]:
+        check ui.widget(ui.id(id)).frame.height > 0
+
+      let editorFrame = ui.widget(ui.id("editor")).frame
+      check editorFrame.width == 420
+      check editorFrame.height >= 160
+    finally:
+      fontRelays = originalFontRelays
+
   test "duck app renders with at least one buffer tab":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
@@ -820,7 +889,8 @@ animation (id "panel") (not (dialogClosing?)):
 
       if app.runtime.lastError == "":
         check layoutUi.widget(layoutUi.id("wallpaper", "panel")).frame.width > 0
-        check layoutUi.widget(layoutUi.id("wallpaper", "duration")).frame.width > 0
+        check layoutUi.widget(layoutUi.id("wallpaper",
+            "duration")).frame.width > 0
         check layoutUi.widget(layoutUi.id("wallpaper", "enabled")).frame.width > 0
         check layoutUi.widget(layoutUi.id("wallpaper", "random")).frame.width > 0
         check layoutUi.widget(layoutUi.id("wallpaper", "picker")).frame.width > 0

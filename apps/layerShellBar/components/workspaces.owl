@@ -5,11 +5,9 @@ fun workspaceLabel workspace:
     name = (dict-get workspace "name")
   cond:
     when (dict-get workspace "urgent"):
-      string "! " IconWorkspace " " name
-    when (dict-get workspace "focused"):
-      string IconWorkspace " " name
+      string "! " name
     when T:
-      string IconWorkspace " " name
+      string name
 
 fun workspaceBackgroundColor workspace:      
   cond:

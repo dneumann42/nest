@@ -155,6 +155,15 @@ type
     inputID*: WidgetID
     key*: string
 
+  UIDriverRelays* = object
+    containerConfig*: proc(): BoxConfig {.raises: [].}
+    leafConfig*: proc(): BoxConfig {.raises: [].}
+    menuDividerConfig*: proc(): BoxConfig {.raises: [].}
+    tabsConfig*: proc(): BoxConfig {.raises: [].}
+    sliderConfig*: proc(): BoxConfig {.raises: [].}
+    lineInputConfig*: proc(): BoxConfig {.raises: [].}
+    editorConfig*: proc(): BoxConfig {.raises: [].}
+
 macro layoutOnly*(definition: untyped): untyped =
   ## Pragma macro that turns a routine into a no-op during the event phase.
   ##
@@ -276,6 +285,25 @@ proc cfg*(
     syntax: syntax,
     style: resolvedStyle,
   )
+
+proc defaultUIDriverRelays*(): UIDriverRelays =
+  ## Return the UI declaration defaults shared by language drivers.
+  ##
+  ## Nim's native procs expose the same defaults in their signatures; script
+  ## drivers use this relay table so missing attributes resolve identically.
+  UIDriverRelays(
+    containerConfig: proc(): BoxConfig = cfg(),
+    leafConfig: proc(): BoxConfig = cfg(width = fit(), height = fit()),
+    menuDividerConfig: proc(): BoxConfig = cfg(width = fill(), height = fit()),
+    tabsConfig: proc(): BoxConfig = cfg(width = fill(), height = fit()),
+    sliderConfig: proc(): BoxConfig = cfg(width = fill(min = 120), height = fit()),
+    lineInputConfig: proc(): BoxConfig = cfg(width = fill(min = 160),
+        height = fit()),
+    editorConfig: proc(): BoxConfig = cfg(width = fill(min = 240),
+        height = fill(min = 160)),
+  )
+
+var uiDriverRelays* = defaultUIDriverRelays()
 
 proc withBackground*(config: BoxConfig, background: Color): BoxConfig =
   ## Return `config` with `background` as its explicit background colour.
@@ -587,8 +615,8 @@ proc windowInactiveFor*(self: UI, graceMs: int): bool {.raises: [].} =
 
 proc windowInactiveRemainingMs*(self: UI, graceMs: int): int {.raises: [].} =
   ## Return the remaining grace delay for inactive-window auto-dismiss.
-  if not self.windowAutoDismissArmed or self.windowFocused or self.windowMouseInside or
-      self.windowInactiveSince == 0:
+  if not self.windowAutoDismissArmed or self.windowFocused or
+      self.windowMouseInside or self.windowInactiveSince == 0:
     return -1
   max(self.windowInactiveSince + max(graceMs, 0) - self.nowTicks(), 0)
 
@@ -1139,8 +1167,8 @@ template autoScoped*(self: var UI, body: untyped) =
 proc peelSignature(node: NimNode, returnType, eventType: var NimNode): NimNode =
   ## Strip `emits E` and `-> T` off a widget signature, in any order, including
   ## when an export marker encloses them.
-  if node.kind == nnkCommand and node.len == 2 and node[1].kind == nnkCommand and
-      node[1][0].eqIdent("emits"):
+  if node.kind == nnkCommand and node.len == 2 and node[1].kind ==
+      nnkCommand and node[1][0].eqIdent("emits"):
     eventType = node[1][1]
     return node[0].peelSignature(returnType, eventType)
   if node.kind == nnkInfix and node.len == 3 and node[0].eqIdent("->"):
