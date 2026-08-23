@@ -1,6 +1,6 @@
 import "../variables.owl"
 
-component dateSelector key target:
+widget dateSelector key target:
   define:
     keyText = (eval key)
     selected = (eval target)
@@ -32,12 +32,14 @@ component dateSelector key target:
       button previousID "<":
         width = (fixed CalendarNavButtonWidth)
         height = fit
+      tooltip previousID "Previous month"
       label (id keyText "calendar-title") (date-month-title year month):
         width = fill
         height = fit
       button nextID ">":
         width = (fixed CalendarNavButtonWidth)
         height = fit
+      tooltip nextID "Next month"
     row (id keyText "calendar-weekdays"):
       width = fill
       height = fit
@@ -79,6 +81,7 @@ component dateSelector key target:
             button dayID cellDay:
               width = (fixed CalendarDayWidth)
               height = fit
+            tooltip dayID (string "Select " cellDate)
             else:
               spacer (id keyText "blank" week weekday):
                 width = (fixed CalendarDayWidth)
@@ -88,7 +91,7 @@ component dateSelector key target:
       width = fill
       height = fit
 
-component dateSelectorWithSignal key target clickedTarget:
+widget dateSelectorWithSignal key target clickedTarget:
   define:
     keyText = (eval key)
     selected = (eval target)
@@ -122,12 +125,14 @@ component dateSelectorWithSignal key target clickedTarget:
       button previousID "<":
         width = (fixed CalendarNavButtonWidth)
         height = fit
+      tooltip previousID "Previous month"
       label (id keyText "calendar-title") (date-month-title year month):
         width = fill
         height = fit
       button nextID ">":
         width = (fixed CalendarNavButtonWidth)
         height = fit
+      tooltip nextID "Next month"
     define:
       bw = CalendarPopoverDayWidth
     row (id keyText "calendar-weekdays"):
@@ -172,6 +177,7 @@ component dateSelectorWithSignal key target clickedTarget:
             button dayID cellDay:
               width = (fixed bw)
               height = fit
+            tooltip dayID (string "Select " cellDate)
             else:
               spacer (id keyText "blank" week weekday):
                 width = (fixed bw)
@@ -180,4 +186,3 @@ component dateSelectorWithSignal key target clickedTarget:
     label (id keyText "selected-date") selected:
       width = fill
       height = fit
-

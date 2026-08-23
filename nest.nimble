@@ -11,6 +11,7 @@ bin = @["nest"]
 
 task test, "Run the Nest test suite":
   exec "nim c -r --path:src --nimcache:build/nimcache tests/test_layout.nim"
+  exec "nim c -r --path:src --nimcache:build/nimcache tests/test_resize_pacing.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_ui.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_owldsl.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_widget.nim"

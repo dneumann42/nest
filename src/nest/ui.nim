@@ -1,12 +1,20 @@
-import std/[math, macros, sets, strutils, tables]
+import std/[json, math, macros, os, osproc, sets, strutils, tables]
 
 import layouts, components, coords, palette, resources, widgets2
 export layouts, components
 import nest/screen
 
+const
+  TooltipDelayMs = 250
+  TooltipCursorInset = 4
+
 type
   ComponentWidget = tuple[component: Component, widget: Widget]
   WidgetSlot* = seq[Widget]
+  PopoverProcess = ref object
+    process: Process
+    resultPath: string
+    key: string
   LayoutKind = enum
     RowLayout
     ColumnLayout
@@ -102,6 +110,12 @@ type
     eventActiveWidgets: HashSet[WidgetID]
     eventSubmittedWidgets: HashSet[WidgetID]
     eventFocusedWidget: WidgetID
+    tooltipProcess: PopoverProcess
+    tooltipTexts: Table[WidgetID, string]
+    tooltipHoverID: WidgetID
+    tooltipHoverText: string
+    tooltipHoverSince: int
+    choicePopovers: Table[WidgetID, PopoverProcess]
     pointerSurfaceWidget: WidgetID
     pointerSurfaceIDs: HashSet[WidgetID]
     modalWidgets: HashSet[WidgetID]
@@ -176,6 +190,18 @@ proc cfg*(
     buttonPadding = -1.0,
     syntax = "",
     style = ComponentStyle(),
+    cornerStyle = FlatCorners,
+    radius = 0.0,
+    radiusTopLeft = NaN,
+    radiusTopRight = NaN,
+    radiusBottomRight = NaN,
+    radiusBottomLeft = NaN,
+    shadow = false,
+    shadowColor = color(0, 0, 0, 96),
+    shadowOffsetX = 0.0,
+    shadowOffsetY = 3.0,
+    shadowBlur = 8.0,
+    shadowSpread = 0.0,
 ): BoxConfig =
   ## Build the configuration shared by Nest's box widgets.
   ##
@@ -197,6 +223,24 @@ proc cfg*(
     resolvedPadding.right = paddingRight
   if paddingBottom == paddingBottom:
     resolvedPadding.bottom = paddingBottom
+  var resolvedStyle = style
+  resolvedStyle.cornerStyle = cornerStyle
+  resolvedStyle.cornerRadii = radii(radius)
+  if radiusTopLeft == radiusTopLeft:
+    resolvedStyle.cornerRadii.topLeft = radiusTopLeft
+  if radiusTopRight == radiusTopRight:
+    resolvedStyle.cornerRadii.topRight = radiusTopRight
+  if radiusBottomRight == radiusBottomRight:
+    resolvedStyle.cornerRadii.bottomRight = radiusBottomRight
+  if radiusBottomLeft == radiusBottomLeft:
+    resolvedStyle.cornerRadii.bottomLeft = radiusBottomLeft
+  if shadow:
+    resolvedStyle.hasShadow = true
+    resolvedStyle.shadowColor = shadowColor
+    resolvedStyle.shadowOffsetX = shadowOffsetX
+    resolvedStyle.shadowOffsetY = shadowOffsetY
+    resolvedStyle.shadowBlur = shadowBlur
+    resolvedStyle.shadowSpread = shadowSpread
   BoxConfig(
     width: width,
     height: height,
@@ -216,7 +260,7 @@ proc cfg*(
     fontSize: fontSize,
     buttonPadding: insets(buttonPadding),
     syntax: syntax,
-    style: style,
+    style: resolvedStyle,
   )
 
 proc withBackground*(config: BoxConfig, background: Color): BoxConfig =
@@ -230,6 +274,46 @@ proc withOpacity*(config: BoxConfig, opacity: float64): BoxConfig =
   result = config
   result.style.hasOpacity = true
   result.style.opacity = opacity
+
+proc withCornerStyle*(config: BoxConfig, style: CornerStyle): BoxConfig =
+  ## Return `config` with `style` controlling whether corners are flat or rounded.
+  result = config
+  result.style.cornerStyle = style
+
+proc withRadius*(config: BoxConfig, radius: float64): BoxConfig =
+  ## Return `config` with one radius applied to every corner.
+  result = config
+  result.style.cornerRadii = radii(radius)
+
+proc withRadii*(
+    config: BoxConfig,
+    topLeft, topRight, bottomRight, bottomLeft: float64,
+): BoxConfig =
+  ## Return `config` with an independent radius for each corner.
+  result = config
+  result.style.cornerRadii = CornerRadii(
+    topLeft: topLeft,
+    topRight: topRight,
+    bottomRight: bottomRight,
+    bottomLeft: bottomLeft,
+  )
+
+proc withShadow*(
+    config: BoxConfig,
+    shadowColor = color(0, 0, 0, 96),
+    offsetX = 0.0,
+    offsetY = 3.0,
+    blur = 8.0,
+    spread = 0.0,
+): BoxConfig =
+  ## Return `config` with an outer shadow.
+  result = config
+  result.style.hasShadow = true
+  result.style.shadowColor = shadowColor
+  result.style.shadowOffsetX = offsetX
+  result.style.shadowOffsetY = offsetY
+  result.style.shadowBlur = blur
+  result.style.shadowSpread = spread
 
 proc init*(T: typedesc[UI]): T =
   ## Create an empty UI: a fresh layout whose root fills the window, the
@@ -368,6 +452,179 @@ proc redrawDelayMs*(self: UI): int =
 proc clearRedrawRequest*(self: var UI) {.raises: [].} =
   ## Forget the scheduled redraw.
   self.hasScheduledRedraw = false
+
+proc externalPopoverAvailable(): bool {.raises: [].} =
+  when defined(linux):
+    screen.externalPopoversEnabled and getEnv("WAYLAND_DISPLAY").len > 0
+  else:
+    false
+
+proc tooltipTraceEnabled(): bool {.raises: [].} =
+  getEnv("NEST_TOOLTIP_TRACE").normalize in ["1", "true", "yes", "on"]
+
+proc traceTooltip(message: string) {.raises: [].} =
+  if tooltipTraceEnabled():
+    try:
+      echo "[nest tooltip] " & message
+    except IOError:
+      discard
+
+proc closePopover(popover: PopoverProcess) {.raises: [].} =
+  if popover == nil or popover.process == nil:
+    return
+  try:
+    if popover.process.running:
+      popover.process.terminate
+      discard popover.process.waitForExit(100)
+    else:
+      discard popover.process.waitForExit(0)
+    popover.process.close
+  except OSError:
+    discard
+  except IOError:
+    discard
+  except ValueError:
+    discard
+
+proc popoverAnchorJson(self: UI, x, y: int): string {.raises: [].} =
+  $(%*{
+    "x": x,
+    "y": y,
+    "width": 1,
+    "height": 1,
+    "windowWidth": self.windowWidth,
+    "windowHeight": max(self.windowHeight, 1),
+  })
+
+proc cursorPopoverAnchorJson(self: UI, x, y: int): string {.raises: [].} =
+  $(%*{
+    "cursor": true,
+    "x": x,
+    "y": y,
+    "width": 1,
+    "height": 1,
+    "windowWidth": max(self.windowWidth, 1),
+    "windowHeight": max(self.windowHeight, 1),
+  })
+
+proc startPopoverProcess(
+    command: string, args: openArray[string], resultPath = "", key = ""
+): PopoverProcess {.raises: [].} =
+  when defined(linux):
+    try:
+      var processArgs = @[command]
+      for arg in args:
+        processArgs.add arg
+      result = PopoverProcess(
+        process: startProcess(
+          getAppFilename(), args = processArgs, options = {poUsePath,
+              poParentStreams}
+        ),
+        resultPath: resultPath,
+        key: key,
+      )
+    except OSError:
+      result = nil
+    except IOError:
+      result = nil
+  else:
+    discard command
+    discard args
+    discard resultPath
+    discard key
+
+proc showExternalTooltip*(self: var UI, id: WidgetID, text: string) {.raises: [].} =
+  ## Show `text` next to the pointer in a separate popover process when the
+  ## current platform supports external popovers.
+  if text.len == 0 or not externalPopoverAvailable():
+    if text.len > 0:
+      traceTooltip("external popovers unavailable")
+    return
+  let key = $id & "\x1f" & text
+  if self.tooltipProcess != nil and self.tooltipProcess.key == key:
+    return
+  self.tooltipProcess.closePopover()
+  traceTooltip("show " & $id & " " & text)
+  self.tooltipProcess = startPopoverProcess(
+    "tooltip-popover",
+    [text, self.cursorPopoverAnchorJson(
+        max(self.context.update.mouseX - TooltipCursorInset, 0),
+        max(self.context.update.mouseY - TooltipCursorInset, 0),
+      ), self.themeName, $getCurrentProcessId()],
+    key = key,
+  )
+
+proc hideExternalTooltip*(self: var UI) {.raises: [].} =
+  ## Close the currently shown external tooltip, if any.
+  self.tooltipProcess.closePopover()
+  self.tooltipProcess = nil
+
+proc tooltipNow(self: UI): int {.raises: [].} =
+  if self.context.draw.ticks > 0:
+    self.context.draw.ticks
+  else:
+    try:
+      input.getTicks()
+    except Exception:
+      0
+
+proc evaluateTooltipHover(self: var UI) {.raises: [].} =
+  if not externalPopoverAvailable():
+    return
+  var
+    bestID = InvalidWidgetID
+    bestText = ""
+    bestArea = Inf
+  for id, text in self.tooltipTexts.pairs:
+    if text.len == 0:
+      continue
+    let located = self.widgetFrame(id)
+    if not located.ok:
+      continue
+    let frame = located.frame
+    if self.context.update.mouseX.float64 >= frame.x and
+        self.context.update.mouseX.float64 < frame.x + frame.width and
+        self.context.update.mouseY.float64 >= frame.y and
+        self.context.update.mouseY.float64 < frame.y + frame.height:
+      let area = frame.width * frame.height
+      if bestID == InvalidWidgetID or area < bestArea:
+        bestID = id
+        bestText = text
+        bestArea = area
+  if bestID == InvalidWidgetID:
+    self.tooltipHoverID = InvalidWidgetID
+    self.tooltipHoverText = ""
+    self.tooltipHoverSince = 0
+    self.hideExternalTooltip()
+    return
+
+  let now = self.tooltipNow()
+  if bestID != self.tooltipHoverID or bestText != self.tooltipHoverText:
+    traceTooltip("hover " & $bestID & " " & bestText)
+    self.tooltipHoverID = bestID
+    self.tooltipHoverText = bestText
+    self.tooltipHoverSince = now
+    self.hideExternalTooltip()
+    self.requestRedrawAfterSafe(TooltipDelayMs)
+    return
+
+  let elapsed = now - self.tooltipHoverSince
+  if elapsed < TooltipDelayMs:
+    self.requestRedrawAfterSafe(TooltipDelayMs - elapsed)
+    return
+
+  self.showExternalTooltip(bestID, bestText)
+
+proc tooltip*(self: var UI, id: WidgetID, text: string) =
+  ## Attach a tooltip to the widget `id`.
+  ##
+  ## Layer-shell Wayland apps show the tooltip as a separate popover process
+  ## so it can escape the parent window bounds. Other apps currently ignore
+  ## the request.
+  if text.len == 0:
+    self.tooltipTexts.del id
+  else:
+    self.tooltipTexts[id] = text
 
 proc markAllDirty*(self: var UI) {.raises: [].} =
   ## Mark the whole frame as needing to be redrawn.
@@ -537,7 +794,11 @@ proc setRenderKey*(self: var UI, id: WidgetID, key: string) =
 proc renderKey(kind: string, config: BoxConfig): string =
   let styleKey =
     "|" & $config.style.hasBackground & "|" & $config.style.background & "|" &
-    $config.style.hasOpacity & "|" & $config.style.opacity
+    $config.style.hasOpacity & "|" & $config.style.opacity & "|" &
+    $config.style.cornerStyle & "|" & $config.style.cornerRadii & "|" &
+    $config.style.hasShadow & "|" & $config.style.shadowColor & "|" &
+    $config.style.shadowOffsetX & "|" & $config.style.shadowOffsetY & "|" &
+    $config.style.shadowBlur & "|" & $config.style.shadowSpread
   let paddingKey = $config.padding.left & "," & $config.padding.top & "," &
     $config.padding.right & "," & $config.padding.bottom
   let buttonPaddingKey = $config.buttonPadding.left & "," &
@@ -549,6 +810,12 @@ proc renderKey(kind: string, config: BoxConfig): string =
     $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars & "|" &
     config.fontName & "|" & $config.fontSize & "|" & buttonPaddingKey & "|" &
     config.syntax & styleKey
+
+proc styleRenderKey(style: ComponentStyle): string =
+  $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity & "|" &
+    $style.opacity & "|" & $style.cornerStyle & "|" & $style.cornerRadii & "|" &
+    $style.hasShadow & "|" & $style.shadowColor & "|" & $style.shadowOffsetX & "|" &
+    $style.shadowOffsetY & "|" & $style.shadowBlur & "|" & $style.shadowSpread
 
 proc renderKey(kind: string, width, height: SizePolicy,
     alignSelf: Alignment): string =
@@ -1271,6 +1538,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
+  self.tooltipTexts.clear()
   self.liveWidgetIDs.clear()
   self.liveWidgetIDs.incl self.root.id
   self.liveRealtimeWidgetIDs.clear()
@@ -1826,6 +2094,12 @@ proc endLayout*(self: var UI): bool {.discardable.} =
           staleKeys.add id
       for id in staleKeys:
         self.renderKeys.del id
+    var staleTooltipKeys: seq[WidgetID]
+    for id in self.tooltipTexts.keys:
+      if id notin self.liveWidgetIDs:
+        staleTooltipKeys.add id
+    for id in staleTooltipKeys:
+      self.tooltipTexts.del id
     self.previousWidgetIDs = self.liveWidgetIDs
     var staleRealtimeKeys: seq[WidgetID]
     for id in self.retainedRealtimeWidgets.keys:
@@ -1898,12 +2172,6 @@ proc currentParent(self: UI): Widget =
     self.parent
   else:
     self.frames[^1].parent
-
-proc currentWidget(self: UI, id: WidgetID): tuple[ok: bool, widget: Widget] =
-  for box in self.layout.boxes:
-    if box.id == id:
-      return (true, box)
-  (false, Widget())
 
 proc peekChildren(self: UI): seq[Widget] =
   ## Return the children collected for the current parent, leaving them in
@@ -2103,6 +2371,7 @@ template layout*(
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, updateContext
     )
     switchState(updateContext, drawContext)
+    ui.evaluateTooltipHover()
     ui.frameRedrawn = ui.draw(drawContext)
     if drawContext.hasRedrawRequest:
       ui.requestRedrawAfterSafe(drawContext.redrawDelayMs)
@@ -2173,6 +2442,7 @@ template layout*(ui: var UI, blk: untyped): auto =
       beforeHot, beforeActive, beforeSubmitted, beforeFocused, ui.context.update
     )
     switchState(ui.context.update, ui.context.draw)
+    ui.evaluateTooltipHover()
     ui.frameRedrawn = ui.draw(ui.context.draw)
     if ui.context.draw.hasRedrawRequest:
       ui.requestRedrawAfterSafe(ui.context.draw.redrawDelayMs)
@@ -2490,6 +2760,7 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
   self.floatingWidgets = self.retainedFloatingWidgets
   self.scrollContainers = self.retainedScrollContainers
   self.context.draw.dirtyAll = true
+  self.evaluateTooltipHover()
   result = self.draw(self.context.draw)
   self.root = root
   self.components = components
@@ -2541,6 +2812,7 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
     beforeHot, beforeActive, beforeSubmitted, beforeFocused, self.context.update
   )
   switchState(self.context.update, self.context.draw)
+  self.evaluateTooltipHover()
   self.frameRedrawn = self.draw(self.context.draw)
   if self.context.draw.hasRedrawRequest:
     self.requestRedrawAfterSafe(self.context.draw.redrawDelayMs)
@@ -3120,9 +3392,7 @@ proc button*(
         $buttonPadding.left & "," & $buttonPadding.top & "," &
         $buttonPadding.right & "," & $buttonPadding.bottom, width, height,
         alignSelf) & "|" &
-      $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity &
-          "|" &
-      $style.opacity,
+      styleRenderKey(style),
   )
   let btn = Button.new(label, textScroll, fontName, buttonPadding)
   btn.style = style
@@ -3252,8 +3522,7 @@ proc tabs*(
     id,
     renderKey("tabs:" & labels.join("|") & ":" & $selected, width, height,
         alignSelf) &
-      "|" & $gap & "|" & $padding & "|" & $style.hasBackground & "|" &
-          $style.background & "|" & $style.hasOpacity & "|" & $style.opacity,
+      "|" & $gap & "|" & $padding & "|" & styleRenderKey(style),
   )
   let panel = Panel.new()
   panel.style = style
@@ -3287,6 +3556,7 @@ proc label*(
     fontName = "font",
     alignSelf = AlignAuto,
     textScroll = false,
+    style = ComponentStyle(),
 ) {.layoutOnly.} =
   ## Declare a text label with the id `id`.
   ##
@@ -3297,9 +3567,10 @@ proc label*(
     id,
     renderKey(
       "label:" & text & ":" & fontName & ":" & $textScroll, width, height, alignSelf
-    ),
+    ) & "|" & styleRenderKey(style),
   )
   let lbl = Label.new(text, fontName, textScroll = textScroll)
+  lbl.style = style
   ui.attach(box, Component(lbl))
   ui.addChild(box)
 
@@ -3434,9 +3705,7 @@ proc imageButton*(
   ui.setRenderKey(
     id,
     renderKey("imageButton:" & path, width, height, alignSelf) & "|" &
-      $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity &
-          "|" &
-      $style.opacity,
+      styleRenderKey(style),
   )
   let img = ImageButton.new(path)
   img.style = style
@@ -3463,8 +3732,7 @@ proc imageButton*(
   ui.setRenderKey(
     id,
     renderKey("imageButton:" & path & ":" & $source, width, height, alignSelf) &
-      "|" & $style.hasBackground & "|" & $style.background & "|" &
-      $style.hasOpacity & "|" & $style.opacity,
+      "|" & styleRenderKey(style),
   )
   let img = ImageButton.new(path, source)
   img.style = style
@@ -3673,6 +3941,85 @@ proc comboboxPopupIndex(
   else:
     result = -1
 
+proc choicePopoverKey(options: openArray[string], selected: int): string =
+  result = $selected
+  for option in options:
+    result.add "\x1f"
+    result.add option
+
+proc choicePopoverData(options: openArray[string]): string =
+  var nodes: seq[JsonNode]
+  for option in options:
+    nodes.add %option
+  $(%nodes)
+
+proc closeChoicePopover(self: var UI, id: WidgetID) {.raises: [].} =
+  let popover = self.choicePopovers.getOrDefault(id)
+  popover.closePopover()
+  self.choicePopovers.del id
+
+proc pollChoicePopover(
+    self: var UI, id: WidgetID
+): tuple[ready: bool, index: int] {.raises: [].} =
+  let popover = self.choicePopovers.getOrDefault(id)
+  if popover == nil:
+    return
+  if popover.process != nil:
+    try:
+      if popover.process.running:
+        return
+      popover.process.close
+    except OSError:
+      discard
+    except IOError:
+      discard
+  if popover.resultPath.len > 0 and fileExists(popover.resultPath):
+    try:
+      result.index = parseInt(readFile(popover.resultPath).strip)
+      result.ready = true
+      removeFile(popover.resultPath)
+    except ValueError:
+      discard
+    except OSError:
+      discard
+    except IOError:
+      discard
+  self.choicePopovers.del id
+
+proc showChoicePopover(
+    self: var UI,
+    id: WidgetID,
+    field: Frame,
+    selected: int,
+    options: openArray[string],
+) {.raises: [].} =
+  if not externalPopoverAvailable():
+    return
+  let key = choicePopoverKey(options, selected)
+  let current = self.choicePopovers.getOrDefault(id)
+  if current != nil and current.key == key:
+    return
+  self.closeChoicePopover(id)
+  let resultPath =
+    getTempDir() / ("nest-choice-" & $getCurrentProcessId() & "-" & $id)
+  try:
+    if fileExists(resultPath):
+      removeFile(resultPath)
+  except OSError:
+    discard
+  self.choicePopovers[id] = startPopoverProcess(
+    "choice-popover",
+    [
+      choicePopoverData(options),
+      resultPath,
+      self.popoverAnchorJson(field.x.toInt, (field.y + field.height).toInt),
+      self.themeName,
+      $getCurrentProcessId(),
+    ],
+    resultPath = resultPath,
+    key = key,
+  )
+
 proc combobox*(
     ui: var UI,
     id: WidgetID,
@@ -3699,9 +4046,27 @@ proc combobox*(
   let clampedSelected = selected.clamp(0, options.len - 1)
 
   if ui.phase == EventPhase:
+    let picked = ui.pollChoicePopover(id)
+    if picked.ready and picked.index >= 0 and picked.index < options.len:
+      return (picked.index != clampedSelected, picked.index)
     if not ui.pointerReaches(id):
       return
     let open = ui.context.draw.focusedWidget == id
+    when defined(linux):
+      if externalPopoverAvailable():
+        let located = ui.widgetFrame(id)
+        if located.ok and ui.context.update.mouseLeftPressed:
+          let f = located.frame
+          let inField =
+            ui.context.update.mouseX.float64 >= f.x and
+            ui.context.update.mouseX.float64 < f.x + f.width and
+            ui.context.update.mouseY.float64 >= f.y and
+            ui.context.update.mouseY.float64 < f.y + f.height
+          if inField:
+            ui.showChoicePopover(id, f, clampedSelected, options)
+            ui.eventActiveWidgets.clear()
+            ui.context.draw.activeWidgets.clear()
+        return
     if open:
       let located = ui.widgetFrame(id)
       if located.ok and ui.context.update.mouseLeftPressed:

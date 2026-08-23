@@ -33,7 +33,7 @@ fun volumeActionCommand action:
 fun volumeSetCommand value:
   string "value='" value "'; pct=$(awk -v v=\"$value\" 'BEGIN { if (v < 0) v = 0; if (v > 150) v = 150; printf \"%.0f%%\", v }'); log=/tmp/nest-volume-slider.log; printf '%s requested=%s pct=%s sink=%s\n' \"$(date +%s.%N)\" \"$value\" \"$pct\" \"$(pactl info 2>&1 | awk -F': ' '/Default Sink/ {print $2; exit}')\" >> \"$log\"; pactl set-sink-volume @DEFAULT_SINK@ \"$pct\" >> \"$log\" 2>&1; rc=$?; printf '%s rc=%s after=%s\n' \"$(date +%s.%N)\" \"$rc\" \"$(pactl get-sink-volume @DEFAULT_SINK@ 2>&1 | tr '\n' ' ')\" >> \"$log\"; exit $rc"
 
-component volumeWidget key:
+widget volumeWidget key:
   define:
     keyText = (eval key)
     buttonID = (id keyText "volume")
@@ -43,9 +43,19 @@ component volumeWidget key:
     when (and (clicked buttonID) (not (dialogOpen? "volume"))):
       openDialog "volume" "./volume" "" buttonID
 
-  button buttonID (string "♫ " status):
+  button buttonID (string IconVolume " " status):
     width = fit
     height = fixed BarWidgetHeight
     textScroll = true
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip buttonID "Volume"

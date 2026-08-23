@@ -1,7 +1,7 @@
 fun radioOptionID key value:
   id (eval key) "option" value
 
-component radioGroup key items selected:
+widget radioGroup key items selected:
   define:
     keyText = (eval key)
     values = (eval items)
@@ -25,3 +25,4 @@ component radioGroup key items selected:
           width = fill
           height = fit
           textScroll = true
+        tooltip (radioOptionID keyText value) value

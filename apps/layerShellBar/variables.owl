@@ -9,7 +9,15 @@ define:
   BarOpacity = 0.8
   BarPadding = 4
   BarWidgetHeight = - BarHeight (* BarPadding 2)
+  BarWidgetRadius = 8
+  BarWidgetShadowColor = (color 0 0 0 90)
+  BarWidgetShadowOffsetX = 0
+  BarWidgetShadowOffsetY = 2
+  BarWidgetShadowBlur = 6
+  BarWidgetShadowSpread = 0
   BarIconSize = BarWidgetHeight
+  BarIconFontName = "editor"
+  BarIconFontSize = 16
   BarWidgetFontSize = 10
   BarWidgetPaddingAll = 0
   BarWidgetPaddingX = 8
@@ -32,14 +40,14 @@ define:
   DialogMutedOpacity = 0.35
   DialogPanelOpacity = 0.9
 
-  ActiveWindowWidth = 120
+  ActiveWindowWidth = 200
   WorkspaceGap = 1
   WorkspaceEmptyWidth = 24
 
   MetricCpuWidth = 100
   MetricMemoryWidth = 150
   MetricStorageWidth = 100
-  MetricNetworkWidth = 200
+  MetricNetworkWidth = 120
 
   NetworkRowGap = 4
   NetworkRowHeight = BarHeight
@@ -88,3 +96,18 @@ define:
   CalendarPopoverDayWidth = 42
   CalendarBlankHeight = BarHeight
   CalendarPopoverOpacity = 0.5
+
+  IconCpu = ""
+  IconMemory = ""
+  IconDisk = ""
+  IconNetwork = ""
+  IconVolume = ""
+  IconNotifications = ""
+  IconCalendar = ""
+  IconWindow = ""
+  IconWorkspace = ""
+  IconMedia = ""
+  IconPrevious = ""
+  IconNext = ""
+  IconPlay = ""
+  IconPause = ""

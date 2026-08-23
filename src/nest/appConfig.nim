@@ -112,6 +112,7 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
     initLayerShellSdl3Driver()
   else:
     initBackend()
+  screen.externalPopoversEnabled = cfg.layerShell
   owldsl.runtimeWake = layerShellSdl3Driver.wakeEventLoop
   result = createWindow(cfg.width, cfg.height)
   owldsl.pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =

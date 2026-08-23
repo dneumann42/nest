@@ -21,34 +21,70 @@ fun tint col-name:
     (color 0 0 0)
     0.55
 
-component cpuMeter key:
-  button (id (eval key) "cpu") (string "◉ " (shellAsync (id (eval key) "cpu-query") (cpuCommand) FastPollInterval)):
+widget cpuMeter key:
+  define:
+    cpuID = (id (eval key) "cpu")
+  button cpuID (string IconCpu " " (shellAsync (id (eval key) "cpu-query") (cpuCommand) FastPollInterval)):
     width = fixed MetricCpuWidth
     height = fixed BarWidgetHeight
     background = tint "primary"
     textScroll = true
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip cpuID "CPU usage"
 
-component memoryMeter key:
-  button (id (eval key) "memory") (string "▣ " (shellAsync (id (eval key) "memory-query") (memoryCommand) MediaPollInterval)):
+widget memoryMeter key:
+  define:
+    memoryID = (id (eval key) "memory")
+  button memoryID (string IconMemory " " (shellAsync (id (eval key) "memory-query") (memoryCommand) MediaPollInterval)):
     width = fixed MetricMemoryWidth
     height = fixed BarWidgetHeight
     background = tint "rose"
     textScroll = true
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip memoryID "Memory usage"
 
-component storageMeter key:
-  button (id (eval key) "storage") (string "▤ " (shellAsync (id (eval key) "storage-query") (storageCommand) StoragePollInterval)):
+widget storageMeter key:
+  define:
+    storageID = (id (eval key) "storage")
+  button storageID (string IconDisk " " (shellAsync (id (eval key) "storage-query") (storageCommand) StoragePollInterval)):
     width = fixed MetricStorageWidth
     height = fixed BarWidgetHeight
     background = tint "mauve"
     textScroll = true
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip storageID "Disk usage"
 
-component networkMeter key:
+widget networkMeter key:
   define:
     keyText = (eval key)
     buttonID = (id keyText "network")
@@ -58,10 +94,20 @@ component networkMeter key:
     when (and (clicked buttonID) (not (dialogOpen? "network"))):
       openDialog "network" "./network" "" buttonID
 
-  button buttonID (string "⇅ " status):
+  button buttonID (string IconNetwork " " status):
     width = fixed MetricNetworkWidth
     height = fixed BarWidgetHeight
     background = tint "sky"
     textScroll = true
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip buttonID "Network throughput"

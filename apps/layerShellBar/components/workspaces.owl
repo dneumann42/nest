@@ -5,11 +5,11 @@ fun workspaceLabel workspace:
     name = (dict-get workspace "name")
   cond:
     when (dict-get workspace "urgent"):
-      string "! " name
+      string "! " IconWorkspace " " name
     when (dict-get workspace "focused"):
-      name
+      string IconWorkspace " " name
     when T:
-      name
+      string IconWorkspace " " name
 
 fun workspaceBackgroundColor workspace:      
   cond:
@@ -23,7 +23,7 @@ fun workspaceBackgroundColor workspace:
 fun workspaceQuery key:
   swayWorkspaceSubscription key
 
-component workspaces key:
+widget workspaces key:
   define:
     keyText = (eval key)
     workspaceList = (workspaceQuery (id keyText "query"))
@@ -39,16 +39,34 @@ component workspaces key:
         height = fixed BarWidgetHeight
         fontSize = BarWidgetFontSize
     else:
+      define:
+        firstWorkspaceName = (dict-get (nth workspaceList 0) "name")
+        lastWorkspaceName = (dict-get (nth workspaceList (- (length workspaceList) 1)) "name")
       for workspace (iter workspaceList):
         define:
           name = (dict-get workspace "name")
           workspaceID = (id keyText "workspace" name)
+          firstWorkspace = (= name firstWorkspaceName)
+          lastWorkspace = (= name lastWorkspaceName)
         events:
           when (clicked workspaceID):
             shellAsync (id keyText "activate" name) (swayWorkspaceCommand name) ImmediateInterval
         button workspaceID (workspaceLabel workspace):
           width = fit
           height = fixed BarWidgetHeight
-	  fontSize = BarWidgetFontSize
-	  buttonPadding = BarWidgetPadding
-	  background = (workspaceBackgroundColor workspace)
+          fontName = BarIconFontName
+          fontSize = BarIconFontSize
+          buttonPadding = BarWidgetPadding
+          background = (workspaceBackgroundColor workspace)
+          cornerStyle = "rounded"
+          radiusTopLeft = (pick firstWorkspace BarWidgetRadius 0)
+          radiusBottomLeft = (pick firstWorkspace BarWidgetRadius 0)
+          radiusTopRight = (pick lastWorkspace BarWidgetRadius 0)
+          radiusBottomRight = (pick lastWorkspace BarWidgetRadius 0)
+          shadow = (or firstWorkspace lastWorkspace)
+          shadowColor = BarWidgetShadowColor
+          shadowOffsetX = BarWidgetShadowOffsetX
+          shadowOffsetY = BarWidgetShadowOffsetY
+          shadowBlur = BarWidgetShadowBlur
+          shadowSpread = BarWidgetShadowSpread
+        tooltip workspaceID (string "Workspace " name)

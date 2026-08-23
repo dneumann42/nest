@@ -1,5 +1,5 @@
 title = "Network"
-width = 620
+width = 320
 height = 520
 layerShell = "top-right"
 namespace = "nest-network"

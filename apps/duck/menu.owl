@@ -51,7 +51,7 @@ fun handleMenuAction action:
   when (= action "help.about"):
     set showAbout true
 
-component duckMenuBar:
+widget duckMenuBar:
   define:
     splitID = (id "duck" "menu" "split")
     horizontalSplitID = (id "duck" "menu" "split-horizontal")

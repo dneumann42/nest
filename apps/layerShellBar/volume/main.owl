@@ -63,6 +63,7 @@ card (id "volume" "panel"):
     button closeID "x":
       width = fixed DialogCloseButtonWidth
       height = fit
+    tooltip closeID "Close"
   row (id "volume" "body"):
     width = fill
     height = fill
@@ -90,16 +91,21 @@ card (id "volume" "panel"):
         button downID "-":
           width = fixed VolumeSmallButtonWidth
           height = fit
+        tooltip downID "Lower volume"
         button muteID "Mute":
           width = fixed VolumeMuteButtonWidth
           height = fit
+        tooltip muteID "Toggle mute"
         button upID "+":
           width = fixed VolumeSmallButtonWidth
           height = fit
+        tooltip upID "Raise volume"
       button mixerID "Open mixer":
         width = fill
         height = fit
+      tooltip mixerID "Open mixer"
       radioGroup "volume-sources" sinks defaultSink
     verticalSlider sliderID percent 0 VolumeMax:
       width = fixed VolumeSliderWidth
       height = fill
+    tooltip sliderID "Set volume"

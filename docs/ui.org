@@ -1780,10 +1780,10 @@ A ~project.owl~ may ~import~ another file and then use the symbols it defines as
 
 ** The Same Application, In Owl
 
-Here is the counter from [[*A Complete Application][A Complete Application]] again: a ~counter~ component with its own state and its own handlers, and an app around it that keeps the tally.
+Here is the counter from [[*A Complete Application][A Complete Application]] again: a ~counter~ widget with its own state and its own handlers, and an app around it that keeps the tally.
 
 #+begin_src owl
-component counter key:
+widget counter key:
   define:
     keyText = eval key
     decrementID = (id keyText "decrement")
@@ -1866,9 +1866,9 @@ events:
     set lowest 0
 #+end_src
 
-Line for line this is the Nim version, with three substitutions. A ~widget~ became a ~component~. An ~update~ procedure became an ~events~ block that mutates the state in place, since there is no type to case over. And ~emit~ became ~send~, read back by the parent with ~received~ and ~receive~, because owl has no ~emits~, and so no return value to carry events up.
+Line for line this is the Nim version, with two substitutions. An ~update~ procedure became an ~events~ block that mutates the state in place, since there is no type to case over. And ~emit~ became ~send~, read back by the parent with ~received~ and ~receive~, because owl has no ~emits~, and so no return value to carry events up.
 
-Note where the parent's ~events~ block sits: *after* the tree. Statements evaluate in order, and the component's own ~events~ block runs while the tree is being declared, so a message sent inside the child is already in the queue by the time the parent's block runs. Both passes evaluate the whole program, so the labels above pick up the new numbers in the layout pass of the same frame.
+Note where the parent's ~events~ block sits: *after* the tree. Statements evaluate in order, and the widget's own ~events~ block runs while the tree is being declared, so a message sent inside the child is already in the queue by the time the parent's block runs. Both passes evaluate the whole program, so the labels above pick up the new numbers in the layout pass of the same frame.
 
 ** The Language
 
@@ -1899,17 +1899,17 @@ A command is a callable value. User-defined ones come in two kinds, which differ
 
 ~fun~, ~fn~ and ~lambda~ define argument-evaluating commands. Each argument is evaluated at the call, the parameter is bound to the resulting value, and the body runs in a child of the environment the command was defined in. These are the ones with a closure: they see the definition site.
 
-~command~, ~component~ and ~block-command~ define raw-syntax commands. A parameter is bound to the unevaluated argument syntax, paired with the caller's environment, and the body runs in a child of the *caller's* environment rather than the definition's. They are not closures — a raw-syntax command resolves free names at the call site, which is why a component can read the ~state~ fields of the program that declared it without taking them as parameters. Getting an argument's value takes an explicit ~(eval key)~.
+~command~, ~widget~ and ~block-command~ define raw-syntax commands. A parameter is bound to the unevaluated argument syntax, paired with the caller's environment, and the body runs in a child of the *caller's* environment rather than the definition's. They are not closures — a raw-syntax command resolves free names at the call site, which is why a widget can read the ~state~ fields of the program that declared it without taking them as parameters. Getting an argument's value takes an explicit ~(eval key)~.
 
 | Form                     | Parameter bound to  | Body runs in       | Takes a body  | Use for                        |
 |--------------------------+---------------------+--------------------+---------------+--------------------------------|
 | ~fun name args:~           | evaluated value     | its defining scope | no            | computation                    |
 | ~fn~ / ~lambda~              | evaluated value     | its defining scope | no            | an anonymous function          |
 | ~command name args:~       | raw argument syntax | the caller's scope | no            | anything that needs the syntax |
-| ~component name args:~     | raw argument syntax | the caller's scope | no            | a widget                       |
+| ~widget name args:~        | raw argument syntax | the caller's scope | no            | a widget                       |
 | ~block-command name args:~ | raw argument syntax | the caller's scope | yes, as ~block~ | a container widget             |
 
-~component~ is exactly ~command~ under another name; the two exist so that a widget declaration reads as one. Every call also binds ~block~ to the call's body and ~layout~ to the text form of how that body was attached, so a raw-syntax command can be handed a whole subtree as data.
+~widget~ is exactly ~command~ under another name; the two exist so that a widget declaration reads as one. Every call also binds ~block~ to the call's body and ~layout~ to the text form of how that body was attached, so a raw-syntax command can be handed a whole subtree as data.
 
 The control-flow and data commands are ordinary commands, most of them defined in owl's own prelude:
 
@@ -1957,10 +1957,10 @@ state "root":
   incrementID = (id "increment")
 #+end_src
 
-The store is keyed by the scope string and the field name, and by nothing else. Two instances of a component whose ~state~ scope is a constant therefore share one set of fields, which is almost never what is wanted; build the scope from the component's key instead.
+The store is keyed by the scope string and the field name, and by nothing else. Two instances of a widget whose ~state~ scope is a constant therefore share one set of fields, which is almost never what is wanted; build the scope from the widget's key instead.
 
 #+begin_src owl
-component counter key:
+widget counter key:
   define:
     keyText = eval key
   ; Distinct per instance. `state "counter":` would be shared by all of them.
@@ -1973,7 +1973,7 @@ component counter key:
 
 Ids are usually bound in ~state~ as well, so that the handler and the declaration cannot disagree about which widget they mean.
 
-~state~ is also how a program declares its top-level values, because ~define~ cannot. ~define~ raises when the symbol already exists in that scope, and a program's statements are re-evaluated on every pass, so a top-level ~define~ succeeds on the event pass and fails on the layout pass immediately after. It is fine inside a ~fun~ or a ~component~, where each call gets a fresh scope, and fine in an imported file, which is evaluated once.
+~state~ is also how a program declares its top-level values, because ~define~ cannot. ~define~ raises when the symbol already exists in that scope, and a program's statements are re-evaluated on every pass, so a top-level ~define~ succeeds on the event pass and fails on the layout pass immediately after. It is fine inside a ~fun~ or a ~widget~, where each call gets a fresh scope, and fine in an imported file, which is evaluated once.
 
 *** The events Block
 
@@ -2013,14 +2013,14 @@ The available commands are ~panel~, ~card~, ~row~, ~column~, ~overlay~, ~center~
 
 ~id~ builds a widget id from its arguments, and ~(id)~ with no arguments generates one. A widget id stringifies back to its own parts, so ids compose: ~id someID "title"~ extends ~someID~. ~scope "key": ...~ is ~ui.scope~, for declaring the same subtree twice.
 
-** Components
+** Owl Widgets
 
-A component is a command that declares widgets. The convention throughout ~apps/~ is that its first parameter is a key, every id inside is derived from that key, and the component is therefore safe to declare more than once.
+A widget is a command that declares widgets. The convention throughout ~apps/~ is that its first parameter is a key, every id inside is derived from that key, and the widget is therefore safe to declare more than once.
 
-Because a component's body runs in the caller's scope, it can read any binding the caller can see. This is the prevailing style in ~apps/duck~: ~duckStatusBar~ takes no parameters at all and reads ~showStatusBar~ and ~statusText~ straight out of the program's ~state "root"~, plus the top-level helper commands beside them. It keeps declarations short, and the cost is that such a component only works where those names are in scope. Pass a value as a parameter when the component is meant to be reusable, and read a free name when it is a region of one specific program.
+Because a widget's body runs in the caller's scope, it can read any binding the caller can see. This is the prevailing style in ~apps/duck~: ~duckStatusBar~ takes no parameters at all and reads ~showStatusBar~ and ~statusText~ straight out of the program's ~state "root"~, plus the top-level helper commands beside them. It keeps declarations short, and the cost is that such a widget only works where those names are in scope. Pass a value as a parameter when the widget is meant to be reusable, and read a free name when it is a region of one specific program.
 
 #+begin_src owl
-component labelledValue key labelText valueText:
+widget labelledValue key labelText valueText:
   define:
     keyText = eval key
   row (id keyText "row"):
@@ -2071,9 +2071,9 @@ column (id "root"):
 
 Use ~fun~ for anything that computes, and for a dialog or a section that takes no arguments and only needs to be a name.
 
-** Messages Between Components
+** Messages Between Widgets
 
-Owl has no ~emits~, so a component cannot return its events. It sends them instead. ~send topic payload~ appends to a queue, ~received topic~ says whether the queue has anything, and ~receive topic~ takes the oldest item off it.
+Owl has no ~emits~, so a widget cannot return its events. It sends them instead. ~send topic payload~ appends to a queue, ~received topic~ says whether the queue has anything, and ~receive topic~ takes the oldest item off it.
 
 #+begin_src owl
 ; In the child:
@@ -2087,11 +2087,11 @@ events:
     saveBuffer (receive "editor.save")
 #+end_src
 
-Messages are the only channel between components that do not share a state scope, and they replace both the returned-event list and the ~emitted: var seq[E]~ parameter of the Nim API. Two things follow from that. Order matters: a parent only sees a message the child sent earlier in the same pass, so its handler goes after the declaration, not before. And nothing consumes a queue automatically, so a topic that is sent to and never received from grows for the life of the program.
+Messages are the only channel between widgets that do not share a state scope, and they replace both the returned-event list and the ~emitted: var seq[E]~ parameter of the Nim API. Two things follow from that. Order matters: a parent only sees a message the child sent earlier in the same pass, so its handler goes after the declaration, not before. And nothing consumes a queue automatically, so a topic that is sent to and never received from grows for the life of the program.
 
 ** Modules
 
-~import "path.owl"~ evaluates another file's statements in the current environment. The path is resolved relative to the importing file, and each file is imported once no matter how many files ask for it. This is how ~apps/layerShellBar~ shares one ~variables.owl~ across the bar, its six popover projects and every component file in between.
+~import "path.owl"~ evaluates another file's statements in the current environment. The path is resolved relative to the importing file, and each file is imported once no matter how many files ask for it. This is how ~apps/layerShellBar~ shares one ~variables.owl~ across the bar, its six popover projects and every widget file in between.
 
 ~use module: include a b c~ is owl's own module command. It takes a bare module name rather than a string, evaluates the file in a child environment, and copies only the named symbols into the caller. ~exclude~ inverts the filter, and ~use module~ with no body binds the whole module as a dictionary named after the file.
 
@@ -2149,7 +2149,7 @@ The correspondence is close enough to translate mechanically:
 
 | Nim                               | Owl                                           |
 |-----------------------------------+-----------------------------------------------|
-| ~widget name(...)~                  | ~component name ...~                            |
+| ~widget name(...)~                  | ~widget name ...~                               |
 | ~widget name(..., body: untyped)~   | ~block-command name ...~ plus ~eval block~        |
 | a plain ~proc~                      | ~fun~                                           |
 | a state ~object~                    | a ~state~ block                                 |
@@ -2176,7 +2176,7 @@ Differences that matter in practice:
 
 ** Using Both
 
-The two front ends are not exclusive. A Nim application can render an owl component into its own frame with ~renderComponent~, which loads a library file and evaluates one component against the live ~UI~. The owl part is a child of the Nim part in the same widget tree, laid out by the same solver.
+The two front ends are not exclusive. A Nim application can render an owl widget into its own frame with ~renderWidget~, which loads a library file and evaluates one widget against the live ~UI~. The owl part is a child of the Nim part in the same widget tree, laid out by the same solver.
 
 #+begin_src nim
 import nest
@@ -2188,10 +2188,10 @@ widget shell():
   ui.row(ui.id("root"), cfg(width = fill(), height = fill(), gap = 8, padding = 8)):
     ui.label(ui.id("nim"), "Written in Nim", width = fixed(140))
     # `sidePanel` lives in a .owl file, and is re-read whenever that file changes.
-    runtime.renderComponent(ui, "panels/side.owl", "sidePanel", ["side", "Settings"])
+    runtime.renderWidget(ui, "panels/side.owl", "sidePanel", ["side", "Settings"])
 #+end_src
 
-Arguments given as strings arrive in the component as owl string literals, which is enough for keys and labels. The other overload takes ~SyntaxNode~ values, for a component whose parameters are lists or dictionaries.
+Arguments given as strings arrive in the widget as owl string literals, which is enough for keys and labels. The other overload takes ~SyntaxNode~ values, for a widget whose parameters are lists or dictionaries.
 
 This is the seam for a program that wants types everywhere except one place: a theme, a layout still being designed, a panel the user is expected to edit.
 
@@ -2338,11 +2338,11 @@ nimble gallery
 
 ** In Owl
 
-- Declare every portion of the interface with ~component~, and take a key as its first parameter.
-- Derive every id inside a component from that key, so the component can be declared twice.
+- Declare every portion of the interface with ~widget~, and take a key as its first parameter.
+- Derive every id inside a widget from that key, so the widget can be declared twice.
 - Build a ~state~ scope from the key too; a constant scope is shared by every instance.
 - Bind ids in ~state~ rather than repeating ~id ...~ in both the handler and the declaration.
-- Remember that a ~component~ body runs in the caller's scope. Take a parameter for anything the component should be reusable over, and read a free name only where the component belongs to one program.
+- Remember that a ~widget~ body runs in the caller's scope. Take a parameter for anything the widget should be reusable over, and read a free name only where the widget belongs to one program.
 - Put ~width~ and ~height~ on every widget. There are no per-widget defaults on this side.
 - Mutate nothing outside an ~events~ block.
 - Put a parent's ~events~ block after the children it listens to, so a message sent this frame arrives this frame.

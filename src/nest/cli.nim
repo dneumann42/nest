@@ -1,6 +1,6 @@
 import std/[cmdline, os, strutils]
 
-import nest/[owldsl, errorDialogs, generator, perf, runner]
+import nest/[owldsl, errorDialogs, generator, perf, popovers, runner]
 
 proc usage*(): string =
   ## Return the usage text for the `nest` command line tool.
@@ -8,6 +8,8 @@ proc usage*(): string =
   nest --project DIR
   nest run DIR [--perf-overlay] [--benchmark [FRAMES]]
   nest dialog DIR [DATA] [RESULT_PATH] [ANCHOR_JSON]
+  nest tooltip-popover TEXT ANCHOR_JSON [THEME] [PARENT_PID]
+  nest choice-popover OPTIONS_JSON RESULT_PATH ANCHOR_JSON [THEME] [PARENT_PID]
   nest error-dialog [example | MESSAGE]
   nest generate [DIR]
 
@@ -84,6 +86,37 @@ proc main*() =
       writeFile(resultPath, value)
     elif value.len > 0:
       echo value
+  of "tooltip-popover":
+    if args.len < 3:
+      quit(usage(), 1)
+    runTooltipPopover(
+      args[1],
+      args[2],
+      if args.len >= 4: args[3] else: "",
+      if args.len >= 5:
+        try:
+          parseInt(args[4])
+        except ValueError:
+          0
+      else:
+        0,
+    )
+  of "choice-popover":
+    if args.len < 4:
+      quit(usage(), 1)
+    runChoicePopover(
+      args[1],
+      args[2],
+      args[3],
+      if args.len >= 5: args[4] else: "",
+      if args.len >= 6:
+        try:
+          parseInt(args[5])
+        except ValueError:
+          0
+      else:
+        0,
+    )
   of "error-dialog":
     if args.len >= 2 and args[1] != "example":
       runOwlErrorDialog(args[1])

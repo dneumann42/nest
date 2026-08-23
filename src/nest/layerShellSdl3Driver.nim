@@ -1,6 +1,6 @@
 import sdl3
 import sdl3_ttf
-import std/[atomics, hashes, os, strutils, tables]
+import std/[atomics, hashes, os, strformat, strutils, tables]
 import nest/[coords, input, screen]
 import nest/fallbackfonts
 
@@ -16,6 +16,10 @@ proc imgLoad(
 proc ttfOpenFontIO(
   src: sdl3.IOStream, closeio: bool, ptsize: cfloat
 ): sdl3_ttf.Font {.importc: "TTF_OpenFontIO", cdecl, dynlib: sdl3_ttf.TtfLibName.}
+
+proc ttfFontHasGlyph(
+  font: sdl3_ttf.Font, ch: uint32
+): bool {.importc: "TTF_FontHasGlyph", cdecl, dynlib: sdl3_ttf.TtfLibName.}
 
 # Kept alive for the process, since a font opened from memory reads from it
 # for as long as it is open.
@@ -215,15 +219,49 @@ var
   drawColorValid: bool
   drawColor: screen.Color
   rendererWidth, rendererHeight: int
+  frameTarget: sdl3.Texture
+  frameTargetWidth, frameTargetHeight: int
+  frameContentWidth, frameContentHeight: int
   clipStack: seq[ClipState]
   currentClip: ClipState
   useLayerShell: bool
   wakeEventQueued: Atomic[bool]
+  traceRefreshes: int
+  traceTargetGrows: int
+  traceLastReportTicks: int
 
 proc currentSdlWindow*(): sdl3.Window =
   ## Return the SDL window this driver is rendering into, or nil before one
   ## has been created.
   win
+
+proc resizeTraceEnabled(): bool =
+  getEnv("NEST_RESIZE_TRACE").normalize in ["1", "true", "yes", "on"]
+
+proc renderVsyncSetting*(layerShell: bool; envValue: string): int =
+  let value = envValue.normalize
+  if value in ["0", "false", "no", "off"]:
+    0
+  elif value in ["1", "true", "yes", "on"]:
+    1
+  elif layerShell:
+    1
+  else:
+    0
+
+proc renderVsyncSetting(): int =
+  renderVsyncSetting(useLayerShell, getEnv("NEST_RENDER_VSYNC"))
+
+proc reportSdlResizeTrace(reason: string; force = false) =
+  if not resizeTraceEnabled():
+    return
+  let now = sdl3.getTicks().int
+  if not force and traceLastReportTicks > 0 and now - traceLastReportTicks < 1000:
+    return
+  traceLastReportTicks = now
+  echo &"[nest sdl trace] {reason} refreshes={traceRefreshes} " &
+    &"targetGrows={traceTargetGrows} renderer={rendererWidth}x{rendererHeight} " &
+    &"target={frameTargetWidth}x{frameTargetHeight} content={frameContentWidth}x{frameContentHeight}"
 
 proc clearMeasureCache() =
   measureCache.clear()
@@ -252,6 +290,15 @@ proc clearImageCache() =
     slot.h = 0
   images.setLen(0)
 
+proc clearFrameTarget() =
+  if frameTarget != nil:
+    destroyTexture(frameTarget)
+  frameTarget = nil
+  frameTargetWidth = 0
+  frameTargetHeight = 0
+  frameContentWidth = 0
+  frameContentHeight = 0
+
 proc closeAllFonts() =
   for slot in mitems(fonts):
     if slot.ttfFont != nil:
@@ -264,6 +311,7 @@ proc resetSdlState() =
   clearTextCache()
   clearMeasureCache()
   clearCursorCache()
+  clearFrameTarget()
   closeAllFonts()
   clipStack.setLen(0)
   currentClip = ClipState()
@@ -291,6 +339,65 @@ proc applyClipState() =
     discard setRenderClipRect(ren, addr currentClip.rect)
   else:
     discard setRenderClipRect(ren, cast[ptr sdl3.Rect](nil))
+
+proc frameTargetExtent(size: int): int {.inline.} =
+  let requested = max(size, 1)
+  requested + max(requested div 4, 128)
+
+proc ensureFrameTarget(width, height: int): bool =
+  ## Keep the renderer drawing into a reusable texture that grows with slack.
+  ## Interactive window resize often reports many intermediate sizes; allocating
+  ## an exact-size target for each one makes resize latency visible.
+  if ren == nil:
+    return false
+  let
+    neededWidth = max(width, 1)
+    neededHeight = max(height, 1)
+  if frameTarget != nil and frameTargetWidth >= neededWidth and
+      frameTargetHeight >= neededHeight:
+    discard setRenderTarget(ren, frameTarget)
+    applyClipState()
+    drawColorValid = false
+    return true
+
+  let
+    newWidth = frameTargetExtent(neededWidth)
+    newHeight = frameTargetExtent(neededHeight)
+  let oldTarget = frameTarget
+  let oldWidth = frameTargetWidth
+  let oldHeight = frameTargetHeight
+  let newTarget = createTexture(
+    ren, PIXELFORMAT_RGBA32, TEXTUREACCESS_TARGET, newWidth.cint, newHeight.cint
+  )
+  if newTarget == nil:
+    discard setRenderTarget(ren, nil)
+    applyClipState()
+    drawColorValid = false
+    return false
+
+  discard setTextureBlendMode(newTarget, BLENDMODE_BLEND)
+  discard setTextureScaleMode(newTarget, SCALEMODE_LINEAR)
+  discard setRenderTarget(ren, newTarget)
+  discard setRenderClipRect(ren, cast[ptr sdl3.Rect](nil))
+  discard setRenderDrawColor(ren, 0, 0, 0, 0)
+  discard renderClear(ren)
+
+  if oldTarget != nil and oldWidth > 0 and oldHeight > 0:
+    var
+      src = FRect(x: 0, y: 0, w: oldWidth.cfloat, h: oldHeight.cfloat)
+      dst = src
+    discard renderTexture(ren, oldTarget, addr src, addr dst)
+    destroyTexture(oldTarget)
+
+  frameTarget = newTarget
+  frameTargetWidth = newWidth
+  frameTargetHeight = newHeight
+  if resizeTraceEnabled():
+    inc traceTargetGrows
+    reportSdlResizeTrace("grow", true)
+  applyClipState()
+  drawColorValid = false
+  true
 
 proc nextMeasureCacheGeneration(): int =
   inc measureCacheGeneration
@@ -352,6 +459,22 @@ const
     "italic", "oblique", "bold", "black", "heavy", "thin", "light", "medium",
     "semibold", "extra", "ultra", "emoji", "symbol", "math", "icon",
   ]
+  RequiredNerdGlyphs = [
+    0xF2DB'u32, # microchip
+    0xF538'u32, # memory
+    0xF0A0'u32, # hdd
+    0xF1EB'u32, # wifi
+    0xF028'u32, # volume
+    0xF0F3'u32, # bell
+    0xF073'u32, # calendar
+    0xF2D0'u32, # window
+    0xF108'u32, # desktop
+    0xF001'u32, # music
+    0xF048'u32, # backward
+    0xF051'u32, # forward
+    0xF04B'u32, # play
+    0xF04C'u32, # pause
+  ]
 
 var scannedFonts: Table[string, string]
 
@@ -392,6 +515,79 @@ proc scanForFont(needles, avoid: openArray[string]): string =
   scannedFonts[key] = best
   best
 
+proc hasRequiredGlyphs(path: string, glyphs: openArray[uint32]): bool =
+  if path.len == 0 or not fileExists(path):
+    return false
+  let font = sdl3_ttf.openFont(cstring(path), 16.cfloat)
+  if font == nil:
+    return false
+  result = true
+  for glyph in glyphs:
+    if not ttfFontHasGlyph(font, glyph):
+      result = false
+      break
+  sdl3_ttf.closeFont(font)
+
+proc nerdFontScore(path: string): int =
+  let name = path.extractFilename.toLowerAscii
+  result = 0
+  if "regular" in name:
+    result += 100
+  if "mono" in name:
+    result += 40
+  if "propo" in name:
+    result -= 20
+  if "caskaydia" in name:
+    result += 30
+  elif "jetbrains" in name:
+    result += 25
+  elif "meslo" in name:
+    result += 20
+  elif "fantasque" in name:
+    result += 15
+  elif "hurmit" in name:
+    result += 10
+  elif "monoid" in name:
+    result += 5
+  if path.startsWith(getHomeDir()):
+    result += 3
+
+proc scanForNerdFont(): string =
+  let overridePath = getEnv("NEST_NERD_FONT")
+  if overridePath.len > 0 and hasRequiredGlyphs(overridePath, RequiredNerdGlyphs):
+    return overridePath
+
+  let key = "nerd-monospace"
+  if scannedFonts.hasKey(key):
+    return scannedFonts[key]
+
+  var
+    best = ""
+    bestScore = low(int)
+  for directory in fontDirectories():
+    if not dirExists(directory):
+      continue
+    for path in walkDirRec(directory):
+      let name = path.extractFilename.toLowerAscii
+      if name.splitFile.ext notin FontFileExtensions:
+        continue
+      if "nerdfont" notin name and " nf " notin name and "nf-" notin name:
+        continue
+      var wanted = true
+      for word in UnwantedFaces:
+        if word in name:
+          wanted = false
+          break
+      if not wanted or not hasRequiredGlyphs(path, RequiredNerdGlyphs):
+        continue
+      let score = nerdFontScore(path)
+      if score > bestScore or (score == bestScore and (best.len == 0 or path < best)):
+        best = path
+        bestScore = score
+
+  scannedFonts[key] = best
+  best
+
 proc resolveFontPath(path: string): string =
   ## Return the file to open for the font named `path`.
   ##
@@ -410,39 +606,51 @@ proc resolveFontPath(path: string): string =
     ""
 
   if path == "nerd-monospace":
+    result = scanForNerdFont()
+    if result.len > 0:
+      return
+
     when defined(windows):
       result = firstExisting(
         [
           r"C:\Windows\Fonts\CaskaydiaCoveNerdFont-Regular.ttf",
-          r"C:\Windows\Fonts\DejaVuSansMono.ttf", r"C:\Windows\Fonts\consola.ttf",
+          r"C:\Windows\Fonts\CaskaydiaCoveNerdFontMono-Regular.ttf",
         ]
       )
     elif defined(macosx):
       result = firstExisting(
         [
+          getHomeDir() / "Library" / "Fonts" / "MesloLGS NF Regular.ttf",
           "/Library/Fonts/MesloLGS NF Regular.ttf",
           "/Library/Fonts/SauceCodeProNerdFont-Regular.ttf",
-          "/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf",
         ]
       )
     else:
       result = firstExisting(
         [
+          getHomeDir() / ".local" / "share" / "fonts" /
+            "CaskaydiaCoveNerdFontMono-Regular.ttf",
+          getHomeDir() / ".local" / "share" / "fonts" /
+            "CaskaydiaCoveNerdFont-Regular.ttf",
+          getHomeDir() / ".local" / "share" / "fonts" /
+            "HurmitNerdFontMono-Regular.otf",
+          getHomeDir() / ".local" / "share" / "fonts" /
+            "MonoidNerdFontMono-Regular.ttf",
           "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
           "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFont-Regular.ttf",
           "/usr/share/fonts/TTF/CaskaydiaCoveNerdFont-Regular.ttf",
           "/usr/share/fonts/TTF/MesloLGS NF Regular.ttf",
-          "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-          "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-          "/usr/share/fonts/liberation-mono-fonts/LiberationMono-Regular.ttf",
-          "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
-          "/usr/share/fonts/liberation-fonts/LiberationMono-Regular.ttf",
-          "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf",
-          "/usr/share/fonts/google-noto/NotoSansMono-Regular.ttf",
+          "/usr/share/fonts/TTF/FantasqueSansMNerdFontMono-Regular.ttf",
+          "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
         ]
       )
-    if result.len == 0:
-      result = scanForFont(["mono"], UnwantedFaces)
+    if result.len > 0 and hasRequiredGlyphs(result, RequiredNerdGlyphs):
+      return
+
+    # A plain monospace fallback keeps editor text available on machines with
+    # no Nerd Font installed, but it is deliberately last so icon surfaces do
+    # not silently render as tofu when a real Nerd Font exists.
+    result = scanForFont(["mono"], UnwantedFaces)
     return
 
   when defined(windows):
@@ -563,9 +771,9 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   ren = createRenderer(win, nil)
   if ren == nil:
     quit("Could not create SDL renderer")
-  # Do not let animated layer-shell frames queue ahead of compositor input.
-  # SDL falls back gracefully when the selected backend cannot enable VSync.
-  discard setRenderVSync(ren, 1)
+  # Layer-shell bars animate continuously and benefit from compositor pacing.
+  # Normal windows must not block interactive resize on renderer vsync.
+  discard setRenderVSync(ren, renderVsyncSetting().cint)
   discard setRenderDrawBlendMode(ren, BLENDMODE_BLEND)
   discard setRenderDrawColor(ren, 0, 0, 0, 0)
   discard renderClear(ren)
@@ -578,13 +786,45 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   layout.height = h
   rendererWidth = layout.width
   rendererHeight = layout.height
+  discard ensureFrameTarget(rendererWidth, rendererHeight)
+  frameContentWidth = rendererWidth
+  frameContentHeight = rendererHeight
   layout.scaleX = 1
   layout.scaleY = 1
   currentClip = ClipState()
   applyClipState()
 
 proc sdlRefresh() =
+  if resizeTraceEnabled():
+    inc traceRefreshes
+  if frameTarget == nil:
+    discard ensureFrameTarget(rendererWidth, rendererHeight)
+  if frameTarget == nil:
+    discard renderPresent(ren)
+    return
+  discard setRenderTarget(ren, nil)
+  discard setRenderClipRect(ren, cast[ptr sdl3.Rect](nil))
+  discard setRenderDrawColor(ren, 0, 0, 0, 0)
+  discard renderClear(ren)
+  var
+    src = FRect(
+      x: 0,
+      y: 0,
+      w: max(frameContentWidth, 1).cfloat,
+      h: max(frameContentHeight, 1).cfloat,
+    )
+    dst = FRect(
+      x: 0,
+      y: 0,
+      w: max(rendererWidth, 1).cfloat,
+      h: max(rendererHeight, 1).cfloat,
+    )
+  discard renderTexture(ren, frameTarget, addr src, addr dst)
   discard renderPresent(ren)
+  discard setRenderTarget(ren, frameTarget)
+  applyClipState()
+  drawColorValid = false
+  reportSdlResizeTrace("refresh")
 
 proc sdlSaveState() =
   clipStack.add currentClip
@@ -713,8 +953,11 @@ proc sdlGetFontMetrics(f: screen.Font): FontMetrics =
     screen.FontMetrics()
 
 proc sdlFillRect(r: coords.Rect, color: screen.Color) =
+  discard ensureFrameTarget(rendererWidth, rendererHeight)
   if color.a == 0 and r.x == 0 and r.y == 0 and r.w >= rendererWidth and
       r.h >= rendererHeight:
+    frameContentWidth = rendererWidth
+    frameContentHeight = rendererHeight
     discard setRenderDrawColor(ren, color.r, color.g, color.b, color.a)
     discard renderClear(ren)
     drawColorValid = false
@@ -980,7 +1223,8 @@ proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
     wakeEventQueued.store(false, moRelease)
   elif evType == uint32(EVENT_QUIT):
     e.kind = QuitEvent
-  elif evType == uint32(EVENT_WINDOW_RESIZED):
+  elif evType == uint32(EVENT_WINDOW_RESIZED) or
+      evType == uint32(EVENT_WINDOW_PIXEL_SIZE_CHANGED):
     e.kind = WindowResizeEvent
     e.x = sdlEvent.window.data1
     e.y = sdlEvent.window.data2

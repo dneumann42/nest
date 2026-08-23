@@ -66,7 +66,7 @@ type
   NestOwlRuntime* = ref object
     evaluator*: Evaluator
     externalEvents: CountTable[string]
-    componentState: Table[string, Value]
+    widgetState: Table[string, Value]
     stateBindings: seq[StateBinding]
     messages: Table[string, seq[Value]]
     loadedFiles*: Table[string, Time]
@@ -150,6 +150,10 @@ proc errorReport*(details: ErrorDetails): string =
   if details.primary.path.len > 0:
     result.add "\n" & details.primary.path & ":" & $details.primary.line & ":" &
       $details.primary.column
+  if details.primary.sourceLine.len > 0:
+    result.add "\n" & details.primary.sourceLine
+    if details.primary.column > 0:
+      result.add "\n" & repeat(' ', max(details.primary.column - 1, 0)) & "^"
   if details.frames.len > 0:
     result.add "\nStack trace:"
     for frame in details.frames:
@@ -220,7 +224,7 @@ proc receiveMessage(runtime: NestOwlRuntime, topic: string): Value {.raises: [].
 proc commitState(runtime: NestOwlRuntime) {.raises: [].} =
   for binding in runtime.stateBindings:
     let value = binding.env.bindings.getOrDefault(binding.symbol)
-    runtime.componentState[binding.key] = value
+    runtime.widgetState[binding.key] = value
 
 proc widgetValue(id: WidgetID, key = ""): Value =
   nativeValue(WidgetIDValue(value: id, key: key))
@@ -340,6 +344,15 @@ proc asInsets(value: Value, fallback: EdgeInsets): EdgeInsets =
     InsetsValue(value.native).value
   elif value.kind in {Number, Text}:
     insets(value.asNumber(fallback.left))
+  else:
+    fallback
+
+proc asCornerStyle(value: Value, fallback: CornerStyle): CornerStyle =
+  case value.asString.normalize
+  of "rounded", "round":
+    RoundedCorners
+  of "flat", "square":
+    FlatCorners
   else:
     fallback
 
@@ -465,6 +478,41 @@ proc evalConfig(
     of "opacity":
       result.style.hasOpacity = true
       result.style.opacity = value.asNumber(1.0)
+    of "cornerStyle", "cornerType", "corners":
+      result.style.cornerStyle = value.asCornerStyle(result.style.cornerStyle)
+    of "radius", "cornerRadius":
+      result.style.cornerRadii = radii(value.asNumber)
+    of "radiusTopLeft", "cornerRadiusTopLeft":
+      result.style.cornerRadii.topLeft = value.asNumber(result.style.cornerRadii.topLeft)
+    of "radiusTopRight", "cornerRadiusTopRight":
+      result.style.cornerRadii.topRight = value.asNumber(result.style.cornerRadii.topRight)
+    of "radiusBottomRight", "cornerRadiusBottomRight":
+      result.style.cornerRadii.bottomRight = value.asNumber(result.style.cornerRadii.bottomRight)
+    of "radiusBottomLeft", "cornerRadiusBottomLeft":
+      result.style.cornerRadii.bottomLeft = value.asNumber(result.style.cornerRadii.bottomLeft)
+    of "shadow", "boxShadow":
+      result.style.hasShadow = value.isTruthy
+      if result.style.shadowColor.a == 0:
+        result.style.shadowColor = color(0, 0, 0, 96)
+      if result.style.shadowBlur <= 0:
+        result.style.shadowBlur = 8
+      if result.style.shadowOffsetY == 0:
+        result.style.shadowOffsetY = 3
+    of "shadowColor":
+      result.style.hasShadow = true
+      result.style.shadowColor = value.asColor(result.style.shadowColor)
+    of "shadowOffsetX":
+      result.style.hasShadow = true
+      result.style.shadowOffsetX = value.asNumber(result.style.shadowOffsetX)
+    of "shadowOffsetY":
+      result.style.hasShadow = true
+      result.style.shadowOffsetY = value.asNumber(result.style.shadowOffsetY)
+    of "shadowBlur":
+      result.style.hasShadow = true
+      result.style.shadowBlur = value.asNumber(result.style.shadowBlur)
+    of "shadowSpread":
+      result.style.hasShadow = true
+      result.style.shadowSpread = value.asNumber(result.style.shadowSpread)
     else:
       discard
 
@@ -1454,6 +1502,11 @@ proc refreshPerfOverlay(runtime: NestOwlRuntime) {.raises: [].} =
       discard
 
 proc registerNestCommands(runtime: NestOwlRuntime) =
+  let widgetCommand = runtime.evaluator.env.get("component")
+  runtime.evaluator.env.define("widget", widgetCommand)
+  if runtime.evaluator.env.fallback != nil:
+    runtime.evaluator.env.fallback.define("widget", widgetCommand)
+
   runtime.evaluator.native "import":
     discard layout
     discard bodyNodes
@@ -1514,6 +1567,15 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       runtime.requireUi().markAllDirty()
     boolean(submitted)
 
+  runtime.evaluator.native "tooltip":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "tooltip expects widget id and text")
+    runtime.requireUi().tooltip(runtime.asWidgetID(values[0]), values[1].asString)
+    nothing()
+
   runtime.evaluator.native "keyPressed":
     discard layout
     discard bodyNodes
@@ -1539,7 +1601,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
   runtime.evaluator.native "state":
     discard layout
     if arguments.len != 1:
-      raise newException(EvaluatorError, "state expects one component key")
+      raise newException(EvaluatorError, "state expects one widget key")
     if bodyNodes.len == 0:
       raise newException(EvaluatorError, "state expects field bindings")
     let scope = env.eval(arguments[0]).asString
@@ -1548,12 +1610,12 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
         raise newException(EvaluatorError, "state entries must be bindings")
       let key = stateKey(scope, binding.bindingSymbol)
       let value =
-        if key in runtime.componentState:
-          runtime.componentState[key]
+        if key in runtime.widgetState:
+          runtime.widgetState[key]
         else:
           env.eval(binding.value)
-      if key notin runtime.componentState:
-        runtime.componentState[key] = value
+      if key notin runtime.widgetState:
+        runtime.widgetState[key] = value
       if env.bindings.hasKey(binding.bindingSymbol):
         env.bindings[binding.bindingSymbol] = value
       else:
@@ -2803,6 +2865,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       fontName,
       alignSelf = config.alignSelf,
       textScroll = config.textScroll,
+      style = config.style,
     )
     nothing()
 
@@ -3037,7 +3100,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let config = env.evalConfig(bodyNodes)
     boolean(
       runtime.currentUi[].imageButton(
-        id, path, config.width, config.height, config.alignSelf
+        id, path, config.width, config.height, config.alignSelf, config.style
       )
     )
 
@@ -3104,7 +3167,7 @@ proc init*(T: typedesc[NestOwlRuntime]): T =
   result = T(
     evaluator: Evaluator.init(),
     externalEvents: initCountTable[string](),
-    componentState: initTable[string, Value](),
+    widgetState: initTable[string, Value](),
     messages: initTable[string, seq[Value]](),
     loadedModules: initHashSet[string](),
     dialogProcesses: initTable[string, DialogProcess](),
@@ -3195,18 +3258,18 @@ proc render*(runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode) =
     runtime.commitState()
     runtime.currentUi = nil
 
-proc loadComponentLibrary*(runtime: NestOwlRuntime, path: string) =
-  ## Import the owl component library at `path` into the program's
-  ## environment, making its components available to render.
+proc loadWidgetLibrary*(runtime: NestOwlRuntime, path: string) =
+  ## Import the owl widget library at `path` into the program's
+  ## environment, making its widgets available to render.
   runtime.importModule(runtime.evaluator.env, path)
 
-proc renderComponent*(
+proc renderWidget*(
     runtime: NestOwlRuntime,
     ui: var UI,
-    libraryPath, componentName: string,
+    libraryPath, widgetName: string,
     arguments: openArray[SyntaxNode],
 ) =
-  ## Render the component `componentName` from the library at `libraryPath`
+  ## Render the widget `widgetName` from the library at `libraryPath`
   ## into `ui`, passing `arguments` as owl syntax nodes.
   ##
   ## Does nothing while the runtime is holding an error.
@@ -3216,27 +3279,27 @@ proc renderComponent*(
   runtime.stateBindings.setLen(0)
   try:
     if libraryPath.len > 0:
-      runtime.loadComponentLibrary(libraryPath)
+      runtime.loadWidgetLibrary(libraryPath)
     var nodes: seq[SyntaxNode]
     for argument in arguments:
       nodes.add argument
-    discard runtime.renderNodes(@[command(symbol(componentName), nodes)])
+    discard runtime.renderNodes(@[command(symbol(widgetName), nodes)])
   finally:
     runtime.commitState()
     runtime.currentUi = nil
 
-proc renderComponent*(
+proc renderWidget*(
     runtime: NestOwlRuntime,
     ui: var UI,
-    libraryPath, componentName: string,
+    libraryPath, widgetName: string,
     arguments: openArray[string] = [],
 ) =
-  ## Render the component `componentName` from the library at `libraryPath`
+  ## Render the widget `widgetName` from the library at `libraryPath`
   ## into `ui`, passing `arguments` as owl string literals.
   var nodes: seq[SyntaxNode]
   for argument in arguments:
     nodes.add stringLiteral(argument)
-  runtime.renderComponent(ui, libraryPath, componentName, nodes)
+  runtime.renderWidget(ui, libraryPath, widgetName, nodes)
 
 proc renderLayoutOnly*(
     runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode, width, height: int

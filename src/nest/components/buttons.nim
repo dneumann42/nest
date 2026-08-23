@@ -7,14 +7,14 @@ const
   ButtonPaddingY = 3
   ButtonMinHeight = ControlHeight
 
-proc drawBorder(f: Frame, c: Color) =
-  lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
-
 type Button* = ref object of Interactive
   label: string
   textScroll: bool
   fontName: string
   padding: EdgeInsets
+
+proc drawBorder(self: Button, f: Frame, c: Color) =
+  self.styledLineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 proc new*(T: typedesc[Button], label = "", textScroll = false,
     fontName = "font", padding = insets(-1.0)): T =
@@ -72,11 +72,14 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     f = widget.frame
     hot = ctx.hot(widget.id)
     active = ctx.active(widget.id)
-  fillRect(
-    rect(f.x.toInt + 2, f.y.toInt + 2, f.width.toInt, f.height.toInt),
-    color(0, 0, 0))
-  fillRect(
-    rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
+    bounds = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
+  self.drawShadow(bounds)
+  if not self.style.hasShadow:
+    self.styledFillRect(
+      rect(f.x.toInt + 2, f.y.toInt + 2, f.width.toInt, f.height.toInt),
+      color(0, 0, 0))
+  self.styledFillRect(
+    bounds,
     if self.style.hasBackground:
       self.styledBackground(ctx.palette.background)
     elif not active and hot:
@@ -86,14 +89,15 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     else:
       ctx.palette.background,
   )
-  drawLine(
-    f.x.toInt + 1,
-    f.y.toInt + 1,
-    (f.x + f.width - 2).toInt,
-    f.y.toInt + 1,
-    ctx.palette.buttonHighlight,
-  )
-  drawBorder(
+  if self.style.cornerStyle == FlatCorners:
+    drawLine(
+      f.x.toInt + 1,
+      f.y.toInt + 1,
+      (f.x + f.width - 2).toInt,
+      f.y.toInt + 1,
+      ctx.palette.buttonHighlight,
+    )
+  self.drawBorder(
     f,
     if active and hot:
       ctx.palette.buttonBorderActive

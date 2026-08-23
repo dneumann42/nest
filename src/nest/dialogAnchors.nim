@@ -4,6 +4,7 @@ import nest/[appConfig, layerShellSdl3Driver]
 
 type DialogAnchor* = object
   ok*: bool
+  cursor*: bool
   x*, y*, width*, height*: float64
   windowWidth*, windowHeight*: int
 
@@ -32,6 +33,8 @@ proc parseDialogAnchor*(value: string): DialogAnchor =
     let node = parseJson(value)
     result = DialogAnchor(
       ok: node.kind == JObject,
+      cursor: node.kind == JObject and node.hasKey("cursor") and
+        node["cursor"].kind == JBool and node["cursor"].getBool,
       x: numberField(node, "x"),
       y: numberField(node, "y"),
       width: numberField(node, "width"),
@@ -60,6 +63,21 @@ proc applyDialogAnchor*(app: AppConfig; anchor: DialogAnchor): AppConfig =
   ## unchanged when `anchor.ok` is false.
   result = app
   if not anchor.ok:
+    return
+
+  if anchor.cursor:
+    let
+      popupLeft = clampDistance(anchor.x, app.width.float64,
+          anchor.windowWidth.float64)
+      popupTop = max(anchor.y, 0.0)
+    result.layerShell = true
+    result.layerShellConfig.layer = LayerOverlay
+    result.layerShellConfig.exclusiveZone = 0
+    result.layerShellConfig.marginTop = edgeDistance(popupTop)
+    result.layerShellConfig.marginRight = 0
+    result.layerShellConfig.marginBottom = 0
+    result.layerShellConfig.marginLeft = edgeDistance(popupLeft)
+    result.layerShellConfig.anchors = {EdgeTop, EdgeLeft}
     return
 
   let

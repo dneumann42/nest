@@ -1,7 +1,7 @@
-import std/[json, os, osproc]
+import std/[json, os, osproc, strutils]
 
 import nest/[appConfig, owldsl, runtime, ui]
-import nest/input
+import nest/[input, screen]
 
 proc closeOwlErrorDialog*(app: NestOwlApp) =
   ## Close the error dialog `app` has open, terminating the dialog process if
@@ -49,6 +49,40 @@ proc errorDetailsFromJson*(value: string): ErrorDetails =
   except CatchableError:
     result = ErrorDetails(message: value)
 
+proc locationText(location: ErrorLocation): string =
+  if location.path.len == 0:
+    return ""
+  result = location.path & ":" & $location.line & ":" & $location.column
+  if location.label.len > 0:
+    result.add " in " & location.label
+
+proc openLocation(location: ErrorLocation) =
+  let text = location.locationText()
+  if text.len > 0:
+    openDiagnosticLocation(text)
+
+proc sourceContextLines(location: ErrorLocation): seq[string] =
+  if location.sourceLine.len == 0:
+    return
+  let numberWidth = max(($location.line).len, 1)
+  result.add ($location.line).align(numberWidth) & " | " & location.sourceLine
+  if location.column > 0:
+    result.add repeat(' ', numberWidth) & " | " &
+      repeat(' ', max(location.column - 1, 0)) & "^"
+
+proc diagnosticLines(details: ErrorDetails): seq[string] =
+  ## Return the full diagnostic without truncation.
+  result.add "error: " & details.message
+  if details.primary.path.len > 0:
+    result.add details.primary.locationText()
+  for line in details.primary.sourceContextLines():
+    result.add line
+  if details.frames.len > 0:
+    result.add ""
+    result.add "Stack trace:"
+    for frame in details.frames:
+      result.add "  at " & frame.locationText()
+
 proc launchOwlErrorDialog*(app: NestOwlApp, details: ErrorDetails) =
   ## Show `details` in a separate error dialog process.
   ##
@@ -72,14 +106,20 @@ proc launchOwlErrorDialog*(app: NestOwlApp, details: ErrorDetails) =
     discard
 
 template owlErrorDialogBody(
-    ui: var UI, details: ErrorDetails, copied, stackExpanded: var bool, running: var bool
+    ui: var UI, details: ErrorDetails, copied: var bool, running: var bool
 ) =
   ui.events:
     if ui.clicked(ui.id("_nest_error_copy")):
       putClipboardText(details.errorReport())
       copied = true
-    if ui.clicked(ui.id("_nest_error_stack")):
-      stackExpanded = not stackExpanded
+    if ui.clicked(ui.id("_nest_error_open_primary")) or
+        ui.clicked(ui.id("_nest_error_primary")) or
+        ui.clicked(ui.id("_nest_error_source", "0")) or
+        ui.clicked(ui.id("_nest_error_source", "1")):
+      details.primary.openLocation()
+    for index, frame in details.frames:
+      if ui.clicked(ui.id("_nest_error_frame", $index)):
+        frame.openLocation()
     if ui.clicked(ui.id("_nest_error_close")):
       running = false
   ui.card(
@@ -90,6 +130,12 @@ template owlErrorDialogBody(
       padding = 0,
       gap = 0,
       alignItems = AlignStretch,
+      cornerStyle = RoundedCorners,
+      radius = 6,
+      shadow = true,
+      shadowColor = color(0, 0, 0, 150),
+      shadowOffsetY = 4,
+      shadowBlur = 12,
     ),
   ):
     ui.dialogHeader(
@@ -100,34 +146,41 @@ template owlErrorDialogBody(
       ),
     ):
       let titleID = ui.id("_nest_error_title")
-      ui.label(titleID, "Owl error", fill(), fit())
+      ui.label(titleID, "Owl Error", fill(), fit())
       ui.dragWindow(titleID)
       discard ui.button(ui.id("_nest_error_close"), "×", fixed(26), fixed(26))
     ui.column(
       ui.id("_nest_error_body"),
       cfg(
-        width = fill(), height = fill(), padding = 16, gap = 8, scrollY = true,
+        width = fill(), height = fill(), padding = 14, gap = 10,
+            scrollY = true, scrollX = true,
             alignItems = AlignStretch
       ),
     ):
-      for index, line in owlErrorLines(details.message, maxLines = 1024):
-        ui.label(ui.id("_nest_error_message", $index), line, fill(), fit())
+      ui.label(ui.id("_nest_error_summary"), details.message, fill(), fit(),
+        textScroll = true)
       if details.primary.path.len > 0:
         ui.diagnosticLabel(ui.id("_nest_error_primary"),
-          details.primary.path & ":" & $details.primary.line & ":" & $details.primary.column,
-          ui.palette.textColor, fill(), fit(), clickable = false)
-      if details.primary.sourceLine.len > 0:
-        ui.label(ui.id("_nest_error_source"), details.primary.sourceLine, fill(), fit())
+          details.primary.locationText(), ui.palette.rose, fill(), fit(),
+          clickable = true)
+      for index, line in details.primary.sourceContextLines():
+        ui.diagnosticLabel(ui.id("_nest_error_source", $index), line,
+          if line.strip == "^": ui.palette.rose else: ui.palette.textColor,
+          fill(), fit(), clickable = details.primary.path.len > 0)
+      ui.label(ui.id("_nest_error_full_heading"), "Full report", fill(), fit())
+      for index, line in details.diagnosticLines():
+        let location = diagnosticLocation(line)
+        if location.ok:
+          renderOwlErrorLine(ui, index, line, fill(), fit())
+        else:
+          ui.label(ui.id("_nest_error_message", $index), line, fill(), fit(),
+            textScroll = true)
       if details.frames.len > 0:
-        discard ui.button(ui.id("_nest_error_stack"),
-          (if stackExpanded: "▾" else: "▸") & " Stack trace (" & $details.frames.len & ")",
-          fill(), fit())
-        if stackExpanded:
-          for index, frame in details.frames:
-            let location = frame.path & ":" & $frame.line & ":" & $frame.column &
-              (if frame.label.len > 0: " in " & frame.label else: "")
-            ui.diagnosticLabel(ui.id("_nest_error_frame", $index), location,
-              ui.palette.textColor, fill(), fit(), clickable = false)
+        ui.label(ui.id("_nest_error_stack_title"),
+          "Stack trace (" & $details.frames.len & ")", fill(), fit())
+        for index, frame in details.frames:
+          ui.diagnosticLabel(ui.id("_nest_error_frame", $index),
+            frame.locationText(), ui.palette.sky, fill(), fit(), clickable = true)
       if copied:
         ui.label(ui.id("_nest_error_copied"), "Copied to clipboard", fill(),
             fit())
@@ -136,13 +189,15 @@ template owlErrorDialogBody(
       cfg(width = fill(), height = fit(), gap = 8, padding = 10,
           justifyContent = JustifyEnd),
     ):
+      if details.primary.path.len > 0:
+        discard ui.button(ui.id("_nest_error_open_primary"), "Open Location", fit(), fit())
       discard ui.button(ui.id("_nest_error_copy"), "Copy", fit(), fit())
 
 proc drawOwlErrorDialog(
-    ui: var UI, details: ErrorDetails, copied, stackExpanded: var bool, running: var bool
+    ui: var UI, details: ErrorDetails, copied: var bool, running: var bool
 ) =
   ui.layout:
-    owlErrorDialogBody(ui, details, copied, stackExpanded, running)
+    owlErrorDialogBody(ui, details, copied, running)
 
 proc layoutOwlErrorDialogForTest*(
     ui: var UI, message: string, width, height: int
@@ -151,11 +206,23 @@ proc layoutOwlErrorDialogForTest*(
   ## report whether the layout succeeded. Exposed for the test suite.
   var
     copied = false
-    stackExpanded = false
     running = true
   ui.initContext(width, height)
   ui.beginLayout(width, height)
-  owlErrorDialogBody(ui, ErrorDetails(message: message), copied, stackExpanded, running)
+  owlErrorDialogBody(ui, ErrorDetails(message: message), copied, running)
+  ui.applyIntrinsicSizes(ui.resources)
+  ui.endLayout()
+
+proc layoutOwlErrorDialogForTest*(
+    ui: var UI, details: ErrorDetails, width, height: int
+): bool =
+  ## Lay out the structured error dialog once against `ui` for tests.
+  var
+    copied = false
+    running = true
+  ui.initContext(width, height)
+  ui.beginLayout(width, height)
+  owlErrorDialogBody(ui, details, copied, running)
   ui.applyIntrinsicSizes(ui.resources)
   ui.endLayout()
 
@@ -166,15 +233,14 @@ proc runOwlErrorDialog*(details: ErrorDetails) =
   ## This is what the `nest error-dialog` command runs.
   var ui = UI.init()
   var copied = false
-  var stackExpanded = false
   application AppConfig.overlayDialog(
-    width = 620.Positive,
-    height = 360.Positive,
+    width = 960.Positive,
+    height = 640.Positive,
     title = "Owl Error",
     namespace = "nest-owl-error-dialog",
     draggable = true,
   ), ui:
-    drawOwlErrorDialog(ui, details, copied, stackExpanded, running)
+    drawOwlErrorDialog(ui, details, copied, running)
 
 proc runOwlErrorDialog*(message: string) =
   ## Run the error dialog for a plain `message`, blocking until the user

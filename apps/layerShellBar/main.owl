@@ -9,13 +9,33 @@ fun startMenu lbl:
   imageButton startID "apps/layerShellBar/assets/nomicon-small.bmp":
     width = fixed BarIconSize
     height = fixed BarIconSize
+    background = theme-color "background"
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip startID "Start"
 
 fun dateTime:
-  button clockID (clock "MMM d, yyyy   hh:mm:ss tt"):
+  button clockID (string IconCalendar " " (clock "MMM d, yyyy   hh:mm:ss tt")):
     width = fit
     height = fixed BarWidgetHeight
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip clockID "Calendar"
 
 fun defaultConfig:
   {}:
@@ -72,7 +92,7 @@ column (id "root"):
         alignItems = AlignCenter
         alignSelf = AlignStretch
         justifyContent = JustifyStart
-	
+
         startMenu (dict-get cfg "start-label")
         workspaces "bar"
         activeWindow "bar"
@@ -84,7 +104,7 @@ column (id "root"):
         alignItems = AlignCenter
         justifyContent = JustifyEnd
         alignSelf = AlignStretch
-	
+
         volumeWidget "bar"
         mediaWidget "bar-media"
         notificationWidget "bar"
@@ -92,12 +112,12 @@ column (id "root"):
         memoryMeter "bar"
         storageMeter "bar"
         networkMeter "bar"
-	
+
       row (id "clock-center"):
         width = fill
         height = fill
         alignItems = AlignCenter
         justifyContent = JustifyCenter
         alignSelf = AlignStretch
-	
+
         dateTime

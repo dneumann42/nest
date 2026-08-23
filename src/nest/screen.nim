@@ -1,3 +1,5 @@
+import std/math
+
 import coords
 
 type
@@ -9,6 +11,9 @@ type
 
   TextExtent* = object
     w*, h*: int
+
+  CornerRadii* = object
+    topLeft*, topRight*, bottomRight*, bottomLeft*: float64
 
   FontMetrics* = object
     ascent*, descent*, lineHeight*: int
@@ -150,6 +155,7 @@ var drawRelays* = DrawRelays(
 var drawCommands*: ptr seq[DrawCommand]
 var commandMeasureText*: proc(f: Font, text: string): TextExtent {.nimcall.}
 var commandMeasureImage*: proc(path: string): TextExtent {.nimcall.}
+var externalPopoversEnabled* = false
 
 proc printableText*(text: string): string =
   ## Return `text` with characters the renderer cannot draw replaced.
@@ -268,6 +274,127 @@ proc fillRect*(r: Rect, color: Color) =
     return
   drawRelays.fillRect(r, color)
 
+proc drawLine*(x1, y1, x2, y2: int, color: Color)
+proc drawPoint*(x, y: int, color: Color)
+
+proc clampRadius(radius: float64, w, h: int): int =
+  radius.int.clamp(0, min(w, h) div 2)
+
+proc scaledAlpha(color: Color, coverage: int, samples: int): Color =
+  result = color
+  result.a = uint8(((color.a.int * coverage + samples div 2) div samples).clamp(0, 255))
+
+proc insideRoundedRect(px, py: float64, w, h: int, radii: CornerRadii): bool =
+  if px < 0 or py < 0 or px >= w.float64 or py >= h.float64:
+    return false
+  let
+    fw = w.float64
+    fh = h.float64
+    tl = clampRadius(radii.topLeft, w, h).float64
+    tr = clampRadius(radii.topRight, w, h).float64
+    br = clampRadius(radii.bottomRight, w, h).float64
+    bl = clampRadius(radii.bottomLeft, w, h).float64
+
+  if tl > 0 and px < tl and py < tl:
+    let dx = px - tl
+    let dy = py - tl
+    return dx * dx + dy * dy <= tl * tl
+  if tr > 0 and px >= fw - tr and py < tr:
+    let dx = px - (fw - tr)
+    let dy = py - tr
+    return dx * dx + dy * dy <= tr * tr
+  if br > 0 and px >= fw - br and py >= fh - br:
+    let dx = px - (fw - br)
+    let dy = py - (fh - br)
+    return dx * dx + dy * dy <= br * br
+  if bl > 0 and px < bl and py >= fh - bl:
+    let dx = px - bl
+    let dy = py - (fh - bl)
+    return dx * dx + dy * dy <= bl * bl
+  true
+
+proc roundedCoverage(x, y, w, h: int, radii: CornerRadii): int =
+  const SampleGrid = 4
+  for sy in 0 ..< SampleGrid:
+    for sx in 0 ..< SampleGrid:
+      let
+        px = x.float64 + (sx.float64 + 0.5) / SampleGrid.float64
+        py = y.float64 + (sy.float64 + 0.5) / SampleGrid.float64
+      if insideRoundedRect(px, py, w, h, radii):
+        inc result
+
+proc roundedStrokeCoverage(x, y, w, h: int, radii: CornerRadii): int =
+  const SampleGrid = 4
+  let innerRadii = CornerRadii(
+    topLeft: max(radii.topLeft - 1.0, 0.0),
+    topRight: max(radii.topRight - 1.0, 0.0),
+    bottomRight: max(radii.bottomRight - 1.0, 0.0),
+    bottomLeft: max(radii.bottomLeft - 1.0, 0.0),
+  )
+  for sy in 0 ..< SampleGrid:
+    for sx in 0 ..< SampleGrid:
+      let
+        px = x.float64 + (sx.float64 + 0.5) / SampleGrid.float64
+        py = y.float64 + (sy.float64 + 0.5) / SampleGrid.float64
+      if insideRoundedRect(px, py, w, h, radii) and
+          not insideRoundedRect(px - 1.0, py - 1.0, max(w - 2, 0), max(h - 2, 0),
+            innerRadii):
+        inc result
+
+proc fillCoverageRuns(
+    originX, originY, w, h: int,
+    coverage: proc(x, y: int): int,
+    color: Color,
+) =
+  const Samples = 16
+  for y in 0 ..< h:
+    var
+      runX = 0
+      runCoverage = -1
+      hasRun = false
+    for x in 0 ..< w:
+      let c = coverage(x, y)
+      if c == runCoverage:
+        if not hasRun:
+          runX = x
+          hasRun = true
+      else:
+        if hasRun and runCoverage > 0:
+          fillRect(
+            rect(originX + runX, originY + y, x - runX, 1),
+            color.scaledAlpha(runCoverage, Samples),
+          )
+        runX = x
+        runCoverage = c
+        hasRun = true
+    if hasRun and runCoverage > 0:
+      fillRect(
+        rect(originX + runX, originY + y, w - runX, 1),
+        color.scaledAlpha(runCoverage, Samples),
+      )
+
+proc fillRoundedRect*(r: Rect, radii: CornerRadii, color: Color) =
+  ## Fill `r`, rounding each corner independently.
+  if r.w <= 0 or r.h <= 0:
+    return
+  let
+    tl = clampRadius(radii.topLeft, r.w, r.h)
+    tr = clampRadius(radii.topRight, r.w, r.h)
+    br = clampRadius(radii.bottomRight, r.w, r.h)
+    bl = clampRadius(radii.bottomLeft, r.w, r.h)
+  if tl == 0 and tr == 0 and br == 0 and bl == 0:
+    fillRect(r, color)
+    return
+  fillCoverageRuns(
+    r.x,
+    r.y,
+    r.w,
+    r.h,
+    proc(x, y: int): int =
+      roundedCoverage(x, y, r.w, r.h, radii),
+    color,
+  )
+
 proc lineRect*(r: Rect, color: Color) =
   ## Stroke the outline of `r` in `color`, skipping empty rectangles.
   ##
@@ -284,6 +411,28 @@ proc lineRect*(r: Rect, color: Color) =
   drawRelays.drawLine(r.x, r.y + r.h - 1, r.x + r.w - 1, r.y + r.h - 1, color)
   drawRelays.drawLine(r.x, r.y, r.x, r.y + r.h - 1, color)
   drawRelays.drawLine(r.x + r.w - 1, r.y, r.x + r.w - 1, r.y + r.h - 1, color)
+
+proc lineRoundedRect*(r: Rect, radii: CornerRadii, color: Color) =
+  ## Stroke `r`, rounding each corner independently.
+  if r.w <= 0 or r.h <= 0:
+    return
+  let
+    tl = clampRadius(radii.topLeft, r.w, r.h)
+    tr = clampRadius(radii.topRight, r.w, r.h)
+    br = clampRadius(radii.bottomRight, r.w, r.h)
+    bl = clampRadius(radii.bottomLeft, r.w, r.h)
+  if tl == 0 and tr == 0 and br == 0 and bl == 0:
+    lineRect(r, color)
+    return
+  fillCoverageRuns(
+    r.x,
+    r.y,
+    r.w,
+    r.h,
+    proc(x, y: int): int =
+      roundedStrokeCoverage(x, y, r.w, r.h, radii),
+    color,
+  )
 
 proc drawLine*(x1, y1, x2, y2: int, color: Color) =
   ## Draw a line from `x1`, `y1` to `x2`, `y2` in `color`.

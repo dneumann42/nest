@@ -34,7 +34,7 @@ events:
     check runtime.get("count").kind == Number
     check runtime.get("count").number == 2
 
-  test "state persists a component model through ordinary set":
+  test "state persists a widget model through ordinary set":
     let runtime = NestOwlRuntime.init()
     var ui = UI.init()
 
@@ -251,18 +251,18 @@ label (id "value") value:
   test "volume dialog status does not reuse bar percentage command":
     let
       dialogSource = readFile("apps/layerShellBar/volume/main.owl")
-      componentSource = readFile("apps/layerShellBar/components/volume.owl")
+      widgetSource = readFile("apps/layerShellBar/components/volume.owl")
 
     check dialogSource.contains("set status (shell (volumeDialogStatusCommand))")
     check not dialogSource.contains("set status (shell (volumeStatusCommand))")
-    check componentSource.contains("fun volumeDialogStatusCommand:")
-    check componentSource.contains("printf 'Muted'")
-    check componentSource.contains("printf 'Unmuted'")
+    check widgetSource.contains("fun volumeDialogStatusCommand:")
+    check widgetSource.contains("printf 'Muted'")
+    check widgetSource.contains("printf 'Unmuted'")
 
   test "notification mailbox uses uncapped indexed scroll list":
     let
       dialogSource = readFile("apps/layerShellBar/notifications/main.owl")
-      componentSource = readFile("apps/layerShellBar/components/notifications.owl")
+      widgetSource = readFile("apps/layerShellBar/components/notifications.owl")
 
     check dialogSource.contains("scrollY = true")
     check dialogSource.contains("rows = list")
@@ -272,8 +272,8 @@ label (id "value") value:
     check dialogSource.contains("card (id \"notifications\" \"row\" rowIndex)")
     check dialogSource.contains("+= rowIndex 1")
     check not dialogSource.contains("rows = (textLines (shellAsync")
-    check not componentSource.contains("rows[:5]")
-    check componentSource.contains("for item in rows:")
+    check not widgetSource.contains("rows[:5]")
+    check widgetSource.contains("for item in rows:")
 
   test "network dialog exposes only actionable controls":
     let dialogSource = readFile("apps/layerShellBar/network/main.owl")
@@ -842,7 +842,8 @@ actions
         check ui.widget(ui.id("right")).frame.width > 0
         check ui.widget(ui.id("bar", "active-window")).frame.width > 0
         check ui.widget(ui.id("bar", "volume")).frame.width > 0
-        check ui.widget(ui.id("bar-media", "art")).frame.width == 26
+        check ui.widget(ui.id("bar-media", "art")).frame.width ==
+          app.runtime.get("MediaBarArtSize").number
         check ui.widget(ui.id("bar", "cpu")).frame.width > 0
         check ui.widget(ui.id("bar", "memory")).frame.width > 0
         check ui.widget(ui.id("bar", "storage")).frame.width > 0
@@ -1521,7 +1522,7 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
     check runtime.evaluator.exec(parse("swayWorkspaceCommand \"dev's\"\n")).text ==
       "swaymsg workspace 'dev'\\''s'"
 
-  test "owl calendar component renders and selects previous month":
+  test "owl calendar widget renders and selects previous month":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1580,7 +1581,7 @@ dateSelector "cal" selectedDate
     finally:
       fontRelays = originalFontRelays
 
-  test "owl calendar component signals selected day clicks":
+  test "owl calendar widget signals selected day clicks":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1625,7 +1626,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
     finally:
       fontRelays = originalFontRelays
 
-  test "nim can render an owl-defined component":
+  test "nim can render an owl-defined widget":
     let originalFontRelays = fontRelays
     fontRelays = FontRelays(
       openFont: proc(path: string; size: int; metrics: var FontMetrics): Font =
@@ -1649,7 +1650,7 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
       ui.loadFont("font", "", 18)
 
       ui.beginLayout(320, 320)
-      runtime.renderComponent(
+      runtime.renderWidget(
         ui,
         "apps/layerShellBar/components/calendar.owl",
         "dateSelector",

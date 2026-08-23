@@ -64,10 +64,14 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
   ## Draw the label's text, clipped or scrolled to fit its frame.
   let
     f = widget.frame
+    bounds = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
     (font, _) = ctx.resources.get(self.fontName)
     fg = if self.hasColor: self.fg else: ctx.palette.textColor
     textExtent = ctx.resources.measureText(self.fontName, self.text)
     textWidth = max(f.width.toInt, 0)
+  self.drawShadow(bounds)
+  if self.style.hasBackground:
+    self.styledFillRect(bounds, self.styledBackground(ctx.palette.panelMuted))
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
     ctx.requestRedrawAfter(33)
     let

@@ -80,6 +80,7 @@ card (id "media" "dialog"):
     button closeID "x":
       width = fixed DialogCloseButtonWidthLarge
       height = fit
+    tooltip closeID "Close"
   row (id "media" "body"):
     width = fill
     height = fill
@@ -93,6 +94,7 @@ card (id "media" "dialog"):
       imageButton artworkID art:
         width = fill
         height = (fixed MediaPopoverArtworkHeight)
+      tooltip artworkID "Close"
       row (id "media" "controls"):
         width = fill
         height = fit
@@ -101,15 +103,19 @@ card (id "media" "dialog"):
         button previousID "Prev":
           width = (fixed MediaControlButtonWidth)
           height = (fixed MediaControlHeight)
+        tooltip previousID "Previous track"
         button playPauseID playPauseLabel:
           width = (fixed MediaPlayButtonWidth)
           height = (fixed MediaControlHeight)
+        tooltip playPauseID (pick (= displayStatus "Playing") "Pause" "Play")
         button nextID "Next":
           width = (fixed MediaControlButtonWidth)
           height = (fixed MediaControlHeight)
+        tooltip nextID "Next track"
       horizontalSlider seekID position 0 lengthSeconds:
         width = fill
         height = (fixed MediaSeekHeight)
+      tooltip seekID "Seek"
     column (id "media" "details"):
       width = fill
       height = fill

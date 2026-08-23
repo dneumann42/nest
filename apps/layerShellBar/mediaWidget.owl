@@ -1,7 +1,7 @@
 import "variables.owl"
 import "components/media.owl"
 
-component mediaWidget key:
+widget mediaWidget key:
   define:
     keyText = eval key
     previousID = (id keyText "previous")
@@ -22,7 +22,7 @@ component mediaWidget key:
   when (= status statusOverride):
     set statusOverride ""
   set displayStatus (pick (= statusOverride "") status statusOverride)
-  set playPauseLabel (pick (= displayStatus "Playing") "❚❚" "▶")
+  set playPauseLabel (pick (= displayStatus "Playing") IconPause IconPlay)
 
   redrawAfter MediaPollInterval
 
@@ -36,7 +36,7 @@ component mediaWidget key:
     when (clicked playPauseID):
       set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
       set displayStatus statusOverride
-      set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
+      set playPauseLabel (pick (= displayStatus "Playing") IconPause IconPlay)
       mediaAction (id keyText "action" "play-pause") "play-pause 2>/dev/null"
     when (clicked nextID):
       mediaAction (id keyText "action" "next") "next 2>/dev/null"
@@ -46,27 +46,54 @@ component mediaWidget key:
     height = fixed BarWidgetHeight
     gap = NoSpacing
     alignItems = AlignCenter
-    button previousID "◀":
+    button previousID IconPrevious:
       width = (fixed MediaBarButtonWidth)
       height = fixed BarWidgetHeight
-      fontSize = BarWidgetFontSize
+      fontName = BarIconFontName
+      fontSize = BarIconFontSize
       buttonPadding = BarWidgetPadding
+      cornerStyle = "rounded"
+      radiusTopLeft = BarWidgetRadius
+      radiusBottomLeft = BarWidgetRadius
+      shadow = true
+      shadowColor = BarWidgetShadowColor
+      shadowOffsetX = BarWidgetShadowOffsetX
+      shadowOffsetY = BarWidgetShadowOffsetY
+      shadowBlur = BarWidgetShadowBlur
+      shadowSpread = BarWidgetShadowSpread
+    tooltip previousID "Previous track"
     imageButton artID art:
       width = (fixed MediaBarArtSize)
       height = (fixed MediaBarArtSize)
-    button titleID title:
+    tooltip artID "Media"
+    button titleID (string IconMedia " " title):
       width = (fixed MediaBarTitleWidth)
       height = fixed BarWidgetHeight
       textScroll = true
-      fontSize = BarWidgetFontSize
+      fontName = BarIconFontName
+      fontSize = BarIconFontSize
       buttonPadding = BarWidgetPadding
+    tooltip titleID title
     button playPauseID playPauseLabel:
       width = (fixed MediaBarPlayButtonWidth)
       height = fixed BarWidgetHeight
-      fontSize = BarWidgetFontSize
+      fontName = BarIconFontName
+      fontSize = BarIconFontSize
       buttonPadding = BarWidgetPadding
-    button nextID "▶":
+    tooltip playPauseID (pick (= displayStatus "Playing") "Pause" "Play")
+    button nextID IconNext:
       width = (fixed MediaBarButtonWidth)
       height = fixed BarWidgetHeight
-      fontSize = BarWidgetFontSize
+      fontName = BarIconFontName
+      fontSize = BarIconFontSize
       buttonPadding = BarWidgetPadding
+      cornerStyle = "rounded"
+      radiusTopRight = BarWidgetRadius
+      radiusBottomRight = BarWidgetRadius
+      shadow = true
+      shadowColor = BarWidgetShadowColor
+      shadowOffsetX = BarWidgetShadowOffsetX
+      shadowOffsetY = BarWidgetShadowOffsetY
+      shadowBlur = BarWidgetShadowBlur
+      shadowSpread = BarWidgetShadowSpread
+    tooltip nextID "Next track"

@@ -1,5 +1,5 @@
-import nest/[appConfig, dialogs, errorDialogs, runtime, ui]
-export appConfig, dialogs, errorDialogs, runtime, ui
+import nest/[appConfig, dialogs, errorDialogs, resizePacing, runtime, ui]
+export appConfig, dialogs, errorDialogs, resizePacing, runtime, ui
 
 import fungus
 export fungus

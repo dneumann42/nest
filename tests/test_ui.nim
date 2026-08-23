@@ -2,7 +2,7 @@ import std/[sets, strutils, unittest]
 
 import nest as nestApp
 import nest/[appConfig, coords, dialogAnchors, layerShellSdl3Driver, palette,
-    perf, resources, ui]
+    owldsl, perf, resources, ui]
 import nest/screen
 
 const
@@ -89,11 +89,25 @@ suite "ui layout nesting":
     let styled = cfg(width = fit(), height = fit())
       .withBackground(color(12'u8, 24'u8, 36'u8))
       .withOpacity(0.42)
+      .withCornerStyle(RoundedCorners)
+      .withRadius(8)
+      .withShadow(color(0, 0, 0, 96), offsetX = 1, offsetY = 2, blur = 6, spread = 1)
 
     check styled.style.hasBackground
     check styled.style.background == color(12'u8, 24'u8, 36'u8)
     check styled.style.hasOpacity
     check styled.style.opacity == 0.42
+    check styled.style.cornerStyle == RoundedCorners
+    check styled.style.cornerRadii.topLeft == 8
+    check styled.style.cornerRadii.topRight == 8
+    check styled.style.cornerRadii.bottomRight == 8
+    check styled.style.cornerRadii.bottomLeft == 8
+    check styled.style.hasShadow
+    check styled.style.shadowColor == color(0, 0, 0, 96)
+    check styled.style.shadowOffsetX == 1
+    check styled.style.shadowOffsetY == 2
+    check styled.style.shadowBlur == 6
+    check styled.style.shadowSpread == 1
 
   test "dialog anchors do not double-offset top layer-shell popovers":
     let app = AppConfig.init(width = 260, height = 120)
@@ -1315,6 +1329,34 @@ Stack trace:
       check ui.widget(ui.id("_nest_error_dialog")).frame.height == 300
       check ui.widget(ui.id("_nest_error_header")).frame.height > 0
       check ui.widget(ui.id("_nest_error_message", "0")).frame.width > 0
+
+      var detailedUi = UI.init()
+      detailedUi.loadFont("font", "", 18)
+      check nestApp.layoutOwlErrorDialogForTest(
+        detailedUi,
+        ErrorDetails(
+          message: "inconsistent indentation",
+          primary: ErrorLocation(
+            path: "/tmp/example/main.owl",
+            line: 12,
+            column: 9,
+            sourceLine: "        button cmd.name cmd.label:",
+          ),
+          frames: @[
+            ErrorLocation(path: "/tmp/example/main.owl", line: 20, column: 3,
+              label: "render"),
+            ErrorLocation(path: "/tmp/example/component.owl", line: 5, column: 1,
+              label: "component"),
+          ],
+        ),
+        960,
+        640,
+      )
+      check detailedUi.widget(detailedUi.id("_nest_error_primary")).frame.width > 0
+      check detailedUi.widget(detailedUi.id("_nest_error_source", "0")).frame.width > 0
+      check detailedUi.widget(detailedUi.id("_nest_error_source", "1")).frame.width > 0
+      check detailedUi.widget(detailedUi.id("_nest_error_frame", "0")).frame.width > 0
+      check detailedUi.widget(detailedUi.id("_nest_error_frame", "1")).frame.width > 0
     finally:
       fontRelays = originalFontRelays
 

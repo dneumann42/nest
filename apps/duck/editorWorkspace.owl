@@ -167,7 +167,7 @@ fun editorTree tree workspace focusedPane:
           editorTree leftTree workspace focusedPane
           editorTree rightTree workspace focusedPane
 
-component editorWorkspace key:
+widget editorWorkspace key:
   define:
     keyText = (eval key)
 

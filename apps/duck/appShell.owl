@@ -1,4 +1,4 @@
-component duckStatusBar:
+widget duckStatusBar:
   when showStatusBar:
     row (id "duck" "status"):
       width = fill
@@ -16,7 +16,7 @@ component duckStatusBar:
         width = fit
         height = fit
 
-component duckAppShell:
+widget duckAppShell:
   set tabSelection activeBuffer
   panel rootID:
     width = fill

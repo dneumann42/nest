@@ -9,7 +9,7 @@ fun notificationListCommand:
 fun notificationClearCommand:
   string "makoctl dismiss --all --no-history 2>/dev/null; n=$(python3 -c 'import json,subprocess\ntry: print(len(json.loads(subprocess.check_output((\"makoctl\",\"history\",\"-j\"), stderr=subprocess.DEVNULL) or b\"[]\")))\nexcept Exception: print(0)'); while [ \"$n\" -gt 0 ]; do makoctl restore 2>/dev/null; makoctl dismiss --no-history 2>/dev/null; n=$((n-1)); done"
 
-component notificationWidget key:
+widget notificationWidget key:
   define:
     keyText = (eval key)
     buttonID = (id keyText "notifications")
@@ -19,9 +19,19 @@ component notificationWidget key:
     when (and (clicked buttonID) (not (dialogOpen? "notifications"))):
       openDialog "notifications" "./notifications" "" buttonID
 
-  button buttonID (string "✉ " count):
+  button buttonID (string IconNotifications " " count):
     width = fit
     height = fixed BarWidgetHeight
     textScroll = true
-    fontSize = BarWidgetFontSize
+    fontName = BarIconFontName
+    fontSize = BarIconFontSize
     buttonPadding = BarWidgetPadding
+    cornerStyle = "rounded"
+    radius = BarWidgetRadius
+    shadow = true
+    shadowColor = BarWidgetShadowColor
+    shadowOffsetX = BarWidgetShadowOffsetX
+    shadowOffsetY = BarWidgetShadowOffsetY
+    shadowBlur = BarWidgetShadowBlur
+    shadowSpread = BarWidgetShadowSpread
+  tooltip buttonID "Notifications"

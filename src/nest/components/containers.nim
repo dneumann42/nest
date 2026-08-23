@@ -57,18 +57,20 @@ proc new*(T: typedesc[DialogHeader]): T =
   ## trailing controls.
   T()
 
-proc drawBorder(f: Frame, c: Color) =
-  lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
+proc drawBorder(self: Container, f: Frame, c: Color) =
+  self.styledLineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 method draw*(self: Panel, widget: Widget, ctx: var DrawContext) =
   ## Fill the panel's frame with its own background colour, or the palette's.
   let f = widget.frame
-  fillRect(
+  self.drawShadow(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt))
+  self.styledFillRect(
     rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
     self.styledBackground(ctx.palette.panelBackground),
   )
-  fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, 2), ctx.palette.buttonHighlight)
-  drawBorder(f, ctx.palette.panelBorder)
+  if self.style.cornerStyle == FlatCorners:
+    fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, 2), ctx.palette.buttonHighlight)
+  self.drawBorder(f, ctx.palette.panelBorder)
 
 method draw*(self: Card, widget: Widget, ctx: var DrawContext) =
   ## Draw the card: its background, border and drop shadow.
@@ -80,15 +82,18 @@ method draw*(self: Card, widget: Widget, ctx: var DrawContext) =
     h = f.height.toInt
   if w <= 0 or h <= 0:
     return
-  fillRect(rect(x + 2, y + 2, w, h), color(0, 0, 0))
-  fillRect(rect(x, y, w, h), self.styledBackground(ctx.palette.cardBackground))
-  drawBorder(f, ctx.palette.cardBorder)
+  self.drawShadow(rect(x, y, w, h))
+  if not self.style.hasShadow:
+    self.styledFillRect(rect(x + 2, y + 2, w, h), color(0, 0, 0))
+  self.styledFillRect(rect(x, y, w, h), self.styledBackground(ctx.palette.cardBackground))
+  self.drawBorder(f, ctx.palette.cardBorder)
   if w <= 2 or h <= 2:
     return
-  fillRect(rect(x + 1, y + 1, max(w - 2, 0), 1), ctx.palette.buttonHighlight)
-  fillRect(rect(x + 1, y + 1, 2, max(h - 2, 0)), ctx.palette.cardAccent)
-  fillRect(rect(x + 1, y + h - 2, max(w - 2, 0), 1), ctx.palette.panelBorder)
-  fillRect(rect(x + w - 2, y + 1, 1, max(h - 2, 0)), ctx.palette.panelBorder)
+  if self.style.cornerStyle == FlatCorners:
+    fillRect(rect(x + 1, y + 1, max(w - 2, 0), 1), ctx.palette.buttonHighlight)
+    fillRect(rect(x + 1, y + 1, 2, max(h - 2, 0)), ctx.palette.cardAccent)
+    fillRect(rect(x + 1, y + h - 2, max(w - 2, 0), 1), ctx.palette.panelBorder)
+    fillRect(rect(x + w - 2, y + 1, 1, max(h - 2, 0)), ctx.palette.panelBorder)
 
 method draw*(self: DialogHeader, widget: Widget, ctx: var DrawContext) =
   ## Draw the dialog header's background and its separating border.

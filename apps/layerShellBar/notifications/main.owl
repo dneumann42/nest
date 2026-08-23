@@ -40,6 +40,7 @@ card (id "notifications" "panel"):
     button closeID "x":
       width = fixed DialogCloseButtonWidth
       height = fit
+    tooltip closeID "Close"
   column (id "notifications" "list"):
     width = fill
     height = fill
@@ -64,6 +65,8 @@ card (id "notifications" "panel"):
     button restoreID "Restore latest":
       width = fill
       height = fit
+    tooltip restoreID "Restore latest notification"
     button clearID "Empty mailbox":
       width = fill
       height = fit
+    tooltip clearID "Clear all notifications"

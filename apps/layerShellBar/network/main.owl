@@ -141,6 +141,7 @@ card (id "network" "panel"):
     button closeID "x":
       width = fixed DialogCloseButtonWidthLarge
       height = fit
+    tooltip closeID "Close"
   column (id "network" "body"):
     width = fill
     height = fill
@@ -159,6 +160,7 @@ card (id "network" "panel"):
           button wifiOnID "Wi-Fi on":
             width = fill
             height = fit
+          tooltip wifiOnID "Turn Wi-Fi on"
           else:
             if (= wifiRadio ""):
               label (id "network" "wifi-actions-loading") "Loading Wi-Fi controls...":
@@ -168,13 +170,16 @@ card (id "network" "panel"):
                 button wifiOffID "Wi-Fi off":
                   width = fill
                   height = fit
+                tooltip wifiOffID "Turn Wi-Fi off"
                 button scanID "Scan":
                   width = fill
                   height = fit
+                tooltip scanID "Scan for Wi-Fi networks"
                 if (not (= activeSsid "")):
                   button disconnectWifiID "Disconnect":
                     width = fill
                     height = fit
+                  tooltip disconnectWifiID "Disconnect Wi-Fi"
       else:
         label (id "network" "unavailable") (nmcliMissingMessage):
           width = fill
@@ -203,6 +208,7 @@ card (id "network" "panel"):
                   height = fixed NetworkRowHeight
                   background = (pick (= rowSelected "yes") (theme-color "primary") (theme-color "background"))
                   opacity = (pick (= rowSelected "yes") NetworkSelectedOpacity DialogPanelOpacity)
+                tooltip (id "network" "wifi" "row" rowName) (pick (= rowSelected "yes") (string "Disconnect " rowName) (string "Connect to " rowName))
                 else:
                   label (id "network" "wifi" "message" rowLabel) rowLabel:
                     width = fill
@@ -220,13 +226,16 @@ card (id "network" "panel"):
         lineInput manualSsidID "":
           width = fill
           height = fixed NetworkInputHeight
+        tooltip manualSsidID "Wi-Fi network name"
         lineInput manualPasswordID "":
           width = fill
           height = fixed NetworkInputHeight
+        tooltip manualPasswordID "Wi-Fi password"
         if (not (= manualSsid "")):
           button manualConnectID "Connect":
             width = fixed NetworkConnectButtonWidth
             height = fit
+          tooltip manualConnectID (string "Connect to " manualSsid)
           else:
             label (id "network" "manual-placeholder") "SSID required":
               width = fixed NetworkConnectButtonWidth
@@ -253,6 +262,7 @@ card (id "network" "panel"):
                   height = fixed NetworkRowHeight
                   background = (pick (= profileName activeSsid) (theme-color "primary") (theme-color "background"))
                   opacity = (pick (= profileName activeSsid) NetworkSelectedOpacity DialogPanelOpacity)
+                tooltip (id "network" "profile" "row" profileName) (string "Connect saved profile " profileName)
                 else:
                   label (id "network" "profile" "message" profileName) profileName:
                     width = fill
@@ -292,10 +302,12 @@ card (id "network" "panel"):
                     button (id "network" "ethernet" "down" ethernetDevice) "Down":
                       width = fixed NetworkActionButtonWidth
                       height = fit
+                    tooltip (id "network" "ethernet" "down" ethernetDevice) (string "Disconnect " ethernetDevice)
                     else:
                       button (id "network" "ethernet" "up" ethernetDevice) "Up":
                         width = fixed NetworkActionButtonWidth
                         height = fit
+                      tooltip (id "network" "ethernet" "up" ethernetDevice) (string "Connect " ethernetDevice)
                 else:
                   label (id "network" "ethernet" "message" rowText) (tsvCell rowText 0 3):
                     width = fill
@@ -308,8 +320,8 @@ card (id "network" "panel"):
       button editorID "Connection editor":
         width = fill
         height = fit
+      tooltip editorID "Open connection editor"
       else:
         label (id "network" "editor-unavailable") "Connection editor is not installed":
           width = fill
           height = fit
-

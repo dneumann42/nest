@@ -107,14 +107,17 @@ method draw*(self: ImageButton, widget: Widget, ctx: var DrawContext) =
   ## Draw the button's background when it has one, then the image, tinted for
   ## its hot and active state.
   let f = widget.frame
+  let bounds = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
   if self.style.hasBackground:
-    fillRect(
-      rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
+    self.drawShadow(bounds)
+    self.styledFillRect(
+      bounds,
       self.styledBackground(ctx.palette.background),
     )
   elif ctx.hot(widget.id):
-    fillRect(
-      rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt),
+    self.drawShadow(bounds)
+    self.styledFillRect(
+      bounds,
       ctx.palette.backgroundHot,
     )
   drawImagePath(self.path, widget, ctx, self.source, self.hasSource)
