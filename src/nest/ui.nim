@@ -1,7 +1,8 @@
 import std/[json, math, macros, os, osproc, sets, strutils, tables]
 
-import layouts, components, coords, palette, resources, widgets2
+import layouts, animations, components, coords, palette, resources, widgets2
 export layouts, components
+export animations
 import nest/screen
 
 const
@@ -41,6 +42,13 @@ type
     dragging: ScrollAxis
     dragStartMouse: float64
     dragStartScroll: float64
+
+  AnimationState = object
+    target: bool
+    startProgress: float64
+    startTicks: int
+    spec: AnimationSpec
+    value: AnimationValue
 
   BoxConfig* = object
     width*, height*: SizePolicy
@@ -97,6 +105,8 @@ type
     pendingLayouts: seq[PendingLayout]
     layoutChildren: Table[WidgetID, seq[Widget]]
     scrollStates: Table[WidgetID, ScrollState]
+    animations: Table[WidgetID, AnimationState]
+    liveAnimationIDs: HashSet[WidgetID]
     scrollContainers: HashSet[WidgetID]
     frameByID: Table[WidgetID, Frame]
     dialogResults: Table[string, string]
@@ -126,6 +136,10 @@ type
     hasScheduledRedraw: bool
     inputPending: bool
     fullRenderInputPending: bool
+    windowFocused: bool
+    windowMouseInside: bool
+    windowAutoDismissArmed: bool
+    windowInactiveSince: int
     frameRedrawn: bool
     phase: UIPhase
     autoIDCounter: uint64
@@ -329,6 +343,8 @@ proc init*(T: typedesc[UI]): T =
         dirtyAll: true),
   ),
     intrinsicByID: newTable[WidgetID, IntrinsicSize](),
+    windowFocused: true,
+    windowMouseInside: false,
   )
 
 proc setTheme*(self: var UI; themeName: string) =
@@ -442,6 +458,85 @@ proc requestRedrawAfterSafe(self: var UI, ms: int) {.raises: [].} =
   except Exception:
     discard
 
+proc nowTicks(self: UI): int {.raises: [].} =
+  if self.context.draw.ticks > 0:
+    self.context.draw.ticks
+  else:
+    try:
+      input.getTicks()
+    except Exception:
+      0
+
+proc currentAnimationValue(state: AnimationState, now: int): AnimationValue =
+  let duration = max(state.spec.durationMs, 1)
+  let elapsed = max(now - state.startTicks, 0).float64 / duration.float64
+  let targetProgress = if state.target: 1.0 else: 0.0
+  let raw = state.startProgress +
+    (targetProgress - state.startProgress) * elapsed.clamp(0.0, 1.0)
+  result = state.spec.valueAt(raw, elapsed < 1.0)
+
+proc animate*(
+    self: var UI,
+    id: WidgetID,
+    open = true,
+    spec = dialogPopIn(),
+): AnimationValue {.discardable.} =
+  ## Attach an immediate-mode animation to `id` and return this frame's value.
+  ##
+  ## Call this every frame the widget is declared. The animation is keyed by
+  ## `id`, so a widget can be rebuilt by the immediate-mode pass while its
+  ## progress is retained in the UI.
+  if id == InvalidWidgetID:
+    return spec.valueAt(if open: 1.0 else: 0.0)
+  self.liveAnimationIDs.incl id
+  let now = self.nowTicks()
+  var state = self.animations.getOrDefault(id)
+  if id notin self.animations:
+    state = AnimationState(
+      target: open,
+      startProgress: if open: 0.0 else: 1.0,
+      startTicks: now,
+      spec: spec,
+    )
+  elif state.target != open or state.spec != spec:
+    state.startProgress = state.currentAnimationValue(now).progress
+    state.startTicks = now
+    state.target = open
+    state.spec = spec
+  state.value = state.currentAnimationValue(now)
+  self.animations[id] = state
+  if state.value.running:
+    self.context.draw.dirtyAll = true
+    self.requestRedrawAfterSafe(16)
+  state.value
+
+proc animationValue*(self: UI, id: WidgetID): AnimationValue {.raises: [].} =
+  ## Return the latest animation value for `id`, or an identity transform.
+  result = self.animations.getOrDefault(id).value
+  if result.scale <= 0.0 and result.opacity <= 0.0 and result.progress <= 0.0:
+    result = AnimationValue(progress: 1.0, opacity: 1.0, scale: 1.0)
+
+proc hasRunningAnimations*(self: UI): bool {.raises: [].} =
+  ## Test whether any retained animation is still moving.
+  for state in self.animations.values:
+    if state.value.running:
+      return true
+
+proc advanceAnimations(self: var UI) {.raises: [].} =
+  ## Refresh retained animation values before replaying a cached frame.
+  ##
+  ## Owl apps often repaint retained frames between full evaluations. Without
+  ## this, an animation advances only on frames that rebuild the whole widget
+  ## tree, which makes popovers appear to freeze mid-transition.
+  if self.animations.len == 0:
+    return
+  let now = self.nowTicks()
+  for id, state in self.animations.mpairs:
+    state.value = state.currentAnimationValue(now)
+    if state.value.running:
+      self.context.draw.dirtyAll = true
+      self.requestRedrawAfterSafe(16)
+
 proc redrawDelayMs*(self: UI): int =
   ## Return the milliseconds until the scheduled redraw, or -1 when none is
   ## scheduled.
@@ -452,6 +547,50 @@ proc redrawDelayMs*(self: UI): int =
 proc clearRedrawRequest*(self: var UI) {.raises: [].} =
   ## Forget the scheduled redraw.
   self.hasScheduledRedraw = false
+
+proc updateWindowActivity(self: var UI) {.raises: [].} =
+  if self.windowFocused or self.windowMouseInside:
+    self.windowInactiveSince = 0
+  elif self.windowAutoDismissArmed and self.windowInactiveSince == 0:
+    self.windowInactiveSince = self.nowTicks()
+
+proc windowFocusGained*(self: var UI) {.raises: [].} =
+  ## Mark the backing window focused for dialog auto-dismiss policy.
+  self.windowFocused = true
+  self.updateWindowActivity()
+
+proc windowFocusLost*(self: var UI) {.raises: [].} =
+  ## Mark the backing window unfocused for dialog auto-dismiss policy.
+  self.windowFocused = false
+  self.updateWindowActivity()
+
+proc windowMouseEnter*(self: var UI) {.raises: [].} =
+  ## Mark the pointer as inside the backing window.
+  self.windowMouseInside = true
+  self.windowAutoDismissArmed = true
+  self.updateWindowActivity()
+
+proc windowMouseLeave*(self: var UI) {.raises: [].} =
+  ## Mark the pointer as outside the backing window.
+  self.windowMouseInside = false
+  self.updateWindowActivity()
+
+proc windowInactiveFor*(self: UI, graceMs: int): bool {.raises: [].} =
+  ## Test whether focus or pointer activity has been absent for `graceMs`.
+  if not self.windowAutoDismissArmed:
+    return false
+  if self.windowFocused or self.windowMouseInside:
+    return false
+  if self.windowInactiveSince == 0:
+    return false
+  self.nowTicks() - self.windowInactiveSince >= max(graceMs, 0)
+
+proc windowInactiveRemainingMs*(self: UI, graceMs: int): int {.raises: [].} =
+  ## Return the remaining grace delay for inactive-window auto-dismiss.
+  if not self.windowAutoDismissArmed or self.windowFocused or self.windowMouseInside or
+      self.windowInactiveSince == 0:
+    return -1
+  max(self.windowInactiveSince + max(graceMs, 0) - self.nowTicks(), 0)
 
 proc externalPopoverAvailable(): bool {.raises: [].} =
   when defined(linux):
@@ -1503,6 +1642,7 @@ proc reset*(self: var UI) =
   self.modalWidgets.clear()
   self.floatingBelowAnchors.clear()
   self.componentByID.clear()
+  self.liveAnimationIDs.clear()
   if self.intrinsicByID.isNil:
     self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
   else:
@@ -1540,6 +1680,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.scrollContainers.clear()
   self.tooltipTexts.clear()
   self.liveWidgetIDs.clear()
+  self.liveAnimationIDs.clear()
   self.liveWidgetIDs.incl self.root.id
   self.liveRealtimeWidgetIDs.clear()
   self.idScopes.setLen(0)
@@ -2107,6 +2248,12 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         staleRealtimeKeys.add id
     for id in staleRealtimeKeys:
       self.retainedRealtimeWidgets.del id
+    var staleAnimationKeys: seq[WidgetID]
+    for id in self.animations.keys:
+      if id notin self.liveAnimationIDs:
+        staleAnimationKeys.add id
+    for id in staleAnimationKeys:
+      self.animations.del id
     for parentID in directParents:
       if pendingByParent.hasKey(parentID):
         if self.floatingBelowAnchors.hasKey(parentID):
@@ -2274,6 +2421,22 @@ template events*(self: var UI, body: untyped) =
   ## Use it for the frame's event handling, which would otherwise run a
   ## second time as the widget tree is built.
   if self.phase == EventPhase:
+    body
+
+template animated*(
+    self: var UI,
+    id: WidgetID,
+    open: bool = true,
+    spec: AnimationSpec = dialogPopIn(),
+    body: untyped,
+) =
+  ## Declare `body` normally and animate the subtree rooted at `id`.
+  ##
+  ## The widget with `id` must be declared inside `body`; the declaration is
+  ## still immediate-mode, while animation progress is retained by the UI.
+  block:
+    if self.phase == LayoutPhase:
+      discard self.animate(id, open, spec)
     body
 
 proc markStateChanges(
@@ -2666,7 +2829,47 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
         drawContext.palette.cardAccent,
       )
 
-  proc drawWidgetTree(widget: Widget, inheritedDirty = false) =
+  proc drawWidgetTree(widget: Widget, inheritedDirty = false, replaying = false)
+
+  proc animationActive(id: WidgetID): bool =
+    if id notin self.animations:
+      return false
+    let value = self.animations[id].value
+    value.running or abs(value.opacity - 1.0) > 0.001 or
+      abs(value.scale - 1.0) > 0.001 or abs(value.offsetX) > 0.001 or
+      abs(value.offsetY) > 0.001
+
+  proc drawAnimatedSubtree(widget: Widget, inheritedDirty: bool) =
+    let value = self.animations[widget.id].value
+    var commands: seq[DrawCommand]
+    let
+      previousCommands = screen.drawCommands
+      previousContextCommands = drawContext.drawCommands
+    screen.drawCommands = addr commands
+    drawContext.drawCommands = addr commands
+    drawWidgetTree(widget, inheritedDirty, true)
+    screen.drawCommands = previousCommands
+    drawContext.drawCommands = previousContextCommands
+    let
+      f = widget.frame
+      originX = f.x + f.width * 0.5
+      originY = f.y + f.height * 0.5
+    for command in commands:
+      replayDrawCommand(
+        command,
+        originX,
+        originY,
+        value.scale,
+        value.opacity,
+        value.offsetX,
+        value.offsetY,
+      )
+
+  proc drawWidgetTree(widget: Widget, inheritedDirty = false,
+      replaying = false) =
+    if not replaying and widget.id.animationActive():
+      drawAnimatedSubtree(widget, inheritedDirty)
+      return
     let dirty =
       drawContext.dirtyAll or inheritedDirty or widget.id in
           drawContext.dirtyWidgets
@@ -2687,7 +2890,7 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
       saveState()
       setClipRect(clip)
       for child in self.layoutChildren.getOrDefault(widget.id):
-        drawWidgetTree(child, dirty)
+        drawWidgetTree(child, dirty, replaying)
       restoreState()
       drawContext.hasClip = previousHasClip
       drawContext.clipRect = previousClip
@@ -2695,7 +2898,7 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
         drawScrollbars(widget)
     else:
       for child in self.layoutChildren.getOrDefault(widget.id):
-        drawWidgetTree(child, dirty)
+        drawWidgetTree(child, dirty, replaying)
 
   drawWidgetTree(self.root)
   for widget in self.floatingWidgets:
@@ -2759,6 +2962,7 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
   self.layoutChildren = self.retainedLayoutChildren
   self.floatingWidgets = self.retainedFloatingWidgets
   self.scrollContainers = self.retainedScrollContainers
+  self.advanceAnimations()
   self.context.draw.dirtyAll = true
   self.evaluateTooltipHover()
   result = self.draw(self.context.draw)
@@ -2790,6 +2994,7 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
   self.layoutChildren = self.retainedLayoutChildren
   self.floatingWidgets = self.retainedFloatingWidgets
   self.scrollContainers = self.retainedScrollContainers
+  self.advanceAnimations()
 
   let
     beforeHot = self.context.draw.hotWidgets

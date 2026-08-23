@@ -1899,3 +1899,62 @@ Stack trace:
     clickAt((closeFrame.x + 10).int, (closeFrame.y + closeFrame.height / 2).int)
     check closed == 1
     check behind == 1
+
+  test "keyed animations retain progress across immediate-mode frames":
+    var ui = UI.init()
+    ui.initContext(240, 120)
+    ui.loadFont("font", "", 18)
+    let panelID = ui.id("animated-panel")
+
+    template scene() =
+      ui.animated(panelID, true, scaleIn(durationMs = 100, fromScale = 0.8)):
+        ui.card(panelID, cfg(width = fixed(80), height = fixed(40))):
+          ui.label(ui.id("label"), "Animated", fit(), fit())
+
+    ui.setDrawTicks(1000)
+    ui.markAllDirty()
+    ui.layout:
+      scene()
+    let first = ui.animationValue(panelID)
+    check first.progress == 0.0
+    check first.opacity < 0.000001
+    check first.scale < 1.0
+
+    ui.setDrawTicks(1050)
+    discard ui.drawRetainedFrame()
+    let second = ui.animationValue(panelID)
+    check second.progress > first.progress
+    check second.running
+
+    ui.setDrawTicks(1120)
+    ui.markAllDirty()
+    ui.layout:
+      scene()
+    let settled = ui.animationValue(panelID)
+    check settled.progress == 1.0
+    check settled.opacity == DefaultMaxOpacity
+    check settled.scale >= 1.0
+
+  test "dialog auto-dismiss arms after pointer reaches the window":
+    var ui = UI.init()
+    ui.initContext(240, 120)
+
+    ui.setDrawTicks(1000)
+    ui.windowFocusLost()
+    ui.windowMouseLeave()
+    ui.setDrawTicks(1600)
+    check not ui.windowInactiveFor(350)
+    check ui.windowInactiveRemainingMs(350) == -1
+
+    ui.windowMouseEnter()
+    check not ui.windowInactiveFor(350)
+
+    ui.setDrawTicks(1700)
+    ui.windowMouseLeave()
+    check not ui.windowInactiveFor(350)
+
+    ui.setDrawTicks(2100)
+    check ui.windowInactiveFor(350)
+
+    ui.windowFocusGained()
+    check not ui.windowInactiveFor(350)

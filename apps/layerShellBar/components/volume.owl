@@ -41,7 +41,7 @@ widget volumeWidget key:
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "volume"))):
-      openDialog "volume" "./volume" "" buttonID
+      openDialog "volume" "./volume" "" buttonID (dialogAutoDismissOptions)
 
   button buttonID (string IconVolume " " status):
     width = fit

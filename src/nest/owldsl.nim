@@ -31,6 +31,11 @@ type
     process: Process
     resultPath: string
 
+  DialogLaunchOptions = object
+    dismissOnInactive: bool
+    inactiveGraceMs: int
+    hasValues: bool
+
   ShellProcess = ref object
     process: Process
     command: string
@@ -82,6 +87,7 @@ type
     workspaceSubscriptions*: Table[string, WorkspaceSubscription]
     dialogData*: string
     dialogCloseValue*: string
+    dialogCloseRequested*: bool
     requestQuit*: bool
     moduleStack: seq[string]
     currentUi: ptr UI
@@ -356,6 +362,25 @@ proc asCornerStyle(value: Value, fallback: CornerStyle): CornerStyle =
   else:
     fallback
 
+proc asAnimationCurve(value: Value, fallback: AnimationCurve): AnimationCurve =
+  case value.asString.normalize
+  of "linear":
+    Linear
+  of "easein", "in":
+    EaseIn
+  of "easeout", "out":
+    EaseOut
+  of "easeinout", "inout":
+    EaseInOut
+  of "smoothstep", "smooth":
+    SmoothStep
+  of "spring":
+    Spring
+  of "backout", "back":
+    BackOut
+  else:
+    fallback
+
 proc normalizedMenuPart(value: string): string =
   for ch in value.normalize:
     if ch in {'a' .. 'z', '0' .. '9', '_', '-'}:
@@ -483,13 +508,17 @@ proc evalConfig(
     of "radius", "cornerRadius":
       result.style.cornerRadii = radii(value.asNumber)
     of "radiusTopLeft", "cornerRadiusTopLeft":
-      result.style.cornerRadii.topLeft = value.asNumber(result.style.cornerRadii.topLeft)
+      result.style.cornerRadii.topLeft = value.asNumber(
+          result.style.cornerRadii.topLeft)
     of "radiusTopRight", "cornerRadiusTopRight":
-      result.style.cornerRadii.topRight = value.asNumber(result.style.cornerRadii.topRight)
+      result.style.cornerRadii.topRight = value.asNumber(
+          result.style.cornerRadii.topRight)
     of "radiusBottomRight", "cornerRadiusBottomRight":
-      result.style.cornerRadii.bottomRight = value.asNumber(result.style.cornerRadii.bottomRight)
+      result.style.cornerRadii.bottomRight = value.asNumber(
+          result.style.cornerRadii.bottomRight)
     of "radiusBottomLeft", "cornerRadiusBottomLeft":
-      result.style.cornerRadii.bottomLeft = value.asNumber(result.style.cornerRadii.bottomLeft)
+      result.style.cornerRadii.bottomLeft = value.asNumber(
+          result.style.cornerRadii.bottomLeft)
     of "shadow", "boxShadow":
       result.style.hasShadow = value.isTruthy
       if result.style.shadowColor.a == 0:
@@ -513,6 +542,34 @@ proc evalConfig(
     of "shadowSpread":
       result.style.hasShadow = true
       result.style.shadowSpread = value.asNumber(result.style.shadowSpread)
+    else:
+      discard
+
+proc evalAnimationSpec(
+    env: Environment, body: seq[SyntaxNode], fallback = dialogPopIn()
+): AnimationSpec {.raises: [EvaluatorError].} =
+  result = fallback
+  for node in body:
+    if node.kind != Binding:
+      continue
+    let value = env.eval(node.value)
+    case node.bindingSymbol
+    of "duration", "durationMs":
+      result.durationMs = max(value.asNumber(result.durationMs.float64).int, 1)
+    of "curve", "easing", "formula":
+      result.curve = value.asAnimationCurve(result.curve)
+    of "fromOpacity":
+      result.fromOpacity = value.asNumber(result.fromOpacity)
+    of "toOpacity", "opacity", "maxOpacity", "targetOpacity", "finalOpacity":
+      result.toOpacity = value.asNumber(result.toOpacity)
+    of "fromScale":
+      result.fromScale = value.asNumber(result.fromScale)
+    of "toScale", "scale":
+      result.toScale = value.asNumber(result.toScale)
+    of "offsetX":
+      result.offsetX = value.asNumber(result.offsetX)
+    of "offsetY":
+      result.offsetY = value.asNumber(result.offsetY)
     else:
       discard
 
@@ -1179,9 +1236,66 @@ proc dialogAnchorJson(runtime: NestOwlRuntime, anchorID: WidgetID): string =
     }
   )
 
+proc dialogLaunchOptions(value: Value): DialogLaunchOptions {.raises: [
+    EvaluatorError].} =
+  case value.kind
+  of Boolean:
+    result.dismissOnInactive = value.boolean
+    result.inactiveGraceMs = 350
+    result.hasValues = true
+  of Dictionary:
+    result.inactiveGraceMs = 350
+    result.hasValues = true
+    if value.entries.hasKey("dismissOnInactive"):
+      result.dismissOnInactive = value.entries.getOrDefault(
+          "dismissOnInactive").isTruthy
+    elif value.entries.hasKey("autoDismiss"):
+      result.dismissOnInactive = value.entries.getOrDefault(
+          "autoDismiss").isTruthy
+    elif value.entries.hasKey("dismissWhenInactive"):
+      result.dismissOnInactive = value.entries.getOrDefault(
+          "dismissWhenInactive").isTruthy
+    if value.entries.hasKey("inactiveGraceMs"):
+      result.inactiveGraceMs = max(
+        value.entries.getOrDefault("inactiveGraceMs").asNumber.int, 0
+      )
+    elif value.entries.hasKey("graceMs"):
+      result.inactiveGraceMs = max(value.entries.getOrDefault(
+          "graceMs").asNumber.int, 0)
+    elif value.entries.hasKey("dismissGraceMs"):
+      result.inactiveGraceMs = max(
+        value.entries.getOrDefault("dismissGraceMs").asNumber.int, 0
+      )
+  else:
+    raise newException(
+      EvaluatorError,
+      "dialog options expects a boolean or dictionary",
+    )
+
+proc dialogLaunchOptionsJson(options: DialogLaunchOptions): string =
+  if not options.hasValues:
+    return ""
+  $(
+    %*{
+      "dismissOnInactive": options.dismissOnInactive,
+      "inactiveGraceMs": options.inactiveGraceMs,
+    }
+  )
+
+proc requestDialogClose*(runtime: NestOwlRuntime, value = "") =
+  ## Ask a dialog process to close after its UI has had a chance to animate out.
+  runtime.dialogCloseValue = value
+  runtime.dialogCloseRequested = true
+  try:
+    if not runtime.currentUi.isNil:
+      runtime.currentUi[].markAllDirty()
+      runtime.currentUi[].requestRedrawAfter(0)
+  except Exception:
+    discard
+
 proc launchDialogProcess(
     runtime: NestOwlRuntime, key, projectDir, data: string,
-        anchorID = InvalidWidgetID
+        anchorID = InvalidWidgetID, options = DialogLaunchOptions()
 ) {.raises: [EvaluatorError].} =
   if key in runtime.dialogProcesses:
     return
@@ -1196,8 +1310,12 @@ proc launchDialogProcess(
     )
   let resultPath = dialogResultPath(key)
   let anchor = runtime.dialogAnchorJson(anchorID)
+  let optionsJson = dialogLaunchOptionsJson(options)
   var args = @["dialog", resolvedProjectDir, data, resultPath]
-  if anchor.len > 0:
+  if optionsJson.len > 0:
+    args.add anchor
+    args.add optionsJson
+  elif anchor.len > 0:
     args.add anchor
   let process =
     try:
@@ -1208,8 +1326,7 @@ proc launchDialogProcess(
       raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
     except IOError as error:
       raise newException(EvaluatorError, "could not start dialog process: " & error.msg)
-  runtime.dialogProcesses[key] = DialogProcess(process: process,
-      resultPath: resultPath)
+  runtime.dialogProcesses[key] = DialogProcess(process: process, resultPath: resultPath)
 
 proc pollDialogProcesses*(runtime: NestOwlRuntime) =
   ## Reap dialog processes that have exited, recording each one's result for
@@ -1239,13 +1356,13 @@ proc pollDialogProcesses*(runtime: NestOwlRuntime) =
     runtime.dialogProcesses.del key
 
 proc closeManagedDialog*(runtime: NestOwlRuntime, key: string) =
-  ## Close the managed dialog stored under `key`, terminating its process if
-  ## it is still running. Unknown keys are ignored.
+  ## Ask the managed dialog stored under `key` to close. Unknown keys are ignored.
   if key notin runtime.dialogProcesses:
     return
   let dialog = runtime.dialogProcesses[key]
   if dialog.process.running:
     dialog.process.terminate
+    return
   try:
     if fileExists(dialog.resultPath):
       removeFile(dialog.resultPath)
@@ -1261,11 +1378,11 @@ proc closeDialogProcesses*(runtime: NestOwlRuntime) =
   for dialog in runtime.dialogProcesses.values:
     if dialog.process.running:
       dialog.process.terminate
-    try:
-      if fileExists(dialog.resultPath):
-        removeFile(dialog.resultPath)
-    except OSError:
-      discard
+      try:
+        if fileExists(dialog.resultPath):
+          removeFile(dialog.resultPath)
+      except OSError:
+        discard
     dialog.process.close
   runtime.dialogProcesses.clear()
   runtime.closeShellProcesses()
@@ -1768,6 +1885,23 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       raise newException(EvaluatorError, "redrawAfter expects milliseconds")
     runtime.requestRedrawAfter(values[0].asNumber.int)
     nothing()
+
+  runtime.evaluator.native "animation":
+    discard layout
+    let values = env.evalArgs(arguments)
+    if values.len < 1 or values.len > 2:
+      raise newException(EvaluatorError, "animation expects id and optional open")
+    let
+      id = runtime.asWidgetID(values[0])
+      open =
+        if values.len == 2:
+          values[1].isTruthy
+        else:
+          true
+      spec = env.evalAnimationSpec(bodyNodes)
+    if runtime.requireUi().inLayoutPhase():
+      discard runtime.requireUi().animate(id, open, spec)
+    runtime.renderNodes(env, childNodes(bodyNodes))
 
   runtime.evaluator.native "pickFile":
     discard layout
@@ -2431,53 +2565,61 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     discard layout
     discard bodyNodes
     let values = env.evalArgs(arguments)
-    if values.len < 2 or values.len > 4:
+    if values.len < 2 or values.len > 5:
       raise newException(
         EvaluatorError,
-        "openDialog expects key, projectDir, optional data, and optional anchor",
+        "openDialog expects key, projectDir, optional data, optional anchor, and optional options",
       )
-    let
-      key = values[0].asString
-      projectDir = values[1].asString
-      data =
-        if values.len > 2:
-          values[2].asString
-        else:
-          ""
-      anchorID =
-        if values.len > 3:
-          runtime.asWidgetID(values[3])
-        else:
-          runtime.requireUi().id(key)
-    runtime.launchDialogProcess(key, projectDir, data, anchorID)
+    let key = values[0].asString
+    let projectDir = values[1].asString
+    let data =
+      if values.len > 2:
+        values[2].asString
+      else:
+        ""
+    var
+      anchorID = runtime.requireUi().id(key)
+      options = DialogLaunchOptions()
+    if values.len > 3:
+      if values[3].kind in {Dictionary, Boolean}:
+        options = dialogLaunchOptions(values[3])
+      else:
+        anchorID = runtime.asWidgetID(values[3])
+    if values.len > 4:
+      options = dialogLaunchOptions(values[4])
+    runtime.launchDialogProcess(key, projectDir, data, anchorID, options)
     boolean(true)
 
   runtime.evaluator.native "toggleDialog":
     discard layout
     discard bodyNodes
     let values = env.evalArgs(arguments)
-    if values.len < 2 or values.len > 4:
+    if values.len < 2 or values.len > 5:
       raise newException(
         EvaluatorError,
-        "toggleDialog expects key, projectDir, optional data, and optional anchor",
+        "toggleDialog expects key, projectDir, optional data, optional anchor, and optional options",
       )
     let key = values[0].asString
     if key in runtime.dialogProcesses:
       runtime.closeManagedDialog(key)
       return boolean(false)
-    let
-      projectDir = values[1].asString
-      data =
-        if values.len > 2:
-          values[2].asString
-        else:
-          ""
-      anchorID =
-        if values.len > 3:
-          runtime.asWidgetID(values[3])
-        else:
-          runtime.requireUi().id(key)
-    runtime.launchDialogProcess(key, projectDir, data, anchorID)
+    let projectDir = values[1].asString
+    let data =
+      if values.len > 2:
+        values[2].asString
+      else:
+        ""
+    var
+      anchorID = runtime.requireUi().id(key)
+      options = DialogLaunchOptions()
+    if values.len > 3:
+      if values[3].kind in {Dictionary, Boolean}:
+        options = dialogLaunchOptions(values[3])
+      else:
+        anchorID = runtime.asWidgetID(values[3])
+    if values.len > 4:
+      options = dialogLaunchOptions(values[4])
+    runtime.launchDialogProcess(key, projectDir, data, anchorID, options)
     boolean(true)
 
   runtime.evaluator.native "dialogOpen?":
@@ -2536,6 +2678,25 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
         ""
     runtime.requestQuit = true
     text(runtime.dialogCloseValue)
+
+  runtime.evaluator.native "requestCloseDialog":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    runtime.requestDialogClose(
+      if values.len > 0:
+        values[0].asString
+      else:
+        ""
+    )
+    text(runtime.dialogCloseValue)
+
+  runtime.evaluator.native "dialogClosing?":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 0:
+      raise newException(EvaluatorError, "dialogClosing? expects no arguments")
+    boolean(runtime.dialogCloseRequested)
 
   runtime.evaluator.native "events":
     discard arguments
@@ -3344,12 +3505,15 @@ proc render*(app: NestOwlApp, ui: var UI) =
     ui.requestRedrawAfter(0)
   if app.program.isNil:
     return
+  if app.runtime.dialogCloseRequested:
+    ui.markAllDirty()
   let fullRenderDue = app.lastFullRenderTicks == 0 or
       ui.hasPendingFullRenderInput() or
     ui.needsFullRender() or
     (app.runtime.nextFullRenderTicks > 0 and now >=
         app.runtime.nextFullRenderTicks)
   if not fullRenderDue and ui.hasRetainedFrame():
+    ui.setDrawTicks(now)
     if ui.hasPendingInput():
       discard ui.updateRetainedFrame()
     else:

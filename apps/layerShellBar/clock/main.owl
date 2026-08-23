@@ -7,30 +7,37 @@ import "../components/calendar.owl"
 
 events:
   when (keyPressed "escape"):
-    closeDialog ""
+    requestCloseDialog ""
   when (not (= clickedDate nothing)):
-    closeDialog clickedDate
+    requestCloseDialog clickedDate
 
-card (id "start-popover"):
-  width = fill
-  height = fill
-  padding = DialogPaddingWide
-  gap = NoSpacing
-  alignItems = AlignStretch
-  background = color 0 0 0
-  opacity = DialogOpacity
-  dialogHeader (id "start-popover" "header"):
+animation (id "start-popover") (not (dialogClosing?)):
+  duration = DialogAnimationDuration
+  curve = "backOut"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  fromScale = DialogAnimationFromScale
+  offsetY = 6
+  card (id "start-popover"):
     width = fill
-    height = (fixed DialogHeaderHeight)
-    padding = DialogHeaderPadding
-    alignItems = AlignCenter
-    label (id "start-popover" "title") (clock "dddd, MMMM d"):
-      width = fit
-      height = fit
-  column (id "start-popover" "actions"):
-    width = fill
-    height = fit
-    padding = NoSpacing
+    height = fill
+    padding = DialogPaddingWide
     gap = NoSpacing
     alignItems = AlignStretch
-    dateSelectorWithSignal "clock-calendar" selectedDate clickedDate
+    background = color 0 0 0
+    opacity = 1
+    dialogHeader (id "start-popover" "header"):
+      width = fill
+      height = (fixed DialogHeaderHeight)
+      padding = DialogHeaderPadding
+      alignItems = AlignCenter
+      label (id "start-popover" "title") (clock "dddd, MMMM d"):
+        width = fit
+        height = fit
+    column (id "start-popover" "actions"):
+      width = fill
+      height = fit
+      padding = NoSpacing
+      gap = NoSpacing
+      alignItems = AlignStretch
+      dateSelectorWithSignal "clock-calendar" selectedDate clickedDate

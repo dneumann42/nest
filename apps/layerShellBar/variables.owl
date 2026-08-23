@@ -39,6 +39,9 @@ define:
   DialogStrongOpacity = 0.85
   DialogMutedOpacity = 0.35
   DialogPanelOpacity = 0.9
+  DialogAnimationDuration = 150
+  DialogAnimationFromScale = 0.0
+  DialogDismissGraceMs = 350
 
   ActiveWindowWidth = 200
   WorkspaceGap = 1
@@ -111,3 +114,8 @@ define:
   IconNext = ""
   IconPlay = ""
   IconPause = ""
+
+fun dialogAutoDismissOptions:
+  {}:
+    dismissOnInactive = true
+    inactiveGraceMs = DialogDismissGraceMs

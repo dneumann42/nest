@@ -94,6 +94,7 @@ type
     loadImage*: proc(path: string): Image {.nimcall.}
     freeImage*: proc(img: Image) {.nimcall.}
     drawImage*: proc(img: Image, src, dst: Rect) {.nimcall.}
+    drawImageOpacity*: proc(img: Image, src, dst: Rect, opacity: float64) {.nimcall.}
     imageSize*: proc(img: Image): TextExtent {.nimcall.}
 
 proc `==`*(a, b: Font): bool {.borrow.}
@@ -147,6 +148,8 @@ var drawRelays* = DrawRelays(
   freeImage: proc(img: Image) =
     discard,
   drawImage: proc(img: Image, src, dst: Rect) =
+    discard,
+  drawImageOpacity: proc(img: Image, src, dst: Rect, opacity: float64) =
     discard,
   imageSize: proc(img: Image): TextExtent =
     TextExtent(),
@@ -472,6 +475,15 @@ proc drawImage*(img: Image, src, dst: Rect) =
     return
   drawRelays.drawImage(img, src, dst)
 
+proc drawImage*(img: Image, src, dst: Rect, opacity: float64) =
+  ## Draw `img` into `dst` with alpha multiplied by `opacity`.
+  ##
+  ## Recorded command replay uses this to composite animated subtrees.
+  if opacity >= 0.999:
+    drawImage(img, src, dst)
+  elif opacity > 0.0:
+    drawRelays.drawImageOpacity(img, src, dst, opacity)
+
 proc imageSize*(img: Image): TextExtent =
   ## Return the pixel size of a loaded image.
   drawRelays.imageSize(img)
@@ -501,6 +513,80 @@ proc drawImage*(path: string, src, dst: Rect) =
     return
   drawRelays.drawImage(image, src, dst)
   freeImage(image)
+
+proc scaledColor(color: Color, opacity: float64): Color =
+  result = color
+  result.a = uint8((color.a.float64 * opacity.min(1.0).max(0.0) + 0.5).int)
+
+proc transformedRect(r: Rect, originX, originY, scale, offsetX, offsetY: float64): Rect =
+  let
+    x = originX + (r.x.float64 - originX) * scale + offsetX
+    y = originY + (r.y.float64 - originY) * scale + offsetY
+  rect(x.round.int, y.round.int, max((r.w.float64 * scale).round.int, 0),
+      max((r.h.float64 * scale).round.int, 0))
+
+proc transformedCoord(value: int, origin, scale, offset: float64): int =
+  (origin + (value.float64 - origin) * scale + offset).round.int
+
+proc replayDrawCommand*(
+    command: DrawCommand,
+    originX, originY, scale, opacity, offsetX, offsetY: float64,
+) =
+  ## Replay a recorded draw command with a simple compositing transform.
+  ##
+  ## Rectangles and images are scaled around `originX`, `originY`; text keeps
+  ## its current font size and follows the transformed origin. Alpha is
+  ## multiplied into every colour.
+  case command.kind
+  of SaveState:
+    saveState()
+  of RestoreState:
+    restoreState()
+  of SetClipRect:
+    setClipRect(command.rect.transformedRect(originX, originY, scale, offsetX,
+        offsetY))
+  of FillRect:
+    fillRect(
+      command.rect.transformedRect(originX, originY, scale, offsetX, offsetY),
+      command.color.scaledColor(opacity),
+    )
+  of LineRect:
+    lineRect(
+      command.rect.transformedRect(originX, originY, scale, offsetX, offsetY),
+      command.color.scaledColor(opacity),
+    )
+  of DrawLine:
+    drawLine(
+      transformedCoord(command.x1, originX, scale, offsetX),
+      transformedCoord(command.y1, originY, scale, offsetY),
+      transformedCoord(command.x2, originX, scale, offsetX),
+      transformedCoord(command.y2, originY, scale, offsetY),
+      command.lineColor.scaledColor(opacity),
+    )
+  of DrawPoint:
+    drawPoint(
+      transformedCoord(command.x, originX, scale, offsetX),
+      transformedCoord(command.y, originY, scale, offsetY),
+      command.pointColor.scaledColor(opacity),
+    )
+  of DrawText:
+    discard drawText(
+      command.font,
+      transformedCoord(command.textX, originX, scale, offsetX),
+      transformedCoord(command.textY, originY, scale, offsetY),
+      command.text,
+      command.fg.scaledColor(opacity),
+      command.bg.scaledColor(opacity),
+    )
+  of DrawImage:
+    let dst = command.dst.transformedRect(originX, originY, scale, offsetX, offsetY)
+    if command.imagePath.len > 0:
+      let image = loadImage(command.imagePath)
+      if image.int != 0:
+        drawImage(image, command.src, dst, opacity)
+        freeImage(image)
+    else:
+      drawImage(command.image, command.src, dst, opacity)
 
 proc color*(r, g, b: uint8, a: uint8 = 255): Color =
   ## Construct an opaque `Color`, or a translucent one when `a` is given.

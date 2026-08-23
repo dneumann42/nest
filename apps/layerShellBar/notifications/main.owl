@@ -13,60 +13,67 @@ set rowIndex 0
 
 events:
   when (keyPressed "escape"):
-    closeDialog ""
+    requestCloseDialog ""
   when (clicked closeID):
-    closeDialog ""
+    requestCloseDialog ""
   when (clicked clearID):
     shellAsync (id "notifications" "clear-action") (notificationClearCommand) ImmediateInterval
   when (clicked restoreID):
     shellAsync (id "notifications" "restore-action") "makoctl restore" ImmediateInterval
 
-card (id "notifications" "panel"):
-  width = fill
-  height = fill
-  padding = DialogPadding
-  gap = DialogGap
-  alignItems = AlignStretch
-  background = color 0 0 0
-  opacity = DialogOpacity
-  dialogHeader (id "notifications" "header"):
-    width = fill
-    height = fixed DialogHeaderHeight
-    padding = DialogHeaderPadding
-    alignItems = AlignCenter
-    label (id "notifications" "title") "Mailbox":
-      width = fill
-      height = fit
-    button closeID "x":
-      width = fixed DialogCloseButtonWidth
-      height = fit
-    tooltip closeID "Close"
-  column (id "notifications" "list"):
+animation (id "notifications" "panel") (not (dialogClosing?)):
+  duration = DialogAnimationDuration
+  curve = "backOut"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  fromScale = DialogAnimationFromScale
+  offsetY = 6
+  card (id "notifications" "panel"):
     width = fill
     height = fill
-    gap = NotificationListGap
-    scrollY = true
-    for rowText (iter rows):
-      card (id "notifications" "row" rowIndex):
+    padding = DialogPadding
+    gap = DialogGap
+    alignItems = AlignStretch
+    background = color 0 0 0
+    opacity = 1
+    dialogHeader (id "notifications" "header"):
+      width = fill
+      height = fixed DialogHeaderHeight
+      padding = DialogHeaderPadding
+      alignItems = AlignCenter
+      label (id "notifications" "title") "Mailbox":
         width = fill
         height = fit
-        padding = NotificationRowPadding
-        background = color 0 0 0
-        opacity = DialogMutedOpacity
-        label (id "notifications" "row-label" rowIndex) rowText:
+      button closeID "x":
+        width = fixed DialogCloseButtonWidth
+        height = fit
+      tooltip closeID "Close"
+    column (id "notifications" "list"):
+      width = fill
+      height = fill
+      gap = NotificationListGap
+      scrollY = true
+      for rowText (iter rows):
+        card (id "notifications" "row" rowIndex):
           width = fill
           height = fit
-          textScroll = true
-      += rowIndex 1
-  row (id "notifications" "actions"):
-    width = fill
-    height = fit
-    gap = DialogGap
-    button restoreID "Restore latest":
+          padding = NotificationRowPadding
+          background = color 0 0 0
+          opacity = DialogMutedOpacity
+          label (id "notifications" "row-label" rowIndex) rowText:
+            width = fill
+            height = fit
+            textScroll = true
+        += rowIndex 1
+    row (id "notifications" "actions"):
       width = fill
       height = fit
-    tooltip restoreID "Restore latest notification"
-    button clearID "Empty mailbox":
-      width = fill
-      height = fit
-    tooltip clearID "Clear all notifications"
+      gap = DialogGap
+      button restoreID "Restore latest":
+        width = fill
+        height = fit
+      tooltip restoreID "Restore latest notification"
+      button clearID "Empty mailbox":
+        width = fill
+        height = fit
+      tooltip clearID "Clear all notifications"

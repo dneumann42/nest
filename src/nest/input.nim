@@ -85,6 +85,8 @@ type
     WindowCloseEvent
     WindowFocusGainedEvent
     WindowFocusLostEvent
+    WindowMouseEnterEvent
+    WindowMouseLeaveEvent
     QuitEvent
 
   Modifier* = enum
@@ -119,7 +121,8 @@ type
   InputRelays* = object
     pollEvent*: proc(e: var Event, flags: set[InputFlag]): bool {.nimcall.}
     waitEvent*:
-      proc(e: var Event, timeoutMs: int, flags: set[InputFlag]): bool {.nimcall.}
+      proc(e: var Event, timeoutMs: int, flags: set[
+          InputFlag]): bool {.nimcall.}
     getTicks*: proc(): int {.nimcall.}
     sleep*: proc(ms: int) {.nimcall.}
     shutdown*: proc() {.nimcall.}
@@ -133,15 +136,15 @@ var clipboardRelays* = ClipboardRelays(
 
 var inputRelays* = InputRelays(
   pollEvent: proc(e: var Event, flags: set[InputFlag]): bool =
-    false,
+  false,
   waitEvent: proc(e: var Event, timeoutMs: int, flags: set[InputFlag]): bool =
-    false,
+  false,
   getTicks: proc(): int =
-    0,
+  0,
   sleep: proc(ms: int) =
-    discard,
+  discard,
   shutdown: proc() =
-    discard,
+  discard,
 )
 
 proc pollEvent*(e: var Event, flags: set[InputFlag] = {}): bool =

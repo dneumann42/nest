@@ -17,7 +17,7 @@ widget notificationWidget key:
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "notifications"))):
-      openDialog "notifications" "./notifications" "" buttonID
+      openDialog "notifications" "./notifications" "" buttonID (dialogAutoDismissOptions)
 
   button buttonID (string IconNotifications " " count):
     width = fit

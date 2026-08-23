@@ -121,6 +121,8 @@ proc resizeFastPathEvent(kind: EventKind): bool {.inline.} =
     WindowResizeEvent,
     WindowFocusGainedEvent,
     WindowFocusLostEvent,
+    WindowMouseEnterEvent,
+    WindowMouseLeaveEvent,
   }
 
 proc handleEvent(
@@ -157,6 +159,10 @@ proc handleEvent(
     updateContext.windowHeight = max(e.y, 0)
     drawContext.windowWidth = updateContext.windowWidth
     drawContext.windowHeight = updateContext.windowHeight
+  of WindowMouseEnterEvent, WindowFocusGainedEvent:
+    discard
+  of WindowMouseLeaveEvent, WindowFocusLostEvent:
+    discard
   of KeyDownEvent:
     updateContext.keyInputs.add KeyInput(key: e.key, mods: e.mods)
   of TextInputEvent:
@@ -185,6 +191,7 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
     running = false
   of MouseMoveEvent:
     ui.mouseMove(e.x, e.y)
+    ui.windowMouseEnter()
   of MouseDownEvent:
     ui.mouseMove(e.x, e.y)
     ui.mouseDown()
@@ -196,6 +203,18 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
   of WindowResizeEvent:
     ui.resizeWindow(e.x, e.y)
     ui.markAllDirty()
+  of WindowMouseEnterEvent:
+    ui.windowMouseEnter()
+    ui.requestRedrawAfter(0)
+  of WindowMouseLeaveEvent:
+    ui.windowMouseLeave()
+    ui.requestRedrawAfter(0)
+  of WindowFocusGainedEvent:
+    ui.windowFocusGained()
+    ui.requestRedrawAfter(0)
+  of WindowFocusLostEvent:
+    ui.windowFocusLost()
+    ui.requestRedrawAfter(0)
   of KeyDownEvent:
     ui.keyDown(e.key, e.mods)
     ui.requestRedrawAfter(0)
@@ -453,6 +472,7 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       if resizeTraceEnabled():
         inc resizeTrace.fastResizePresents
       if resizeStrategy() == rsRetained:
+        ui.setDrawTicks(input.getTicks())
         discard ui.drawRetainedFrame()
       refresh()
       let now = input.getTicks()
@@ -477,7 +497,7 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
   shutdown()
 
 proc eventTypeOf*[M, E](
-    view: proc(ui: var UI, model: M, emitted: var seq[E]) {.nimcall.}
+    view: proc(ui: var UI; model: M; emitted: var seq[E]) {.nimcall.}
 ): E =
   ## Return the event type of a root widget that collects into a parameter.
   ##
@@ -486,7 +506,7 @@ proc eventTypeOf*[M, E](
   discard
 
 proc eventTypeOf*[M, E](
-    view: proc(ui: var UI, model: var M, emitted: var seq[E]) {.nimcall.}
+    view: proc(ui: var UI; model: var M; emitted: var seq[E]) {.nimcall.}
 ): E =
   ## Return the event type of a root widget that collects into a parameter and
   ## takes its model by `var`.

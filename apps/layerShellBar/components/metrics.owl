@@ -92,7 +92,7 @@ widget networkMeter key:
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "network"))):
-      openDialog "network" "./network" "" buttonID
+      openDialog "network" "./network" "" buttonID (dialogAutoDismissOptions)
 
   button buttonID (string IconNetwork " " status):
     width = fixed MetricNetworkWidth

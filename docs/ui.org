@@ -2009,6 +2009,20 @@ row (id "controls"):
 
 The available commands are ~panel~, ~card~, ~row~, ~column~, ~overlay~, ~center~, ~spacer~, ~table~ and its parts, ~label~, ~button~, ~imageButton~, ~image~, ~checkbox~, ~lineInput~, ~editor~, ~tabs~, ~horizontalSlider~, ~verticalSlider~, ~dialogHeader~, ~modalDialog~, ~menuBar~ and its parts. Size policies are ~fill~, ~fit~, ~fixed n~, ~hug n~ and ~prefer n~; ~insets l t r b~ builds asymmetric padding; ~color r g b~ and ~theme-color "name"~ build colours.
 
+Animations are keyed by widget id and fit the same immediate-mode model. In Nim, call ~ui.animate(id, open, spec)~ or wrap declarations in ~ui.animated(id, open, spec):~. The default specs include ~fadeIn~, ~scaleIn~, ~slideIn~ and ~dialogPopIn~, with curves ~Linear~, ~EaseIn~, ~EaseOut~, ~EaseInOut~, ~SmoothStep~, ~Spring~ and ~BackOut~. Default animations settle at ~DefaultMaxOpacity~ (~0.95~), and each helper accepts ~maxOpacity~ when a different final alpha is needed. In owl, wrap any subtree with ~animation id [open]:~ and set ~duration~, ~curve~, ~fromOpacity~, ~maxOpacity~, ~fromScale~, ~offsetX~ and ~offsetY~ in the body. The widget with that id is still declared normally inside the block:
+#+begin_src owl
+animation (id "popover"):
+  duration = 180
+  curve = "backOut"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  fromScale = 0.94
+  offsetY = 6
+  card (id "popover"):
+    width = fill
+    height = fill
+#+end_src
+
 *** Ids And Scopes
 
 ~id~ builds a widget id from its arguments, and ~(id)~ with no arguments generates one. A widget id stringifies back to its own parts, so ids compose: ~id someID "title"~ extends ~someID~. ~scope "key": ...~ is ~ui.scope~, for declaring the same subtree twice.
@@ -2171,7 +2185,7 @@ Differences that matter in practice:
 - *No static types at all.* Numbers are ~float64~, an unknown symbol is a runtime error, and the error surfaces in the dialog rather than at build time.
 - *Menus are managed.* Owl's ~menuBar~ reads its whole structure from its body, opens and closes the popover itself, and reports the chosen path through ~menuResult~. The Nim ~menuBar~ is a thin container that leaves all of that to the caller.
 - *Dialog processes are owl-only.* ~openDialog~ starts another Nest project as a child process; there is no Nim equivalent.
-- *Components cannot be written in owl.* A ~Component~ subclass that measures, updates and draws itself is Nim code. An owl program can only compose what already exists.
+- *Components cannot be written in owl.* A ~Component~ subclass that measures, updates and draws itself is Nim code. An owl program can compose and animate existing widgets and components with ~animation~, but new component implementations still live in Nim.
 - *State resets on reload.* Editing a file restores the declared defaults.
 
 ** Using Both

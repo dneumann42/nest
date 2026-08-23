@@ -30,9 +30,9 @@ widget mediaWidget key:
     when (clicked previousID):
       mediaAction (id keyText "action" "previous") "previous 2>/dev/null"
     when (and (clicked artID) (not (dialogOpen? "media"))):
-      openDialog "media" "./media" "" artID
+      openDialog "media" "./media" "" artID (dialogAutoDismissOptions)
     when (and (clicked titleID) (not (dialogOpen? "media"))):
-      openDialog "media" "./media" "" titleID
+      openDialog "media" "./media" "" titleID (dialogAutoDismissOptions)
     when (clicked playPauseID):
       set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
       set displayStatus statusOverride

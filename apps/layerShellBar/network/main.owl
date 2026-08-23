@@ -95,9 +95,9 @@ set rowIndex 0
 
 events:
   when (keyPressed "escape"):
-    closeDialog ""
+    requestCloseDialog ""
   when (clicked closeID):
-    closeDialog ""
+    requestCloseDialog ""
   when (and (= nmAvailable "yes") (clicked wifiOnID)):
     shellAsync (id "network" "wifi" "on-action") (wifiPowerCommand "on") ImmediateInterval
   when (and (= nmAvailable "yes") (clicked wifiOffID)):
@@ -122,206 +122,213 @@ events:
     when (clicked (id "network" "ethernet" "down" (tsvCell rowText 0 1))):
       shellAsync (id "network" "ethernet" "down-action" rowText) (ethernetActionCommand rowText "disconnect") ImmediateInterval
 
-card (id "network" "panel"):
-  width = fill
-  height = fill
-  padding = DialogPaddingWide
-  gap = DialogSectionGap
-  alignItems = AlignStretch
-  background = theme-color "panel"
-  opacity = DialogPanelOpacity
-  dialogHeader (id "network" "header"):
-    width = fill
-    height = fixed DialogHeaderHeightTall
-    padding = DialogHeaderPadding
-    alignItems = AlignCenter
-    label (id "network" "title") "Network":
-      width = fill
-      height = fit
-    button closeID "x":
-      width = fixed DialogCloseButtonWidthLarge
-      height = fit
-    tooltip closeID "Close"
-  column (id "network" "body"):
+animation (id "network" "panel") (not (dialogClosing?)):
+  duration = DialogAnimationDuration
+  curve = "backOut"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  fromScale = DialogAnimationFromScale
+  offsetY = 6
+  card (id "network" "panel"):
     width = fill
     height = fill
+    padding = DialogPaddingWide
     gap = DialogSectionGap
-    scrollY = true
-    label (id "network" "status") (pick (= status "") "Loading network status..." status):
+    alignItems = AlignStretch
+    background = theme-color "panel"
+    opacity = 1
+    dialogHeader (id "network" "header"):
       width = fill
-      height = fit
-      textScroll = true
-    if (= nmAvailable "yes"):
-      row (id "network" "wifi-actions"):
+      height = fixed DialogHeaderHeightTall
+      padding = DialogHeaderPadding
+      alignItems = AlignCenter
+      label (id "network" "title") "Network":
         width = fill
         height = fit
-        gap = DialogGap
-        if (= wifiRadio "disabled"):
-          button wifiOnID "Wi-Fi on":
-            width = fill
-            height = fit
-          tooltip wifiOnID "Turn Wi-Fi on"
-          else:
-            if (= wifiRadio ""):
-              label (id "network" "wifi-actions-loading") "Loading Wi-Fi controls...":
-                width = fill
-                height = fit
-              else:
-                button wifiOffID "Wi-Fi off":
-                  width = fill
-                  height = fit
-                tooltip wifiOffID "Turn Wi-Fi off"
-                button scanID "Scan":
-                  width = fill
-                  height = fit
-                tooltip scanID "Scan for Wi-Fi networks"
-                if (not (= activeSsid "")):
-                  button disconnectWifiID "Disconnect":
-                    width = fill
-                    height = fit
-                  tooltip disconnectWifiID "Disconnect Wi-Fi"
-      else:
-        label (id "network" "unavailable") (nmcliMissingMessage):
+      button closeID "x":
+        width = fixed DialogCloseButtonWidthLarge
+        height = fit
+      tooltip closeID "Close"
+    column (id "network" "body"):
+      width = fill
+      height = fill
+      gap = DialogSectionGap
+      scrollY = true
+      label (id "network" "status") (pick (= status "") "Loading network status..." status):
+        width = fill
+        height = fit
+        textScroll = true
+      if (= nmAvailable "yes"):
+        row (id "network" "wifi-actions"):
           width = fill
           height = fit
-    label (id "network" "wifi-heading") "Wi-Fi networks":
-      width = fill
-      height = fit
-    column (id "network" "wifi-list"):
-      width = fill
-      height = fit
-      gap = NetworkRowGap
-      if (= nmAvailable "yes"):
-        if (empty? wifiRows):
-          label (id "network" "wifi-loading") (pick (= wifiRadio "disabled") "Wi-Fi is off" "Loading Wi-Fi networks..."):
-            width = fill
-            height = fit
-          else:
-            for rowText (iter wifiRows):
-              set rowKind (tsvCell rowText 0 0)
-              set rowName (tsvCell rowText 0 1)
-              set rowSelected (tsvCell rowText 0 2)
-              set rowLabel (tsvCell rowText 0 3)
-              if (= rowKind "network"):
-                button (id "network" "wifi" "row" rowName) rowLabel:
+          gap = DialogGap
+          if (= wifiRadio "disabled"):
+            button wifiOnID "Wi-Fi on":
+              width = fill
+              height = fit
+            tooltip wifiOnID "Turn Wi-Fi on"
+            else:
+              if (= wifiRadio ""):
+                label (id "network" "wifi-actions-loading") "Loading Wi-Fi controls...":
                   width = fill
-                  height = fixed NetworkRowHeight
-                  background = (pick (= rowSelected "yes") (theme-color "primary") (theme-color "background"))
-                  opacity = (pick (= rowSelected "yes") NetworkSelectedOpacity DialogPanelOpacity)
-                tooltip (id "network" "wifi" "row" rowName) (pick (= rowSelected "yes") (string "Disconnect " rowName) (string "Connect to " rowName))
+                  height = fit
                 else:
-                  label (id "network" "wifi" "message" rowLabel) rowLabel:
+                  button wifiOffID "Wi-Fi off":
                     width = fill
                     height = fit
+                  tooltip wifiOffID "Turn Wi-Fi off"
+                  button scanID "Scan":
+                    width = fill
+                    height = fit
+                  tooltip scanID "Scan for Wi-Fi networks"
+                  if (not (= activeSsid "")):
+                    button disconnectWifiID "Disconnect":
+                      width = fill
+                      height = fit
+                    tooltip disconnectWifiID "Disconnect Wi-Fi"
         else:
-          label (id "network" "wifi-disabled") "Install NetworkManager to manage Wi-Fi here":
+          label (id "network" "unavailable") (nmcliMissingMessage):
             width = fill
             height = fit
-    if (= nmAvailable "yes"):
-      row (id "network" "manual-row"):
+      label (id "network" "wifi-heading") "Wi-Fi networks":
         width = fill
         height = fit
-        gap = DialogGap
-        alignItems = AlignCenter
-        lineInput manualSsidID "":
-          width = fill
-          height = fixed NetworkInputHeight
-        tooltip manualSsidID "Wi-Fi network name"
-        lineInput manualPasswordID "":
-          width = fill
-          height = fixed NetworkInputHeight
-        tooltip manualPasswordID "Wi-Fi password"
-        if (not (= manualSsid "")):
-          button manualConnectID "Connect":
-            width = fixed NetworkConnectButtonWidth
-            height = fit
-          tooltip manualConnectID (string "Connect to " manualSsid)
+      column (id "network" "wifi-list"):
+        width = fill
+        height = fit
+        gap = NetworkRowGap
+        if (= nmAvailable "yes"):
+          if (empty? wifiRows):
+            label (id "network" "wifi-loading") (pick (= wifiRadio "disabled") "Wi-Fi is off" "Loading Wi-Fi networks..."):
+              width = fill
+              height = fit
+            else:
+              for rowText (iter wifiRows):
+                set rowKind (tsvCell rowText 0 0)
+                set rowName (tsvCell rowText 0 1)
+                set rowSelected (tsvCell rowText 0 2)
+                set rowLabel (tsvCell rowText 0 3)
+                if (= rowKind "network"):
+                  button (id "network" "wifi" "row" rowName) rowLabel:
+                    width = fill
+                    height = fixed NetworkRowHeight
+                    background = (pick (= rowSelected "yes") (theme-color "primary") (theme-color "background"))
+                    opacity = (pick (= rowSelected "yes") NetworkSelectedOpacity DialogPanelOpacity)
+                  tooltip (id "network" "wifi" "row" rowName) (pick (= rowSelected "yes") (string "Disconnect " rowName) (string "Connect to " rowName))
+                  else:
+                    label (id "network" "wifi" "message" rowLabel) rowLabel:
+                      width = fill
+                      height = fit
           else:
-            label (id "network" "manual-placeholder") "SSID required":
+            label (id "network" "wifi-disabled") "Install NetworkManager to manage Wi-Fi here":
+              width = fill
+              height = fit
+      if (= nmAvailable "yes"):
+        row (id "network" "manual-row"):
+          width = fill
+          height = fit
+          gap = DialogGap
+          alignItems = AlignCenter
+          lineInput manualSsidID "":
+            width = fill
+            height = fixed NetworkInputHeight
+          tooltip manualSsidID "Wi-Fi network name"
+          lineInput manualPasswordID "":
+            width = fill
+            height = fixed NetworkInputHeight
+          tooltip manualPasswordID "Wi-Fi password"
+          if (not (= manualSsid "")):
+            button manualConnectID "Connect":
               width = fixed NetworkConnectButtonWidth
               height = fit
-    label (id "network" "profiles-heading") "Saved Wi-Fi":
-      width = fill
-      height = fit
-    column (id "network" "profiles-list"):
-      width = fill
-      height = fit
-      gap = NetworkRowGap
-      if (= nmAvailable "yes"):
-        if (empty? profileRows):
-          label (id "network" "profiles-loading") "Loading saved Wi-Fi...":
-            width = fill
-            height = fit
-          else:
-            for profile (iter profileRows):
-              set profileKind (tsvCell profile 0 0)
-              set profileName (tsvCell profile 0 1)
-              if (= profileKind "profile"):
-                button (id "network" "profile" "row" profileName) profileName:
-                  width = fill
-                  height = fixed NetworkRowHeight
-                  background = (pick (= profileName activeSsid) (theme-color "primary") (theme-color "background"))
-                  opacity = (pick (= profileName activeSsid) NetworkSelectedOpacity DialogPanelOpacity)
-                tooltip (id "network" "profile" "row" profileName) (string "Connect saved profile " profileName)
-                else:
-                  label (id "network" "profile" "message" profileName) profileName:
-                    width = fill
-                    height = fit
-        else:
-          label (id "network" "profiles-empty") "Saved profiles unavailable":
-            width = fill
-            height = fit
-    label (id "network" "ethernet-heading") "Ethernet":
-      width = fill
-      height = fit
-    column (id "network" "ethernet-list"):
-      width = fill
-      height = fit
-      gap = NetworkRowGap
-      if (= nmAvailable "yes"):
-        if (empty? ethernetRows):
-          label (id "network" "ethernet-loading") "Loading Ethernet devices...":
-            width = fill
-            height = fit
-          else:
-            for rowText (iter ethernetRows):
-              set ethernetKind (tsvCell rowText 0 0)
-              set ethernetDevice (tsvCell rowText 0 1)
-              set ethernetState (tsvCell rowText 0 2)
-              set ethernetName (tsvCell rowText 0 3)
-              if (= ethernetKind "device"):
-                row (id "network" "ethernet" "row" ethernetDevice):
-                  width = fill
-                  height = fixed NetworkRowHeight
-                  gap = DialogGap
-                  alignItems = AlignCenter
-                  label (id "network" "ethernet" "label" ethernetDevice) (string ethernetDevice "  " ethernetState "  " ethernetName):
-                    width = fill
-                    height = fit
-                  if (= ethernetState "connected"):
-                    button (id "network" "ethernet" "down" ethernetDevice) "Down":
-                      width = fixed NetworkActionButtonWidth
-                      height = fit
-                    tooltip (id "network" "ethernet" "down" ethernetDevice) (string "Disconnect " ethernetDevice)
-                    else:
-                      button (id "network" "ethernet" "up" ethernetDevice) "Up":
-                        width = fixed NetworkActionButtonWidth
-                        height = fit
-                      tooltip (id "network" "ethernet" "up" ethernetDevice) (string "Connect " ethernetDevice)
-                else:
-                  label (id "network" "ethernet" "message" rowText) (tsvCell rowText 0 3):
-                    width = fill
-                    height = fit
-        else:
-          label (id "network" "ethernet-empty") "Ethernet unavailable":
-            width = fill
-            height = fit
-    if (= editorAvailable "yes"):
-      button editorID "Connection editor":
+            tooltip manualConnectID (string "Connect to " manualSsid)
+            else:
+              label (id "network" "manual-placeholder") "SSID required":
+                width = fixed NetworkConnectButtonWidth
+                height = fit
+      label (id "network" "profiles-heading") "Saved Wi-Fi":
         width = fill
         height = fit
-      tooltip editorID "Open connection editor"
-      else:
-        label (id "network" "editor-unavailable") "Connection editor is not installed":
+      column (id "network" "profiles-list"):
+        width = fill
+        height = fit
+        gap = NetworkRowGap
+        if (= nmAvailable "yes"):
+          if (empty? profileRows):
+            label (id "network" "profiles-loading") "Loading saved Wi-Fi...":
+              width = fill
+              height = fit
+            else:
+              for profile (iter profileRows):
+                set profileKind (tsvCell profile 0 0)
+                set profileName (tsvCell profile 0 1)
+                if (= profileKind "profile"):
+                  button (id "network" "profile" "row" profileName) profileName:
+                    width = fill
+                    height = fixed NetworkRowHeight
+                    background = (pick (= profileName activeSsid) (theme-color "primary") (theme-color "background"))
+                    opacity = (pick (= profileName activeSsid) NetworkSelectedOpacity DialogPanelOpacity)
+                  tooltip (id "network" "profile" "row" profileName) (string "Connect saved profile " profileName)
+                  else:
+                    label (id "network" "profile" "message" profileName) profileName:
+                      width = fill
+                      height = fit
+          else:
+            label (id "network" "profiles-empty") "Saved profiles unavailable":
+              width = fill
+              height = fit
+      label (id "network" "ethernet-heading") "Ethernet":
+        width = fill
+        height = fit
+      column (id "network" "ethernet-list"):
+        width = fill
+        height = fit
+        gap = NetworkRowGap
+        if (= nmAvailable "yes"):
+          if (empty? ethernetRows):
+            label (id "network" "ethernet-loading") "Loading Ethernet devices...":
+              width = fill
+              height = fit
+            else:
+              for rowText (iter ethernetRows):
+                set ethernetKind (tsvCell rowText 0 0)
+                set ethernetDevice (tsvCell rowText 0 1)
+                set ethernetState (tsvCell rowText 0 2)
+                set ethernetName (tsvCell rowText 0 3)
+                if (= ethernetKind "device"):
+                  row (id "network" "ethernet" "row" ethernetDevice):
+                    width = fill
+                    height = fixed NetworkRowHeight
+                    gap = DialogGap
+                    alignItems = AlignCenter
+                    label (id "network" "ethernet" "label" ethernetDevice) (string ethernetDevice "  " ethernetState "  " ethernetName):
+                      width = fill
+                      height = fit
+                    if (= ethernetState "connected"):
+                      button (id "network" "ethernet" "down" ethernetDevice) "Down":
+                        width = fixed NetworkActionButtonWidth
+                        height = fit
+                      tooltip (id "network" "ethernet" "down" ethernetDevice) (string "Disconnect " ethernetDevice)
+                      else:
+                        button (id "network" "ethernet" "up" ethernetDevice) "Up":
+                          width = fixed NetworkActionButtonWidth
+                          height = fit
+                        tooltip (id "network" "ethernet" "up" ethernetDevice) (string "Connect " ethernetDevice)
+                  else:
+                    label (id "network" "ethernet" "message" rowText) (tsvCell rowText 0 3):
+                      width = fill
+                      height = fit
+          else:
+            label (id "network" "ethernet-empty") "Ethernet unavailable":
+              width = fill
+              height = fit
+      if (= editorAvailable "yes"):
+        button editorID "Connection editor":
           width = fill
           height = fit
+        tooltip editorID "Open connection editor"
+        else:
+          label (id "network" "editor-unavailable") "Connection editor is not installed":
+            width = fill
+            height = fit

@@ -7,7 +7,7 @@ proc usage*(): string =
   """Usage:
   nest --project DIR
   nest run DIR [--perf-overlay] [--benchmark [FRAMES]]
-  nest dialog DIR [DATA] [RESULT_PATH] [ANCHOR_JSON]
+  nest dialog DIR [DATA] [RESULT_PATH] [ANCHOR_JSON] [OPTIONS_JSON]
   nest tooltip-popover TEXT ANCHOR_JSON [THEME] [PARENT_PID]
   nest choice-popover OPTIONS_JSON RESULT_PATH ANCHOR_JSON [THEME] [PARENT_PID]
   nest error-dialog [example | MESSAGE]
@@ -75,12 +75,18 @@ proc main*() =
         args[4]
       else:
         ""
+    let dialogOptions =
+      if args.len >= 6:
+        parseDialogOptions(args[5])
+      else:
+        DialogOptions(inactiveGraceMs: 350)
     let value = runProject(
       args[1],
       dialogData = data,
       dialogMode = true,
       dialogResultPath = resultPath,
       dialogAnchor = anchor,
+      dialogOptions = dialogOptions,
     )
     if resultPath.len > 0:
       writeFile(resultPath, value)

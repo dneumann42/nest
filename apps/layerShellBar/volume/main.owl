@@ -22,7 +22,7 @@ set sinks (textLines (shell (volumeSinkListCommand)))
 
 events:
   when (keyPressed "escape"):
-    closeDialog ""
+    requestCloseDialog ""
   when (clicked muteID):
     shellAsync (id "volume" "action" "mute") (volumeActionCommand "toggle") ImmediateInterval
   when (clicked downID):
@@ -36,7 +36,7 @@ events:
     set percent draggedVolume
     shellAsync (id "volume" "set") (volumeSetCommand draggedVolume) ImmediateInterval
   when (clicked closeID):
-    closeDialog ""
+    requestCloseDialog ""
   for sink (iter sinks):
     define:
       sourceID = (radioOptionID "volume-sources" sink)
@@ -44,68 +44,75 @@ events:
       shell (volumeSinkSwitchCommand sink)
       set defaultSink sink
 
-card (id "volume" "panel"):
-  width = fill
-  height = fill
-  padding = DialogPadding
-  gap = DialogGap
-  alignItems = AlignStretch
-  background = color 0 0 0
-  opacity = DialogOpacity
-  dialogHeader (id "volume" "header"):
-    width = fill
-    height = fixed DialogHeaderHeight
-    padding = DialogHeaderPadding
-    alignItems = AlignCenter
-    label (id "volume" "title") "Volume":
-      width = fill
-      height = fit
-    button closeID "x":
-      width = fixed DialogCloseButtonWidth
-      height = fit
-    tooltip closeID "Close"
-  row (id "volume" "body"):
+animation (id "volume" "panel") (not (dialogClosing?)):
+  duration = DialogAnimationDuration
+  curve = "backOut"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  fromScale = DialogAnimationFromScale
+  offsetY = 6
+  card (id "volume" "panel"):
     width = fill
     height = fill
-    gap = VolumeBodyGap
-    alignItems = AlignCenter
-    justifyContent = JustifyStart
-    column (id "volume" "readout"):
+    padding = DialogPadding
+    gap = DialogGap
+    alignItems = AlignStretch
+    background = color 0 0 0
+    opacity = 1
+    dialogHeader (id "volume" "header"):
+      width = fill
+      height = fixed DialogHeaderHeight
+      padding = DialogHeaderPadding
+      alignItems = AlignCenter
+      label (id "volume" "title") "Volume":
+        width = fill
+        height = fit
+      button closeID "x":
+        width = fixed DialogCloseButtonWidth
+        height = fit
+      tooltip closeID "Close"
+    row (id "volume" "body"):
       width = fill
       height = fill
-      gap = DialogGap
-      alignItems = AlignStretch
-      justifyContent = JustifyCenter
-      label (id "volume" "status") (string "♫ " status):
+      gap = VolumeBodyGap
+      alignItems = AlignCenter
+      justifyContent = JustifyStart
+      column (id "volume" "readout"):
         width = fill
-        height = fit
-      label (id "volume" "percent") (string percent "%"):
-        width = fill
-        height = fit
-      row (id "volume" "actions"):
-        width = fill
-        height = fit
+        height = fill
         gap = DialogGap
-        alignItems = AlignCenter
+        alignItems = AlignStretch
         justifyContent = JustifyCenter
-        button downID "-":
-          width = fixed VolumeSmallButtonWidth
+        label (id "volume" "status") (string "♫ " status):
+          width = fill
           height = fit
-        tooltip downID "Lower volume"
-        button muteID "Mute":
-          width = fixed VolumeMuteButtonWidth
+        label (id "volume" "percent") (string percent "%"):
+          width = fill
           height = fit
-        tooltip muteID "Toggle mute"
-        button upID "+":
-          width = fixed VolumeSmallButtonWidth
+        row (id "volume" "actions"):
+          width = fill
           height = fit
-        tooltip upID "Raise volume"
-      button mixerID "Open mixer":
-        width = fill
-        height = fit
-      tooltip mixerID "Open mixer"
-      radioGroup "volume-sources" sinks defaultSink
-    verticalSlider sliderID percent 0 VolumeMax:
-      width = fixed VolumeSliderWidth
-      height = fill
-    tooltip sliderID "Set volume"
+          gap = DialogGap
+          alignItems = AlignCenter
+          justifyContent = JustifyCenter
+          button downID "-":
+            width = fixed VolumeSmallButtonWidth
+            height = fit
+          tooltip downID "Lower volume"
+          button muteID "Mute":
+            width = fixed VolumeMuteButtonWidth
+            height = fit
+          tooltip muteID "Toggle mute"
+          button upID "+":
+            width = fixed VolumeSmallButtonWidth
+            height = fit
+          tooltip upID "Raise volume"
+        button mixerID "Open mixer":
+          width = fill
+          height = fit
+        tooltip mixerID "Open mixer"
+        radioGroup "volume-sources" sinks defaultSink
+      verticalSlider sliderID percent 0 VolumeMax:
+        width = fixed VolumeSliderWidth
+        height = fill
+      tooltip sliderID "Set volume"

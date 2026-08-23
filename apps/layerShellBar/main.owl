@@ -53,11 +53,11 @@ import "mediaWidget.owl"
 
 events:
   when (external "sigusr1"):
-    toggleDialog "start" "./startPopover" (dict-get cfg "start-label") startID
+    toggleDialog "start" "./startPopover" (dict-get cfg "start-label") startID (dialogAutoDismissOptions)
   when (and (clicked startID) (not (dialogOpen? "start"))):
-    openDialog "start" "./startPopover" (dict-get cfg "start-label") startID
+    openDialog "start" "./startPopover" (dict-get cfg "start-label") startID (dialogAutoDismissOptions)
   when (and (clicked clockID) (not (dialogOpen? "clock"))):
-    openDialog "clock" "./clock" "" clockID
+    openDialog "clock" "./clock" "" clockID (dialogAutoDismissOptions)
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"

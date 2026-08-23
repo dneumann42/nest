@@ -15,7 +15,8 @@ proc imgLoad(
 
 proc ttfOpenFontIO(
   src: sdl3.IOStream, closeio: bool, ptsize: cfloat
-): sdl3_ttf.Font {.importc: "TTF_OpenFontIO", cdecl, dynlib: sdl3_ttf.TtfLibName.}
+): sdl3_ttf.Font {.importc: "TTF_OpenFontIO", cdecl,
+    dynlib: sdl3_ttf.TtfLibName.}
 
 proc ttfFontHasGlyph(
   font: sdl3_ttf.Font, ch: uint32
@@ -154,7 +155,8 @@ proc anchorMask(config: LayerShellConfig): uint32 =
     result = result or 8'u32
 
 proc layerSurfaceWidth(config: LayerShellConfig, width: int): uint32 =
-  if EdgeLeft in config.anchors and EdgeRight in config.anchors: 0'u32 else: width.uint32
+  if EdgeLeft in config.anchors and EdgeRight in
+      config.anchors: 0'u32 else: width.uint32
 
 proc layerSurfaceHeight(config: LayerShellConfig, height: int): uint32 =
   if EdgeTop in config.anchors and EdgeBottom in config.anchors:
@@ -172,7 +174,8 @@ proc nestLayerShellConfigure(
 ): cint {.importc: "nest_wayland_layer_shell_configure".}
 
 proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
-proc nestLayerShellSetMargin(top, right, bottom, left: int32) {.importc: "nest_wayland_layer_shell_set_margin".}
+proc nestLayerShellSetMargin(top, right, bottom,
+    left: int32) {.importc: "nest_wayland_layer_shell_set_margin".}
 
 proc `==`(a, b: MeasureCacheKey): bool {.inline.} =
   a.fontId == b.fontId and a.text == b.text
@@ -554,7 +557,8 @@ proc nerdFontScore(path: string): int =
 
 proc scanForNerdFont(): string =
   let overridePath = getEnv("NEST_NERD_FONT")
-  if overridePath.len > 0 and hasRequiredGlyphs(overridePath, RequiredNerdGlyphs):
+  if overridePath.len > 0 and hasRequiredGlyphs(overridePath,
+      RequiredNerdGlyphs):
     return overridePath
 
   let key = "nerd-monospace"
@@ -655,7 +659,8 @@ proc resolveFontPath(path: string): string =
 
   when defined(windows):
     result =
-      firstExisting([r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf"])
+      firstExisting([r"C:\Windows\Fonts\segoeui.ttf",
+          r"C:\Windows\Fonts\arial.ttf"])
   elif defined(macosx):
     result = firstExisting(
       [
@@ -700,7 +705,8 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
 
   let winFlags = WINDOW_BORDERLESS or WINDOW_TRANSPARENT
   discard
-    setStringProperty(props, cstring(PROP_WINDOW_CREATE_TITLE_STRING), cstring"NimEdit")
+    setStringProperty(props, cstring(PROP_WINDOW_CREATE_TITLE_STRING),
+        cstring"NimEdit")
   discard setNumberProperty(
     props, cstring(PROP_WINDOW_CREATE_WIDTH_NUMBER), layout.width.int64
   )
@@ -708,7 +714,8 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
     props, cstring(PROP_WINDOW_CREATE_HEIGHT_NUMBER), layout.height.int64
   )
   discard
-    setNumberProperty(props, cstring(PROP_WINDOW_CREATE_FLAGS_NUMBER), winFlags.int64)
+    setNumberProperty(props, cstring(PROP_WINDOW_CREATE_FLAGS_NUMBER),
+        winFlags.int64)
   discard
     setBooleanProperty(props, cstring(PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN), true)
   discard setBooleanProperty(
@@ -725,9 +732,11 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
 
   let windowProps = getWindowProperties(win)
   let display =
-    getPointerProperty(windowProps, cstring(PROP_WINDOW_WAYLAND_DISPLAY_POINTER), nil)
+    getPointerProperty(windowProps, cstring(
+        PROP_WINDOW_WAYLAND_DISPLAY_POINTER), nil)
   let surface =
-    getPointerProperty(windowProps, cstring(PROP_WINDOW_WAYLAND_SURFACE_POINTER), nil)
+    getPointerProperty(windowProps, cstring(
+        PROP_WINDOW_WAYLAND_SURFACE_POINTER), nil)
   var configuredWidth, configuredHeight: uint32
   let layerResult = nestLayerShellConfigure(
     display,
@@ -857,7 +866,8 @@ proc openEmbeddedFont(mono: bool, size: int): sdl3_ttf.Font =
   # The stream is closed with the font; it borrows memory that outlives both.
   ttfOpenFontIO(stream, true, size.cfloat)
 
-proc sdlOpenFont(path: string, size: int, metrics: var FontMetrics): screen.Font =
+proc sdlOpenFont(path: string, size: int,
+    metrics: var FontMetrics): screen.Font =
   let resolvedPath = resolveFontPath(path)
   var f: sdl3_ttf.Font = nil
   if resolvedPath.len > 0:
@@ -920,7 +930,8 @@ proc getCachedTextEntry(
     return TextCacheEntry()
   discard setTextureBlendMode(tex, BLENDMODE_BLEND)
   let entry = TextCacheEntry(
-    texture: tex, extent: getCachedExtent(f, text), lastUsed: nextTextCacheGeneration()
+    texture: tex, extent: getCachedExtent(f, text),
+        lastUsed: nextTextCacheGeneration()
   )
   destroySurface(surf)
   textCache[key] = entry
@@ -935,13 +946,16 @@ proc sdlDrawText(
     return
   if bg.a != 0 and entry.extent.w > 0 and entry.extent.h > 0:
     var bgRect = FRect(
-      x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat
+      x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat,
+      h: entry.extent.h.cfloat
     )
     ensureDrawColor(bg)
     discard renderFillRect(ren, addr bgRect)
-  var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
+  var src = FRect(x: 0, y: 0, w: entry.extent.w.cfloat,
+      h: entry.extent.h.cfloat)
   var dst =
-    FRect(x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat, h: entry.extent.h.cfloat)
+    FRect(x: x.cfloat, y: y.cfloat, w: entry.extent.w.cfloat,
+        h: entry.extent.h.cfloat)
   discard renderTexture(ren, entry.texture, addr src, addr dst)
   result = entry.extent
 
@@ -1057,6 +1071,19 @@ proc sdlDrawImage(img: screen.Image, src, dst: coords.Rect) =
   var dstRect =
     FRect(x: dst.x.cfloat, y: dst.y.cfloat, w: dst.w.cfloat, h: dst.h.cfloat)
   discard renderTexture(ren, slot[].texture, addr srcRect, addr dstRect)
+
+proc sdlDrawImageOpacity(
+    img: screen.Image, src, dst: coords.Rect, opacity: float64
+) =
+  let slot = getImageSlot(img)
+  if slot == nil or slot[].texture == nil:
+    return
+  var previousAlpha: uint8 = 255
+  discard getTextureAlphaMod(slot[].texture, previousAlpha)
+  let alpha = uint8((opacity.min(1.0).max(0.0) * 255.0 + 0.5).int)
+  discard setTextureAlphaMod(slot[].texture, alpha)
+  sdlDrawImage(img, src, dst)
+  discard setTextureAlphaMod(slot[].texture, previousAlpha)
 
 proc sdlImageSize(img: screen.Image): TextExtent =
   let slot = getImageSlot(img)
@@ -1236,6 +1263,10 @@ proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
     e.kind = WindowFocusGainedEvent
   elif evType == uint32(EVENT_WINDOW_FOCUS_LOST):
     e.kind = WindowFocusLostEvent
+  elif evType == uint32(EVENT_WINDOW_MOUSE_ENTER):
+    e.kind = WindowMouseEnterEvent
+  elif evType == uint32(EVENT_WINDOW_MOUSE_LEAVE):
+    e.kind = WindowMouseLeaveEvent
   elif evType == uint32(EVENT_KEY_DOWN):
     e.kind = KeyDownEvent
     e.key = translateScancode(sdlEvent.key.scancode)
@@ -1304,7 +1335,8 @@ proc sdlPollEvent(e: var input.Event, flags: set[InputFlag]): bool =
   translateEvent(sdlEvent, e)
   result = true
 
-proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[InputFlag]): bool =
+proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[
+    InputFlag]): bool =
   var sdlEvent: sdl3.Event
   let ok =
     if timeoutMs < 0:
@@ -1379,6 +1411,7 @@ proc installSdl3Relays() =
     loadImage: sdlLoadImage,
     freeImage: sdlFreeImage,
     drawImage: sdlDrawImage,
+    drawImageOpacity: sdlDrawImageOpacity,
     imageSize: sdlImageSize,
   )
   inputRelays = InputRelays(
@@ -1397,8 +1430,8 @@ proc initSdl3Driver*() =
   ## Prefers SDL's Wayland video driver when the session provides one and the
   ## environment has not already chosen a driver.
   useLayerShell = false
-  if getEnv("WAYLAND_DISPLAY").len > 0 and getEnv("SDL_VIDEODRIVER").len == 0 and
-      getEnv("SDL_VIDEO_DRIVER").len == 0:
+  if getEnv("WAYLAND_DISPLAY").len > 0 and getEnv("SDL_VIDEODRIVER").len ==
+      0 and getEnv("SDL_VIDEO_DRIVER").len == 0:
     selectWaylandVideoDriver()
   installSdl3Relays()
 

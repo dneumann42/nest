@@ -295,7 +295,7 @@ label (id "value") value:
 
     check menuSource.contains("label = \"Perf Overlay\"")
     check menuSource.contains("cmd = \"toggle-perf-overlay\"")
-    check menuSource.contains("closeDialog command.cmd")
+    check menuSource.contains("requestCloseDialog command.cmd")
     check barSource.contains("when (= lastAction \"toggle-perf-overlay\"):")
     check barSource.contains("togglePerfOverlay")
 
@@ -570,6 +570,110 @@ button hoverID "Hover":
 
       check app.runtime.get("count").number == 1
       check ui.redrewFrame()
+    finally:
+      inputRelays = originalInputRelays
+      if fileExists(path):
+        removeFile(path)
+
+  test "app retained redraw advances owl animations with current ticks":
+    let
+      originalInputRelays = inputRelays
+      path = getTempDir() / "nest-retained-animation-test.owl"
+    var ticks = 1000
+    inputRelays.getTicks = proc(): int =
+      ticks
+    writeFile(path, """
+state "root":
+  count = 0
+
+events:
+  += count 1
+
+animation (id "panel"):
+  duration = 120
+  curve = "linear"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  card (id "panel"):
+    width = fixed 120
+    height = fixed 48
+    label (id "text") "Animated":
+      width = fit
+      height = fit
+""")
+    try:
+      let app = NestOwlApp.init(path)
+      var ui = UI.init()
+      ui.initContext(360, 180)
+      ui.loadFont("font", "", 18)
+
+      ui.setDrawTicks(ticks)
+      app.render(ui)
+      let initial = ui.animationValue(ui.id("panel"))
+      check initial.progress == 0.0
+      check app.runtime.get("count").number == 1
+
+      ticks = 1050
+      app.render(ui)
+      let advanced = ui.animationValue(ui.id("panel"))
+      check app.runtime.get("count").number == 1
+      check advanced.progress > initial.progress
+      check advanced.opacity > initial.opacity
+      check advanced.running
+    finally:
+      inputRelays = originalInputRelays
+      if fileExists(path):
+        removeFile(path)
+
+  test "app pending dialog close forces full render for reverse animation":
+    let
+      originalInputRelays = inputRelays
+      path = getTempDir() / "nest-dialog-close-animation-test.owl"
+    var ticks = 1000
+    inputRelays.getTicks = proc(): int =
+      ticks
+    writeFile(path, """
+animation (id "panel") (not (dialogClosing?)):
+  duration = 120
+  curve = "linear"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  card (id "panel"):
+    width = fixed 120
+    height = fixed 48
+    label (id "text") "Animated":
+      width = fit
+      height = fit
+""")
+    try:
+      let app = NestOwlApp.init(path)
+      var ui = UI.init()
+      ui.initContext(360, 180)
+      ui.loadFont("font", "", 18)
+
+      ui.setDrawTicks(ticks)
+      app.render(ui)
+      ticks = 1200
+      ui.setDrawTicks(ticks)
+      app.render(ui)
+      check ui.animationValue(ui.id("panel")).progress == 1.0
+
+      app.runtime.requestDialogClose("")
+      ticks = 1210
+      ui.setDrawTicks(ticks)
+      app.render(ui)
+
+      let closing = ui.animationValue(ui.id("panel"))
+      check app.runtime.dialogCloseRequested
+      check closing.running
+
+      ticks = 1230
+      ui.setDrawTicks(ticks)
+      app.render(ui)
+      let closingAdvanced = ui.animationValue(ui.id("panel"))
+      check closingAdvanced.running
+      check closingAdvanced.progress < closing.progress
+      check closingAdvanced.opacity < closing.opacity
     finally:
       inputRelays = originalInputRelays
       if fileExists(path):
@@ -915,6 +1019,13 @@ actions
     check closeValue.text == "applications"
     check runtime.requestQuit
     check runtime.dialogCloseValue == "applications"
+
+    let requested = runtime.evaluator.exec(parse("requestCloseDialog \"files\"\n"))
+    check requested.kind == Text
+    check requested.text == "files"
+    check runtime.dialogCloseRequested
+    check runtime.dialogCloseValue == "files"
+    check runtime.evaluator.exec(parse("dialogClosing?\n")).isTruthy
 
   test "dialog result commands track completed child values":
     var runtime = NestOwlRuntime.init()
@@ -1664,3 +1775,50 @@ dateSelectorWithSignal "cal" selectedDate clickedDate
       check ui.widget(ui.id("nim-cal", "day", "18")).frame.width > 0
     finally:
       fontRelays = originalFontRelays
+
+  test "owl animation block attaches to custom widget subtree":
+    let runtime = NestOwlRuntime.init()
+    var ui = UI.init()
+    ui.initContext(240, 120)
+    ui.loadFont("font", "", 18)
+    ui.setDrawTicks(2000)
+
+    runtime.render(ui, parse("""
+animation (id "panel"):
+  duration = 120
+  curve = "easeOut"
+  fromOpacity = 0
+  maxOpacity = 0.8
+  fromScale = 0.9
+  card (id "panel"):
+    width = fixed 120
+    height = fixed 48
+    label (id "text") "Animated":
+      width = fit
+      height = fit
+"""))
+
+    let value = ui.animationValue(ui.id("panel"))
+    let panel = ui.widgetFrame(ui.id("panel"))
+    check not runtime.hasError
+    check panel.ok
+    check panel.frame.width == 120
+    check value.progress == 0.0
+    check value.opacity < 0.000001
+
+    ui.setDrawTicks(2200)
+    runtime.render(ui, parse("""
+animation (id "panel"):
+  duration = 120
+  curve = "easeOut"
+  fromOpacity = 0
+  maxOpacity = 0.8
+  fromScale = 0.9
+  card (id "panel"):
+    width = fixed 120
+    height = fixed 48
+    label (id "text") "Animated":
+      width = fit
+      height = fit
+"""))
+    check ui.animationValue(ui.id("panel")).opacity == 0.8

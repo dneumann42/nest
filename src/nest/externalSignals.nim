@@ -7,6 +7,7 @@ const sigUsr1Event* = "sigusr1"
 
 var
   pendingSigUsr1 {.volatile.}: cint
+  pendingSigTerm {.volatile.}: cint
   eventLoopWakeReady {.volatile.}: cint
 
 proc handleSigUsr1(signal: cint) {.noconv.} =
@@ -15,9 +16,17 @@ proc handleSigUsr1(signal: cint) {.noconv.} =
   if eventLoopWakeReady != 0:
     layerShellSdl3Driver.wakeEventLoop()
 
-proc installExternalSignalHandlers*() =
-  ## Install the process signal handlers Nest reacts to (`SIGUSR1`).
+proc handleSigTerm(signal: cint) {.noconv.} =
+  discard signal
+  pendingSigTerm = 1
+  if eventLoopWakeReady != 0:
+    layerShellSdl3Driver.wakeEventLoop()
+
+proc installExternalSignalHandlers*(gracefulTerminate = false) =
+  ## Install the process signal handlers Nest reacts to.
   discard posix.signal(SIGUSR1, handleSigUsr1)
+  if gracefulTerminate:
+    discard posix.signal(SIGTERM, handleSigTerm)
 
 proc enableExternalSignalWake*() =
   ## Allow the signal handler to wake a blocked event loop.
@@ -30,6 +39,12 @@ proc consumePendingSigUsr1(): bool =
   if pendingSigUsr1 == 0:
     return false
   pendingSigUsr1 = 0
+  true
+
+proc consumePendingTerminate*(): bool =
+  if pendingSigTerm == 0:
+    return false
+  pendingSigTerm = 0
   true
 
 proc queuePendingExternalSignals*(runtime: NestOwlRuntime) =
