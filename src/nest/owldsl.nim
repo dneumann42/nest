@@ -21,6 +21,12 @@ type
   JustificationValue* = ref object of NativeValue
     value*: Justification
 
+  ButtonBorderStyleValue* = ref object of NativeValue
+    value*: ButtonBorderStyle
+
+  ButtonChromeStyleValue* = ref object of NativeValue
+    value*: ButtonChromeStyle
+
   ColorValue* = ref object of NativeValue
     value*: Color
 
@@ -244,6 +250,12 @@ proc alignValue(alignment: Alignment): Value =
 proc justifyValue(justification: Justification): Value =
   nativeValue(JustificationValue(value: justification))
 
+proc buttonBorderStyleValue(style: ButtonBorderStyle): Value =
+  nativeValue(ButtonBorderStyleValue(value: style))
+
+proc buttonChromeStyleValue(style: ButtonChromeStyle): Value =
+  nativeValue(ButtonChromeStyleValue(value: style))
+
 proc colorValue(color: Color): Value =
   nativeValue(ColorValue(value: color))
 
@@ -338,6 +350,32 @@ proc asJustification(value: Value, fallback: Justification): Justification =
     JustificationValue(value.native).value
   else:
     fallback
+
+proc asButtonBorderStyle(value: Value,
+    fallback: ButtonBorderStyle): ButtonBorderStyle =
+  if value.kind == Native and value.native of ButtonBorderStyleValue:
+    ButtonBorderStyleValue(value.native).value
+  else:
+    case value.asString.normalize
+    of "none", "no", "off":
+      ButtonBorderNone
+    of "line", "default", "border":
+      ButtonBorderLine
+    else:
+      fallback
+
+proc asButtonChromeStyle(value: Value,
+    fallback: ButtonChromeStyle): ButtonChromeStyle =
+  if value.kind == Native and value.native of ButtonChromeStyleValue:
+    ButtonChromeStyleValue(value.native).value
+  else:
+    case value.asString.normalize
+    of "flat", "none", "plain":
+      ButtonChromeFlat
+    of "raised", "default", "chrome":
+      ButtonChromeRaised
+    else:
+      fallback
 
 proc asColor(value: Value, fallback: Color): Color =
   if value.kind == Native and value.native of ColorValue:
@@ -479,6 +517,8 @@ proc evalConfig(
       result.scrollX = value.isTruthy
     of "scrollY":
       result.scrollY = value.isTruthy
+    of "scrollWheel":
+      result.scrollWheel = value.isTruthy
     of "textScroll":
       result.textScroll = value.isTruthy
     of "lineNumbers":
@@ -495,6 +535,14 @@ proc evalConfig(
       result.fontSize = value.asNumber(result.fontSize.float64).int
     of "buttonPadding":
       result.buttonPadding = value.asInsets(result.buttonPadding)
+    of "buttonBorderStyle":
+      result.buttonBorderStyle = value.asButtonBorderStyle(
+          result.buttonBorderStyle)
+    of "buttonChromeStyle", "buttonStyle":
+      result.buttonChromeStyle = value.asButtonChromeStyle(
+          result.buttonChromeStyle)
+    of "buttonTextAlign", "textAlign":
+      result.buttonTextAlign = value.asJustification(result.buttonTextAlign)
     of "syntax", "syntaxHighlighter":
       result.syntax = value.asString
     of "background", "backgroundColor":
@@ -3031,6 +3079,9 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
         textScroll = config.textScroll,
         fontName = fontName,
         buttonPadding = config.buttonPadding,
+        buttonBorderStyle = config.buttonBorderStyle,
+        buttonChromeStyle = config.buttonChromeStyle,
+        buttonTextAlign = config.buttonTextAlign,
         style = config.style,
       )
     )
@@ -3285,6 +3336,14 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
   runtime.evaluator.env.define("JustifyStart", justifyValue(JustifyStart))
   runtime.evaluator.env.define("JustifyCenter", justifyValue(JustifyCenter))
   runtime.evaluator.env.define("JustifyEnd", justifyValue(JustifyEnd))
+  runtime.evaluator.env.define("ButtonBorderNone",
+      buttonBorderStyleValue(ButtonBorderNone))
+  runtime.evaluator.env.define("ButtonBorderLine",
+      buttonBorderStyleValue(ButtonBorderLine))
+  runtime.evaluator.env.define("ButtonChromeFlat",
+      buttonChromeStyleValue(ButtonChromeFlat))
+  runtime.evaluator.env.define("ButtonChromeRaised",
+      buttonChromeStyleValue(ButtonChromeRaised))
 
 proc init*(T: typedesc[NestOwlRuntime]): T =
   ## Create a runtime with a fresh evaluator and Nest's owl builtins.

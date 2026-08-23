@@ -354,8 +354,11 @@ proc alignRowChild(
   of AlignStretch:
     discard ui.constrain(child.top == parent.top + pad.top)
     if child.stretchHeight:
-      discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
-      discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
+      if allowOverflowY:
+        discard ui.constrain(child.bottom >= parent.bottom - pad.bottom)
+      else:
+        discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
+        discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
 
 proc alignColumnChild(
     ui: Layout,
@@ -384,8 +387,12 @@ proc alignColumnChild(
   of AlignStretch:
     discard ui.constrain(child.left == parent.left + pad.left)
     if child.stretchWidth:
-      discard ui.constrain(child.width == parent.width - pad.left -
-          pad.right)
+      if allowOverflowX:
+        discard ui.constrain(child.width >= parent.width - pad.left -
+            pad.right)
+      else:
+        discard ui.constrain(child.width == parent.width - pad.left -
+            pad.right)
 
 proc row*(
     ui: Layout,

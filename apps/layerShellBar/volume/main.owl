@@ -11,14 +11,16 @@ state "root":
   sliderID = (id "volume" "slider")
   status = ""
   percent = 0
+  rawPercent = ""
   draggedVolume = nothing
   defaultSink = ""
   sinks = list
 
-set status (shell (volumeDialogStatusCommand))
-set percent (shell (volumePercentCommand))
-set defaultSink (shell (volumeDefaultSinkCommand))
-set sinks (textLines (shell (volumeSinkListCommand)))
+set status (shellAsync (id "volume" "query" "status") (volumeDialogStatusCommand) FastPollInterval)
+set rawPercent (shellAsync (id "volume" "query" "percent") (volumePercentCommand) FastPollInterval)
+set percent (pick (= rawPercent "") percent rawPercent)
+set defaultSink (shellAsync (id "volume" "query" "default-sink") (volumeDefaultSinkCommand) StoragePollInterval)
+set sinks (textLines (shellAsync (id "volume" "query" "sinks") (volumeSinkListCommand) StoragePollInterval))
 
 events:
   when (keyPressed "escape"):
@@ -41,7 +43,7 @@ events:
     define:
       sourceID = (radioOptionID "volume-sources" sink)
     when (clicked sourceID):
-      shell (volumeSinkSwitchCommand sink)
+      shellAsync (id "volume" "action" "sink" sink) (volumeSinkSwitchCommand sink) ImmediateInterval
       set defaultSink sink
 
 animation (id "volume" "panel") (not (dialogClosing?)):

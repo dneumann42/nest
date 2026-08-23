@@ -1,0 +1,80 @@
+fun tree-node-toggle-id key path:
+  id (eval key) "toggle" (eval path)
+
+fun tree-node-row-id key path:
+  id (eval key) "row" (eval path)
+
+fun tree-node-open-id key path:
+  id (eval key) "open" (eval path)
+
+fun tree-indent-spacers key path depth:
+  when (> depth 0):
+    row (id (eval key) "indent" (eval path) (eval depth)):
+      width = fixed 14
+      height = fill
+    tree-indent-spacers key path (- (eval depth) 1)
+
+widget tree-expander key path expandable expanded:
+  define:
+    keyText = (eval key)
+    pathText = (eval path)
+    canExpand = (eval expandable)
+    isExpanded = (eval expanded)
+    toggleID = (tree-node-toggle-id keyText pathText)
+  if canExpand:
+    button toggleID (pick isExpanded "▾" "▸"):
+      width = fixed 24
+      height = fixed 24
+      fontName = "editor"
+      buttonPadding = 0
+  else:
+    label toggleID "":
+      width = fixed 24
+      height = fixed 24
+
+block-command tree-node-content key path icon labelText:
+  define:
+    keyText = (eval key)
+    pathText = (eval path)
+    iconText = (eval icon)
+    visibleLabel = (eval labelText)
+  if (empty? (statements block)):
+    row (id keyText "content" pathText):
+      width = fill
+      height = fit
+      gap = 6
+      alignItems = AlignCenter
+      label (id keyText "icon" pathText) iconText:
+        width = fixed 24
+        height = fit
+        fontName = "editor"
+      label (id keyText "label" pathText) visibleLabel:
+        width = fill
+        height = fit
+        textScroll = true
+  else:
+    eval block
+
+block-command tree-row key node:
+  define:
+    keyText = (eval key)
+    item = (eval node)
+    pathText = item.path
+    rowID = (tree-node-row-id keyText pathText)
+  row rowID:
+    width = fill
+    height = fit
+    gap = 0
+    padding = 2
+    alignItems = AlignCenter
+    background = (pick item.selected (color 43 83 106) (color 0 0 0 0))
+    tree-indent-spacers keyText pathText item.depth
+    tree-expander keyText pathText item.hasChildren item.expanded
+    tree-node-content keyText pathText item.icon item.name:
+      eval block
+
+widget tree-empty key message:
+  label (id (eval key) "empty") (eval message):
+    width = fill
+    height = fit
+    textScroll = true

@@ -10,7 +10,7 @@ state "root":
     {}:
       label = "Wallpaper"
       name = (id "menu" "wallpaper")
-      cmd = "$HOME/.nimble/bin/nest run $HOME/.workspace/nest/apps/wallpaperSwitcher"
+      cmd = "open-wallpaper-switcher"
       place = "left"
     {}:
       label = "Monitor On/Off"
@@ -79,7 +79,7 @@ events:
     requestCloseDialog ""
   for command (iter commands):
     when (clicked command.name):
-      if (= command.cmd "toggle-perf-overlay"):
+      if (or (= command.cmd "toggle-perf-overlay") (= command.cmd "open-wallpaper-switcher")):
         requestCloseDialog command.cmd
       else:
         shellLaunch command.cmd

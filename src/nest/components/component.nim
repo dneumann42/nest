@@ -15,6 +15,14 @@ type
     FlatCorners
     RoundedCorners
 
+  ButtonBorderStyle* = enum
+    ButtonBorderNone
+    ButtonBorderLine
+
+  ButtonChromeStyle* = enum
+    ButtonChromeFlat
+    ButtonChromeRaised
+
   ComponentStyle* = object
     hasBackground*: bool
     background*: Color

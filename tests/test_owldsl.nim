@@ -248,13 +248,18 @@ label (id "value") value:
     check not source.contains("cmd = \"~/.config/sway/scripts/monitors.sh pick\"")
     check not source.contains("cmd = \"foot sway-float-rules\"")
 
-  test "volume dialog status does not reuse bar percentage command":
+  test "volume dialog uses async dialog status command":
     let
       dialogSource = readFile("apps/layerShellBar/volume/main.owl")
       widgetSource = readFile("apps/layerShellBar/components/volume.owl")
 
-    check dialogSource.contains("set status (shell (volumeDialogStatusCommand))")
+    check dialogSource.contains(
+      "set status (shellAsync (id \"volume\" \"query\" \"status\") (volumeDialogStatusCommand) FastPollInterval)"
+    )
     check not dialogSource.contains("set status (shell (volumeStatusCommand))")
+    check not dialogSource.contains("set percent (shell (volumePercentCommand))")
+    check not dialogSource.contains("set defaultSink (shell (volumeDefaultSinkCommand))")
+    check not dialogSource.contains("set sinks (textLines (shell (volumeSinkListCommand)))")
     check widgetSource.contains("fun volumeDialogStatusCommand:")
     check widgetSource.contains("printf 'Muted'")
     check widgetSource.contains("printf 'Unmuted'")
@@ -288,16 +293,22 @@ label (id "value") value:
     check dialogSource.contains("shellLaunch (connectionEditorCommand)")
     check not dialogSource.contains("editor-action")
 
-  test "start popover can request perf overlay toggle":
+  test "start popover can request parent-owned actions":
     let
       menuSource = readFile("apps/layerShellBar/startPopover/main.owl")
       barSource = readFile("apps/layerShellBar/main.owl")
 
     check menuSource.contains("label = \"Perf Overlay\"")
     check menuSource.contains("cmd = \"toggle-perf-overlay\"")
-    check menuSource.contains("requestCloseDialog command.cmd")
+    check menuSource.contains("label = \"Wallpaper\"")
+    check menuSource.contains("cmd = \"open-wallpaper-switcher\"")
+    check menuSource.contains(
+      "if (or (= command.cmd \"toggle-perf-overlay\") (= command.cmd \"open-wallpaper-switcher\")):"
+    )
     check barSource.contains("when (= lastAction \"toggle-perf-overlay\"):")
     check barSource.contains("togglePerfOverlay")
+    check barSource.contains("when (= lastAction \"open-wallpaper-switcher\"):")
+    check barSource.contains("shellLaunch (wallpaperSwitcherCommand)")
 
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays

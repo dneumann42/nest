@@ -41,6 +41,9 @@ fun defaultConfig:
   {}:
     start-label = "Alatar"
 
+fun wallpaperSwitcherCommand:
+  "$HOME/.nimble/bin/nest run $HOME/.workspace/nest/apps/wallpaperSwitcher"
+
 state "root":
   cfg = defaultConfig
 
@@ -63,6 +66,9 @@ events:
     clearDialogResult "start"
   when (= lastAction "toggle-perf-overlay"):
     togglePerfOverlay
+    set lastAction ""
+  when (= lastAction "open-wallpaper-switcher"):
+    shellLaunch (wallpaperSwitcherCommand)
     set lastAction ""
   when (= lastAction "logout"):
     closeDialog "logout"

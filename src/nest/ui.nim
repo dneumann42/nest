@@ -58,6 +58,7 @@ type
     justifyContent*: Justification
     alignSelf*: Alignment
     scrollX*, scrollY*: bool
+    scrollWheel*: bool
     textScroll*: bool
     lineNumbers*: bool
     scrollbars*: bool
@@ -66,6 +67,9 @@ type
     fontName*: string
     fontSize*: int
     buttonPadding*: EdgeInsets
+    buttonBorderStyle*: ButtonBorderStyle
+    buttonChromeStyle*: ButtonChromeStyle
+    buttonTextAlign*: Justification
     syntax*: string
     style*: ComponentStyle
 
@@ -78,6 +82,7 @@ type
     alignItems: Alignment
     justifyContent: Justification
     scrollX, scrollY: bool
+    scrollWheel: bool
 
   UIContext = object
     update: UpdateContext
@@ -99,6 +104,7 @@ type
     retainedLayoutChildren: Table[WidgetID, seq[Widget]]
     retainedFloatingWidgets: seq[Widget]
     retainedScrollContainers: HashSet[WidgetID]
+    retainedScrollWheelContainers: HashSet[WidgetID]
     retainedFrameValid: bool
     retainedRealtimeWidgets: Table[WidgetID, ComponentWidget]
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
@@ -108,6 +114,7 @@ type
     animations: Table[WidgetID, AnimationState]
     liveAnimationIDs: HashSet[WidgetID]
     scrollContainers: HashSet[WidgetID]
+    scrollWheelContainers: HashSet[WidgetID]
     frameByID: Table[WidgetID, Frame]
     dialogResults: Table[string, string]
     liveWidgetIDs: HashSet[WidgetID]
@@ -203,6 +210,7 @@ proc cfg*(
     alignSelf = AlignAuto,
     scrollX = false,
     scrollY = false,
+    scrollWheel = true,
     textScroll = false,
     lineNumbers = false,
     scrollbars = true,
@@ -211,6 +219,9 @@ proc cfg*(
     fontName = "font",
     fontSize = 0,
     buttonPadding = -1.0,
+    buttonBorderStyle = ButtonBorderLine,
+    buttonChromeStyle = ButtonChromeRaised,
+    buttonTextAlign = JustifyCenter,
     syntax = "",
     style = ComponentStyle(),
     cornerStyle = FlatCorners,
@@ -232,11 +243,11 @@ proc cfg*(
   ## `padding` insets the content on every edge; `paddingLeft` and its
   ## siblings override single edges and default to unset. `alignItems` and
   ## `justifyContent` place the children, and `alignSelf` places the box
-  ## itself in its parent. `scrollX`, `scrollY` and `scrollbars` control
-  ## scrolling, `textScroll`, `lineNumbers`, `gutterMarkers`, `activeLine`
-  ## and `syntax` configure text widgets, `fontName` and `fontSize` pick the
-  ## font, `buttonPadding` overrides the padding inside buttons, and `style`
-  ## carries an explicit background or opacity.
+  ## itself in its parent. `scrollX`, `scrollY`, `scrollbars`, and `scrollWheel`
+  ## control scrolling, `textScroll`, `lineNumbers`, `gutterMarkers`,
+  ## `activeLine` and `syntax` configure text widgets, `fontName` and
+  ## `fontSize` pick the font, `buttonPadding` overrides the padding inside
+  ## buttons, and `style` carries an explicit background or opacity.
   var resolvedPadding = insets(padding)
   if paddingLeft == paddingLeft:
     resolvedPadding.left = paddingLeft
@@ -274,6 +285,7 @@ proc cfg*(
     alignSelf: alignSelf,
     scrollX: scrollX,
     scrollY: scrollY,
+    scrollWheel: scrollWheel,
     textScroll: textScroll,
     lineNumbers: lineNumbers,
     scrollbars: scrollbars,
@@ -282,6 +294,9 @@ proc cfg*(
     fontName: fontName,
     fontSize: fontSize,
     buttonPadding: insets(buttonPadding),
+    buttonBorderStyle: buttonBorderStyle,
+    buttonChromeStyle: buttonChromeStyle,
+    buttonTextAlign: buttonTextAlign,
     syntax: syntax,
     style: resolvedStyle,
   )
@@ -974,9 +989,9 @@ proc renderKey(kind: string, config: BoxConfig): string =
   kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
     paddingKey & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
-    $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars & "|" &
-    config.fontName & "|" & $config.fontSize & "|" & buttonPaddingKey & "|" &
-    config.syntax & styleKey
+    $config.scrollWheel & "|" & $config.textScroll & "|" & $config.lineNumbers &
+    "|" & $config.scrollbars & "|" & config.fontName & "|" & $config.fontSize &
+    "|" & buttonPaddingKey & "|" & config.syntax & styleKey
 
 proc styleRenderKey(style: ComponentStyle): string =
   $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity & "|" &
@@ -1678,6 +1693,7 @@ proc reset*(self: var UI) =
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
+  self.scrollWheelContainers.clear()
   self.idScopes.setLen(0)
   self.eventActiveWidgets.clear()
   self.eventSubmittedWidgets.clear()
@@ -1706,6 +1722,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.pendingLayouts.setLen(0)
   self.layoutChildren.clear()
   self.scrollContainers.clear()
+  self.scrollWheelContainers.clear()
   self.tooltipTexts.clear()
   self.liveWidgetIDs.clear()
   self.liveAnimationIDs.clear()
@@ -2003,7 +2020,7 @@ proc assignDirectStack(
     var fixedHeight = pending.gap * max(pending.children.len - 1, 0).toFloat
     var fillCount = 0
     for child in pending.children:
-      if child.heightPolicy.kind == WidgetFill and not pending.scrollY:
+      if child.heightPolicy.kind == WidgetFill:
         inc fillCount
       else:
         fixedHeight += self.preferredHeight(child, pendingByParent)
@@ -2024,8 +2041,12 @@ proc assignDirectStack(
         parentFrame.y + pending.padding.top
     for child in pending.children:
       let childHeight =
-        if child.heightPolicy.kind == WidgetFill and not pending.scrollY:
-          fillHeight.clampPolicy(child.heightPolicy)
+        if child.heightPolicy.kind == WidgetFill:
+          let preferred = self.preferredHeight(child, pendingByParent)
+          (if pending.scrollY: max(fillHeight,
+              preferred) else: fillHeight).clampPolicy(
+            child.heightPolicy
+          )
         else:
           self.preferredHeight(child, pendingByParent)
       var childWidth =
@@ -2059,7 +2080,7 @@ proc assignDirectStack(
     var fixedWidth = pending.gap * max(pending.children.len - 1, 0).toFloat
     var fillCount = 0
     for child in pending.children:
-      if child.widthPolicy.kind == WidgetFill and not pending.scrollX:
+      if child.widthPolicy.kind == WidgetFill:
         inc fillCount
       else:
         fixedWidth += self.preferredWidth(child, pendingByParent)
@@ -2079,8 +2100,12 @@ proc assignDirectStack(
         parentFrame.x + pending.padding.left
     for child in pending.children:
       let childWidth =
-        if child.widthPolicy.kind == WidgetFill and not pending.scrollX:
-          fillWidth.clampPolicy(child.widthPolicy)
+        if child.widthPolicy.kind == WidgetFill:
+          let preferred = self.preferredWidth(child, pendingByParent)
+          (if pending.scrollX: max(fillWidth,
+              preferred) else: fillWidth).clampPolicy(
+            child.widthPolicy
+          )
         else:
           self.preferredWidth(child, pendingByParent)
       var childHeight =
@@ -2169,6 +2194,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       justifyContent: JustifyStart,
       scrollX: false,
       scrollY: false,
+      scrollWheel: true,
     )
     self.frames[0].children.setLen(0)
 
@@ -2208,6 +2234,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
     self.layoutChildren[pending.parent.id] = pending.children
     if pending.scrollX or pending.scrollY:
       self.scrollContainers.incl pending.parent.id
+      if pending.scrollWheel:
+        self.scrollWheelContainers.incl pending.parent.id
     if pending.parent.id in directParents:
       continue
     case pending.kind
@@ -2330,6 +2358,7 @@ proc endLayout*(self: var UI): bool {.discardable.} =
     self.retainedFloatingWidgets = self.floatingWidgets
     self.retainedModalWidgets = self.modalWidgets
     self.retainedScrollContainers = self.scrollContainers
+    self.retainedScrollWheelContainers = self.scrollWheelContainers
     self.retainedFrameValid = true
 
 proc addChild(self: var UI, child: Widget) =
@@ -2654,7 +2683,8 @@ proc updateScrollbarDrag(self: var UI, parent: Widget,
   let
     overscrollX = overscrollLimit(parent.frame.width)
     overscrollY = overscrollLimit(parent.frame.height)
-  if parent.frame.contains(context.mouseX, context.mouseY):
+  if parent.frame.contains(context.mouseX, context.mouseY) and
+      parent.id in self.scrollWheelContainers:
     if state.maxY > 0 and context.mouseWheelY != 0:
       state.targetY = (state.targetY - context.mouseWheelY * scrollWheelStep(
         )).clamp(
@@ -2984,12 +3014,14 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
     layoutChildren = self.layoutChildren
     floatingWidgets = self.floatingWidgets
     scrollContainers = self.scrollContainers
+    scrollWheelContainers = self.scrollWheelContainers
   self.root = self.retainedRoot
   self.components = self.retainedComponents
   self.componentByID = self.retainedComponentByID
   self.layoutChildren = self.retainedLayoutChildren
   self.floatingWidgets = self.retainedFloatingWidgets
   self.scrollContainers = self.retainedScrollContainers
+  self.scrollWheelContainers = self.retainedScrollWheelContainers
   self.advanceAnimations()
   self.context.draw.dirtyAll = true
   self.evaluateTooltipHover()
@@ -3000,6 +3032,7 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
   self.layoutChildren = layoutChildren
   self.floatingWidgets = floatingWidgets
   self.scrollContainers = scrollContainers
+  self.scrollWheelContainers = scrollWheelContainers
   if result:
     if self.context.draw.hasRedrawRequest:
       self.requestRedrawAfterSafe(self.context.draw.redrawDelayMs)
@@ -3016,12 +3049,14 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
     layoutChildren = self.layoutChildren
     floatingWidgets = self.floatingWidgets
     scrollContainers = self.scrollContainers
+    scrollWheelContainers = self.scrollWheelContainers
   self.root = self.retainedRoot
   self.components = self.retainedComponents
   self.componentByID = self.retainedComponentByID
   self.layoutChildren = self.retainedLayoutChildren
   self.floatingWidgets = self.retainedFloatingWidgets
   self.scrollContainers = self.retainedScrollContainers
+  self.scrollWheelContainers = self.retainedScrollWheelContainers
   self.advanceAnimations()
 
   let
@@ -3057,6 +3092,7 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
   self.layoutChildren = layoutChildren
   self.floatingWidgets = floatingWidgets
   self.scrollContainers = scrollContainers
+  self.scrollWheelContainers = scrollWheelContainers
 
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   ## Arrange the current parent's children in a row.
@@ -3074,6 +3110,7 @@ proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
     justifyContent: config.justifyContent,
     scrollX: config.scrollX,
     scrollY: config.scrollY,
+    scrollWheel: config.scrollWheel,
   )
 
 proc column*(self: var UI, config: BoxConfig) {.layoutOnly.} =
@@ -3092,6 +3129,7 @@ proc column*(self: var UI, config: BoxConfig) {.layoutOnly.} =
     justifyContent: config.justifyContent,
     scrollX: config.scrollX,
     scrollY: config.scrollY,
+    scrollWheel: config.scrollWheel,
   )
 
 proc overlay*(self: var UI, config: BoxConfig) {.layoutOnly.} =
@@ -3110,6 +3148,7 @@ proc overlay*(self: var UI, config: BoxConfig) {.layoutOnly.} =
     justifyContent: config.justifyContent,
     scrollX: config.scrollX,
     scrollY: config.scrollY,
+    scrollWheel: config.scrollWheel,
   )
 
 template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
@@ -3609,6 +3648,9 @@ proc button*(
     textScroll = false,
     fontName = "font",
     buttonPadding = insets(-1.0),
+    buttonBorderStyle = ButtonBorderLine,
+    buttonChromeStyle = ButtonChromeRaised,
+    buttonTextAlign = JustifyCenter,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Declare a button with the id `id` labelled `label`.
@@ -3624,10 +3666,12 @@ proc button*(
     renderKey("button:" & label & ":" & $textScroll & ":" & fontName & ":" &
         $buttonPadding.left & "," & $buttonPadding.top & "," &
         $buttonPadding.right & "," & $buttonPadding.bottom, width, height,
-        alignSelf) & "|" &
+        alignSelf) & "|" & $buttonBorderStyle & "|" & $buttonChromeStyle & "|" &
+      $buttonTextAlign & "|" &
       styleRenderKey(style),
   )
-  let btn = Button.new(label, textScroll, fontName, buttonPadding)
+  let btn = Button.new(label, textScroll, fontName, buttonPadding,
+      buttonBorderStyle, buttonChromeStyle, buttonTextAlign)
   btn.style = style
   ui.attach(box, Component(btn))
   ui.addChild(box)
@@ -3642,6 +3686,9 @@ proc button*(
     textScroll = false,
     fontName = "font",
     buttonPadding: float64,
+    buttonBorderStyle = ButtonBorderLine,
+    buttonChromeStyle = ButtonChromeRaised,
+    buttonTextAlign = JustifyCenter,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Declare a button with the same `buttonPadding` on every edge.
@@ -3654,7 +3701,10 @@ proc button*(
     textScroll,
     fontName,
     insets(buttonPadding),
-    style,
+    buttonBorderStyle = buttonBorderStyle,
+    buttonChromeStyle = buttonChromeStyle,
+    buttonTextAlign = buttonTextAlign,
+    style = style,
   )
 
 proc menu*(
@@ -4467,12 +4517,17 @@ proc button*(
     height = fit(),
     alignSelf = AlignAuto,
     textScroll = false,
+    buttonBorderStyle = ButtonBorderLine,
+    buttonChromeStyle = ButtonChromeRaised,
+    buttonTextAlign = JustifyCenter,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.button(
     ui.nextAutoID(), label, width, height, alignSelf,
-    textScroll = textScroll, style = style
+    textScroll = textScroll, buttonBorderStyle = buttonBorderStyle,
+    buttonChromeStyle = buttonChromeStyle, buttonTextAlign = buttonTextAlign,
+    style = style
   )
 
 proc menu*(

@@ -12,23 +12,33 @@ type Button* = ref object of Interactive
   textScroll: bool
   fontName: string
   padding: EdgeInsets
+  borderStyle: ButtonBorderStyle
+  chromeStyle: ButtonChromeStyle
+  textAlign: Justification
 
 proc drawBorder(self: Button, f: Frame, c: Color) =
   self.styledLineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), c)
 
 proc new*(T: typedesc[Button], label = "", textScroll = false,
-    fontName = "font", padding = insets(-1.0)): T =
+    fontName = "font", padding = insets(-1.0),
+    borderStyle = ButtonBorderLine, chromeStyle = ButtonChromeRaised,
+    textAlign = JustifyCenter): T =
   ## Create a button component labelled `label`.
   ##
   ## `textScroll` lets a label wider than the button scroll instead of being
   ## clipped, `fontName` picks a loaded font, and `padding` overrides the
   ## default insets around the text; negative insets keep the default.
-  T(label: label, textScroll: textScroll, fontName: fontName, padding: padding)
+  T(label: label, textScroll: textScroll, fontName: fontName, padding: padding,
+      borderStyle: borderStyle, chromeStyle: chromeStyle,
+      textAlign: textAlign)
 
 proc new*(T: typedesc[Button], label: string, textScroll: bool,
-    fontName: string, padding: float64): T =
+    fontName: string, padding: float64,
+    borderStyle = ButtonBorderLine, chromeStyle = ButtonChromeRaised,
+    textAlign = JustifyCenter): T =
   ## Create a button component with the same `padding` on every edge.
-  T.new(label, textScroll, fontName, insets(padding))
+  T.new(label, textScroll, fontName, insets(padding), borderStyle, chromeStyle,
+      textAlign)
 
 proc leftPadding(self: Button): float64 =
   if self.padding.left < 0: ButtonPaddingX.toFloat else: self.padding.left
@@ -73,8 +83,9 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     hot = ctx.hot(widget.id)
     active = ctx.active(widget.id)
     bounds = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
-  self.drawShadow(bounds)
-  if not self.style.hasShadow:
+  if self.chromeStyle == ButtonChromeRaised:
+    self.drawShadow(bounds)
+  if self.chromeStyle == ButtonChromeRaised and not self.style.hasShadow:
     self.styledFillRect(
       rect(f.x.toInt + 2, f.y.toInt + 2, f.width.toInt, f.height.toInt),
       color(0, 0, 0))
@@ -89,7 +100,7 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     else:
       ctx.palette.background,
   )
-  if self.style.cornerStyle == FlatCorners:
+  if self.chromeStyle == ButtonChromeRaised and self.style.cornerStyle == FlatCorners:
     drawLine(
       f.x.toInt + 1,
       f.y.toInt + 1,
@@ -97,22 +108,33 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       f.y.toInt + 1,
       ctx.palette.buttonHighlight,
     )
-  self.drawBorder(
-    f,
-    if active and hot:
-      ctx.palette.buttonBorderActive
-    elif hot:
-      ctx.palette.buttonBorderHot
-    else:
-      ctx.palette.buttonBorder,
-  )
+  if self.borderStyle == ButtonBorderLine:
+    self.drawBorder(
+      f,
+      if active and hot:
+        ctx.palette.buttonBorderActive
+      elif hot:
+        ctx.palette.buttonBorderHot
+      else:
+        ctx.palette.buttonBorder,
+    )
   let
     (font, _) = ctx.resources.get(self.fontName)
     textExtent = ctx.resources.measureText(self.fontName, self.label)
     paddingLeft = self.leftPadding.toInt
     paddingTop = self.topPadding.toInt
     paddingRight = self.rightPadding.toInt
-    textX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2, paddingLeft)
+    centeredTextX = f.x.toInt + max((f.width.toInt - textExtent.width) div 2,
+        paddingLeft)
+    textX =
+      case self.textAlign
+      of JustifyEnd:
+        f.x.toInt + max(f.width.toInt - textExtent.width - paddingRight,
+            paddingLeft)
+      of JustifyCenter:
+        centeredTextX
+      else:
+        f.x.toInt + paddingLeft
     textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, paddingTop)
     textWidth = max(f.width.toInt - paddingLeft - paddingRight, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:

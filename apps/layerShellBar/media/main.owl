@@ -18,6 +18,8 @@ state "root":
   length = ""
   position = 0
   lengthSeconds = 0
+  rawPosition = ""
+  rawLengthSeconds = ""
   seekValue = nothing
   url = ""
   art = ""
@@ -29,8 +31,10 @@ set album (mediaCachedQuery (id "media" "query" "album") "popover-album" "metada
 set status (mediaCachedQuery (id "media" "query" "status") "popover-status" "status 2>/dev/null" "Stopped")
 set player (mediaCachedQuery (id "media" "query" "player") "popover-player" "metadata --format '{{playerName}}' 2>/dev/null" "")
 set length (mediaCachedQuery (id "media" "query" "length") "popover-length" "metadata --format '{{mpris:length}}' 2>/dev/null" "")
-set lengthSeconds (mediaLengthSeconds (id "media" "query" "length-seconds"))
-set position (mediaPositionSeconds (id "media" "query" "position"))
+set rawLengthSeconds (mediaLengthSeconds (id "media" "query" "length-seconds"))
+set lengthSeconds (pick (= rawLengthSeconds "") lengthSeconds rawLengthSeconds)
+set rawPosition (mediaPositionSeconds (id "media" "query" "position"))
+set position (pick (= rawPosition "") position rawPosition)
 set url (mediaCachedQuery (id "media" "query" "url") "popover-url" "metadata --format '{{xesam:url}}' 2>/dev/null" "")
 set art (mediaArtwork (id "media" "query" "art"))
 when (= status statusOverride):
