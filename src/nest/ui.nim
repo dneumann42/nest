@@ -9,6 +9,22 @@ const
   TooltipDelayMs = 250
   TooltipCursorInset = 4
 
+var redrawTraceCounts = initTable[string, int]()
+
+proc redrawTraceEnabled(): bool =
+  getEnv("NEST_REDRAW_TRACE").normalize in ["1", "true", "yes", "on"]
+
+proc traceRedrawRequest(ms, ticks: int,
+    loc: tuple[filename: string, line: int, column: int]) =
+  if not redrawTraceEnabled():
+    return
+  let key = loc.filename & ":" & $loc.line & ":" & $loc.column & ":" & $ms
+  let count = redrawTraceCounts.getOrDefault(key) + 1
+  redrawTraceCounts[key] = count
+  if count <= 5 or count mod 60 == 0:
+    echo "[nest redraw trace] " & loc.filename & ":" & $loc.line & ":" &
+      $loc.column & " ms=" & $ms & " targetTicks=" & $ticks & " count=" & $count
+
 type
   ComponentWidget = tuple[component: Component, widget: Widget]
   WidgetSlot* = seq[Widget]
@@ -62,6 +78,7 @@ type
     textScroll*: bool
     lineNumbers*: bool
     scrollbars*: bool
+    readOnly*: bool
     gutterMarkers*: HashSet[int]
     activeLine*: int
     fontName*: string
@@ -97,6 +114,7 @@ type
     components*: seq[ComponentWidget]
     floatingWidgets: seq[Widget]
     floatingBelowAnchors: Table[WidgetID, WidgetID]
+    centeredFloatingWidgets: HashSet[WidgetID]
     componentByID: Table[WidgetID, Component]
     retainedRoot: Widget
     retainedComponents: seq[ComponentWidget]
@@ -139,6 +157,8 @@ type
     retainedModalWidgets: HashSet[WidgetID]
     windowDragHandle: WidgetID
     windowDragLastX, windowDragLastY: int
+    resizeDragHandle: WidgetID
+    resizeDragLastX, resizeDragLastY: int
     scheduledRedrawTicks: int
     hasScheduledRedraw: bool
     inputPending: bool
@@ -214,6 +234,7 @@ proc cfg*(
     textScroll = false,
     lineNumbers = false,
     scrollbars = true,
+    readOnly = false,
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
     fontName = "font",
@@ -289,6 +310,7 @@ proc cfg*(
     textScroll: textScroll,
     lineNumbers: lineNumbers,
     scrollbars: scrollbars,
+    readOnly: readOnly,
     gutterMarkers: gutterMarkers,
     activeLine: activeLine,
     fontName: fontName,
@@ -485,7 +507,8 @@ proc wantsTextInput*(self: UI): bool =
   ## should be asked for text input.
   self.context.draw.focusedWidget != InvalidWidgetID
 
-proc requestRedrawAfter*(self: var UI, ms: int) =
+proc requestRedrawAfter*(self: var UI, ms: int,
+    loc: tuple[filename: string, line: int, column: int] = instantiationInfo()) =
   ## Ask for another frame in at most `ms` milliseconds.
   ##
   ## The soonest outstanding request wins, so an animation can keep asking
@@ -499,10 +522,12 @@ proc requestRedrawAfter*(self: var UI, ms: int) =
   if not self.hasScheduledRedraw or ticks < self.scheduledRedrawTicks:
     self.scheduledRedrawTicks = ticks
     self.hasScheduledRedraw = true
+    traceRedrawRequest(ms, ticks, loc)
 
-proc requestRedrawAfterSafe(self: var UI, ms: int) {.raises: [].} =
+proc requestRedrawAfterSafe(self: var UI, ms: int,
+    loc: tuple[filename: string, line: int, column: int] = instantiationInfo()) {.raises: [].} =
   try:
-    self.requestRedrawAfter(ms)
+    self.requestRedrawAfter(ms, loc)
   except Exception:
     discard
 
@@ -995,8 +1020,9 @@ proc renderKey(kind: string, config: BoxConfig): string =
     paddingKey & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
     $config.scrollWheel & "|" & $config.textScroll & "|" & $config.lineNumbers &
-    "|" & $config.scrollbars & "|" & config.fontName & "|" & $config.fontSize &
-    "|" & buttonPaddingKey & "|" & config.syntax & styleKey
+    "|" & $config.scrollbars & "|" & $config.readOnly & "|" & config.fontName &
+    "|" & $config.fontSize & "|" & buttonPaddingKey & "|" & config.syntax &
+    styleKey
 
 proc styleRenderKey(style: ComponentStyle): string =
   $style.hasBackground & "|" & $style.background & "|" & $style.hasOpacity & "|" &
@@ -1491,6 +1517,36 @@ proc dragWindow*(self: var UI, id: WidgetID) =
     self.windowDragLastX = self.context.update.mouseX
     self.windowDragLastY = self.context.update.mouseY
 
+proc resizeFloating*(self: var UI, id: WidgetID, width, height: var float64,
+    minWidth = 240.0, minHeight = 160.0, maxWidth = Inf, maxHeight = Inf) =
+  ## Resize a floating surface by dragging the widget `id`.
+  if self.phase != EventPhase:
+    return
+  if not self.pointerReaches(id):
+    return
+  let located = self.widgetFrame(id)
+  if self.context.update.mouseLeftPressed and located.ok and
+      located.frame.pointerContains(self.context.update.mouseX,
+          self.context.update.mouseY):
+    self.resizeDragHandle = id
+    self.resizeDragLastX = self.context.update.mouseX
+    self.resizeDragLastY = self.context.update.mouseY
+  if self.resizeDragHandle != id:
+    return
+  if not self.context.update.mouseLeftDown:
+    self.resizeDragHandle = InvalidWidgetID
+    return
+  let
+    dx = self.context.update.mouseX - self.resizeDragLastX
+    dy = self.context.update.mouseY - self.resizeDragLastY
+  if dx != 0 or dy != 0:
+    width = (width + dx.toFloat).clamp(minWidth, maxWidth)
+    height = (height + dy.toFloat).clamp(minHeight, maxHeight)
+    self.resizeDragLastX = self.context.update.mouseX
+    self.resizeDragLastY = self.context.update.mouseY
+    self.markAllDirty()
+    self.requestRedrawAfter(0)
+
 proc rightClicked*(self: UI, id: WidgetID): bool =
   ## Test whether the right button was pressed over the widget `id` this
   ## frame. Only reports during the event phase.
@@ -1621,6 +1677,26 @@ proc keyPressed*(self: UI, name: string): bool =
     if wanted == "esc" and keyName == "keyesc":
       return true
 
+proc keyComboPressed*(self: UI, name: string, ctrl = false, alt = false,
+    shift = false, gui = false): bool =
+  ## Test whether `name` was pressed with exactly the requested modifiers.
+  if self.phase != EventPhase:
+    return false
+  let wanted = normalizedKeyName(name)
+  for input in self.context.update.keyInputs:
+    let keyName = normalizedKeyName($input.key)
+    if keyName != wanted and keyName != "key" & wanted:
+      continue
+    if ctrl != (CtrlPressed in input.mods):
+      continue
+    if alt != (AltPressed in input.mods):
+      continue
+    if shift != (ShiftPressed in input.mods):
+      continue
+    if gui != (GuiPressed in input.mods):
+      continue
+    return true
+
 proc listKey*(index: int, value: string): string =
   ## Return the list key identifying the item `value` at `index`.
   ##
@@ -1689,6 +1765,7 @@ proc reset*(self: var UI) =
   self.floatingWidgets.setLen(0)
   self.modalWidgets.clear()
   self.floatingBelowAnchors.clear()
+  self.centeredFloatingWidgets.clear()
   self.componentByID.clear()
   self.liveAnimationIDs.clear()
   if self.intrinsicByID.isNil:
@@ -1719,6 +1796,7 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.components.setLen(0)
   self.floatingWidgets.setLen(0)
   self.floatingBelowAnchors.clear()
+  self.centeredFloatingWidgets.clear()
   self.componentByID.clear()
   if self.intrinsicByID.isNil:
     self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
@@ -2230,6 +2308,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       directParents.incl pending.parent.id
     elif self.floatingBelowAnchors.hasKey(pending.parent.id):
       directParents.incl pending.parent.id
+    elif pending.parent.id in self.centeredFloatingWidgets:
+      directParents.incl pending.parent.id
     elif pending.parent.id in scrollParentIDs or
         pending.parent.id.hasScrollAncestor():
       directParents.incl pending.parent.id
@@ -2339,6 +2419,18 @@ proc endLayout*(self: var UI): bool {.discardable.} =
               width, 0.0))
           y = min(max(y, rootFrame.y), rootFrame.y + max(rootFrame.height -
               height, 0.0))
+          parent.setFrame(Frame(x: x, y: y, width: width, height: height))
+          self.assignDirectStack(pendingByParent[parentID], pendingByParent)
+        elif parentID in self.centeredFloatingWidgets:
+          let
+            parent = pendingByParent[parentID].parent
+            rootFrame = self.root.frame
+            width = min(self.preferredWidth(parent, pendingByParent),
+                rootFrame.width)
+            height = min(self.preferredHeight(parent, pendingByParent),
+                rootFrame.height)
+            x = rootFrame.x + max((rootFrame.width - width) / 2.0, 0.0)
+            y = rootFrame.y + max((rootFrame.height - height) / 2.0, 0.0)
           parent.setFrame(Frame(x: x, y: y, width: width, height: height))
           self.assignDirectStack(pendingByParent[parentID], pendingByParent)
         elif parentID in self.scrollContainers:
@@ -3425,19 +3517,50 @@ template modalDialog*(
         let component {.gensym.} = Card.new()
         component.style = config.style
         self.attach(layoutParent, Component(component))
-        discard self.layout.constrain(layoutParent.left >= self.root.left)
-        discard self.layout.constrain(layoutParent.top >= self.root.top)
-        discard self.layout.constrain(layoutParent.right <= self.root.right)
-        discard self.layout.constrain(layoutParent.bottom <= self.root.bottom)
-        self.layout.alignCenterX(layoutParent, self.root)
-        self.layout.alignCenterY(layoutParent, self.root)
         self.floatingWidgets.add layoutParent
+        self.centeredFloatingWidgets.incl id
         self.modalWidgets.incl id
         self.pushLayout(layoutParent)
         body
         discard
         self.column(config)
         discard self.popFloatingLayout()
+
+template resizableModalDialog*(
+    self: var UI,
+    dialogWidgetID: WidgetID,
+    open: bool,
+    dialogWidth: var float64,
+    dialogHeight: var float64,
+    minWidth: float64,
+    minHeight: float64,
+    maxWidth: float64,
+    maxHeight: float64,
+    config: BoxConfig,
+    body: untyped,
+) =
+  ## Declare a centered modal dialog with a bottom-right resize handle.
+  block:
+    if open:
+      let dialogID {.gensym.} = dialogWidgetID
+      let handleID {.gensym.} = self.id(dialogID, "resize")
+      if self.phase == EventPhase:
+        body
+        discard
+        self.resizeFloating(handleID, dialogWidth, dialogHeight, minWidth, minHeight,
+            maxWidth, maxHeight)
+      else:
+        dialogWidth = dialogWidth.clamp(minWidth, maxWidth)
+        dialogHeight = dialogHeight.clamp(minHeight, maxHeight)
+        var dialogConfig {.gensym.} = config
+        dialogConfig.width = fixed(dialogWidth)
+        dialogConfig.height = fixed(dialogHeight)
+        self.modalDialog(dialogID, true, dialogConfig):
+          body
+          self.row(self.id(dialogID, "resize-row"), cfg(width = fill(), height = fit(),
+              gap = 0, justifyContent = JustifyEnd)):
+            discard self.button(handleID, "◢", width = fixed(28),
+                height = fixed(24), buttonPadding = 0)
 
 template menuBar*(self: var UI, id: WidgetID, config: BoxConfig,
     body: untyped) =
@@ -4449,6 +4572,7 @@ proc textEditor*(
     alignSelf = AlignAuto,
     lineNumbers = false,
     scrollbars = true,
+    readOnly = false,
     syntax = "",
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
@@ -4468,6 +4592,7 @@ proc textEditor*(
       singleLine = false,
       lineNumbers = lineNumbers,
       scrollbars = scrollbars,
+      readOnly = readOnly,
       syntax = syntax,
       gutterMarkers = gutterMarkers,
       activeLine = activeLine,
@@ -4478,7 +4603,8 @@ proc textEditor*(
     renderKey(
       "textEditor:" & $state.textVersion & ":" & $state.cursor & ":" &
         $state.selectionAnchor & ":" & fontName & ":" & $lineNumbers & ":" &
-        $scrollbars & ":" & syntax & ":" & $gutterMarkers & ":" & $activeLine,
+        $scrollbars & ":" & $readOnly & ":" & syntax & ":" & $gutterMarkers &
+        ":" & $activeLine,
       width,
       height,
       alignSelf,
@@ -4741,6 +4867,7 @@ proc textEditor*(
     alignSelf = AlignAuto,
     lineNumbers = false,
     scrollbars = true,
+    readOnly = false,
     syntax = "",
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
@@ -4748,5 +4875,5 @@ proc textEditor*(
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.textEditor(
     ui.nextAutoID(), state, width, height, fontName, alignSelf, lineNumbers,
-    scrollbars, syntax, gutterMarkers, activeLine
+    scrollbars, readOnly, syntax, gutterMarkers, activeLine
   )

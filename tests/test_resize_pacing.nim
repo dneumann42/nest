@@ -62,16 +62,16 @@ suite "resize pacing":
     check parseResizeStrategy("stretch") == rsStretch
     check parseResizeStrategy("retained") == rsRetained
     check parseResizeStrategy("pump") == rsPump
-    check parseResizeStrategy("") == rsStretch
+    check parseResizeStrategy("") == rsPump
     check parseResizeStrategy("unknown") == rsStretch
 
-  test "runtime environment defaults to event driven resize presents":
+  test "runtime environment defaults to pumped resize presents":
     let
       hadOriginal = existsEnv("NEST_RESIZE_STRATEGY")
       original = getEnv("NEST_RESIZE_STRATEGY")
     delEnv("NEST_RESIZE_STRATEGY")
     try:
-      check resizeStrategyFromEnv() == rsStretch
+      check resizeStrategyFromEnv() == rsPump
     finally:
       if hadOriginal:
         putEnv("NEST_RESIZE_STRATEGY", original)

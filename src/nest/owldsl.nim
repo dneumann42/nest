@@ -460,6 +460,60 @@ proc menuKey(key: string): string =
 proc asByte(value: Value, fallback = 0): uint8 =
   uint8(value.asNumber(fallback.float64).int.clamp(0, 255))
 
+proc syntaxColor(value: Value): Color =
+  case value.kind
+  of Native:
+    value.asColor(color(241, 246, 247))
+  of Dictionary:
+    color(
+      value.entries.getOrDefault("r").asByte(241),
+      value.entries.getOrDefault("g").asByte(246),
+      value.entries.getOrDefault("b").asByte(247),
+      value.entries.getOrDefault("a").asByte(255),
+    )
+  else:
+    color(241, 246, 247)
+
+proc valueText(value: Value, key: string): string =
+  if value.kind == Dictionary and key in value.entries and
+      value.entries[key].kind == Text:
+    value.entries[key].text
+  else:
+    ""
+
+proc syntaxRule(value: Value): SyntaxRule =
+  if value.kind != Dictionary:
+    return
+  let kind = value.valueText("kind")
+  result.kind =
+    case kind
+    of "word":
+      SyntaxWord
+    of "starts-with":
+      SyntaxStartsWith
+    of "contains":
+      SyntaxContains
+    of "span":
+      SyntaxSpan
+    else:
+      SyntaxRegex
+  result.pattern = value.valueText("pattern")
+  result.stopPattern = value.valueText("stop")
+  if "color" in value.entries:
+    result.color = value.entries["color"].syntaxColor()
+  else:
+    result.color = color(241, 246, 247)
+
+proc syntaxDefinition(value: Value): SyntaxDefinition =
+  if value.kind != Dictionary:
+    return
+  result.name = value.valueText("name")
+  if "rules" in value.entries and value.entries["rules"].kind == List:
+    for item in value.entries["rules"].items:
+      let rule = item.syntaxRule()
+      if rule.pattern.len > 0:
+        result.rules.add rule
+
 proc mixChannel(a, b: uint8, amount: float64): uint8 =
   uint8((a.float64 + (b.float64 - a.float64) * amount).round.int.clamp(0, 255))
 
@@ -525,6 +579,8 @@ proc evalConfig(
       result.lineNumbers = value.isTruthy
     of "scrollbars":
       result.scrollbars = value.isTruthy
+    of "readOnly":
+      result.readOnly = value.isTruthy
     of "gutterMarkers":
       result.gutterMarkers = value.asIntSet
     of "activeLine":
@@ -1784,6 +1840,24 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       runtime.requireUi().markAllDirty()
     boolean(pressed)
 
+  runtime.evaluator.native "keyComboPressed":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len < 1 or values.len > 5:
+      raise newException(EvaluatorError,
+          "keyComboPressed expects key name and optional ctrl, alt, shift, gui")
+    let pressed = runtime.requireUi().keyComboPressed(
+      values[0].asString,
+      ctrl = values.len > 1 and values[1].isTruthy,
+      alt = values.len > 2 and values[2].isTruthy,
+      shift = values.len > 3 and values[3].isTruthy,
+      gui = values.len > 4 and values[4].isTruthy,
+    )
+    if pressed:
+      runtime.requireUi().markAllDirty()
+    boolean(pressed)
+
   runtime.evaluator.native "external":
     discard layout
     discard bodyNodes
@@ -2344,6 +2418,18 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       runtime.editorStates[key] = EditorState.new("")
     let replacement = values[1].asString
     runtime.editorStates[key].replaceText(replacement)
+    nothing()
+
+  runtime.evaluator.native "setEditorSyntax":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "setEditorSyntax expects editor id and syntax")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.editorStates:
+      runtime.editorStates[key] = EditorState.new("")
+    runtime.editorStates[key].setSyntax(values[1].syntaxDefinition())
     nothing()
 
   runtime.evaluator.native "clearEditor":
@@ -3247,6 +3333,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       alignSelf = config.alignSelf,
       lineNumbers = config.lineNumbers,
       scrollbars = config.scrollbars,
+      readOnly = config.readOnly,
       syntax = config.syntax,
       gutterMarkers = config.gutterMarkers,
       activeLine = config.activeLine,

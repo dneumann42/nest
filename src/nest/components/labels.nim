@@ -1,6 +1,11 @@
+import std/[os, strutils]
+
 import ../[resources, widgets2]
 import component
 import nest/[coords, screen]
+
+let AnimateTextScroll = getEnv("NEST_TEXT_SCROLL_ANIMATION").normalize in
+  ["1", "true", "yes", "on"]
 
 type Label* = ref object of Component
   text: string
@@ -25,9 +30,9 @@ proc new*(
 ): T =
   ## Create a text label.
   ##
-  ## `fg` together with `hasColor` overrides the palette's text colour, and
-  ## `textScroll` lets text wider than the widget scroll rather than be
-  ## clipped.
+  ## `fg` together with `hasColor` overrides the palette's text colour.
+  ## `textScroll` clips text wider than the widget; marquee animation is
+  ## opt-in with NEST_TEXT_SCROLL_ANIMATION=1.
   T(text: text, fontName: fontName, fg: fg, hasColor: hasColor, textScroll: textScroll)
 
 proc new*(T: typedesc[DiagnosticLabel], text = "", fontName = "font", fg = color(0, 0, 0, 0), hasColor = false): T =
@@ -73,15 +78,28 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
   if self.style.hasBackground:
     self.styledFillRect(bounds, self.styledBackground(ctx.palette.panelMuted))
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
-    ctx.requestRedrawAfter(33)
-    let
-      gap = 32
-      cycle = textExtent.width + gap
-      offset = (ctx.ticks div 24) mod cycle
+    let offset =
+      if AnimateTextScroll:
+        ctx.requestRedrawAfter(33)
+        let
+          gap = 32
+          cycle = textExtent.width + gap
+        (ctx.ticks div 24) mod cycle
+      else:
+        0
     saveState()
     setClipRect(ctx.clippedRect(rect(f.x.toInt, f.y.toInt, textWidth, f.height.toInt)))
     discard drawText(Font(font), f.x.toInt - offset, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
-    discard drawText(Font(font), f.x.toInt - offset + cycle, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
+    if AnimateTextScroll:
+      let gap = 32
+      discard drawText(
+        Font(font),
+        f.x.toInt - offset + textExtent.width + gap,
+        f.y.toInt,
+        self.text,
+        fg,
+        color(0, 0, 0, 0),
+      )
     restoreState()
   else:
     discard drawText(

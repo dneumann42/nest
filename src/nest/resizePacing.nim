@@ -18,15 +18,17 @@ type
     nextPumpTicks*: int
 
 const DefaultResizePacerConfig* = ResizePacerConfig(
-  settleMs: 80,
+  settleMs: 250,
   pumpFrameMs: 16,
   pumpDurationMs: 250,
 )
 
 proc parseResizeStrategy*(value: string): ResizeStrategy =
   case value.normalize
-  of "pump":
+  of "", "pump":
     rsPump
+  of "stretch":
+    rsStretch
   of "retained":
     rsRetained
   else:
@@ -37,7 +39,7 @@ proc resizeStrategyFromEnv*(): ResizeStrategy =
 
 proc init*(
     T: typedesc[ResizePacer],
-    strategy = rsStretch,
+    strategy = rsPump,
     config = DefaultResizePacerConfig,
 ): T =
   T(strategy: strategy, config: config)

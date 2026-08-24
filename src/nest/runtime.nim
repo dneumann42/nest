@@ -43,7 +43,7 @@ proc reportResizeTrace(reason: string; force = false) =
     else:
       0.0
   echo &"[nest resize trace] {reason} resizeEvents={resizeTrace.resizeEvents} " &
-    &"fastPresents={resizeTrace.fastResizePresents} fullFrames={resizeTrace.fullFrames} " &
+    &"strategy={resizeStrategy()} fastPresents={resizeTrace.fastResizePresents} fullFrames={resizeTrace.fullFrames} " &
     &"resizeFullFrames={resizeTrace.resizeFullFrames} blockedNoRetained={resizeTrace.blockedNoRetained} " &
     &"blockedNonFastEvent={resizeTrace.blockedNonFastEvent} avgFullMs={avgFull:.2f} " &
     &"maxFullMs={resizeTrace.maxFullFrameMs}"
@@ -96,6 +96,14 @@ proc scheduleNextFrame(nextFrameTicks: var int; frameRemainder: var int; now: in
     if now > nextFrameTicks + frameTicks:
       nextFrameTicks = now + frameTicks
 
+proc mergedAppWaitMs(a, b: int): int {.inline.} =
+  if a < 0:
+    b
+  elif b < 0:
+    a
+  else:
+    min(a, b)
+
 proc textFromEvent(chars: array[4, char]): string =
   for ch in chars:
     if ch == '\0':
@@ -117,6 +125,8 @@ proc wheelDeltaY(e: Event): float64 =
 proc resizeFastPathEvent(kind: EventKind): bool {.inline.} =
   kind in {
     NoEvent,
+    MouseDownEvent,
+    MouseUpEvent,
     MouseMoveEvent,
     WindowResizeEvent,
     WindowFocusGainedEvent,
@@ -233,6 +243,22 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
     ui.requestRedrawAfter(0)
   else:
     discard
+
+proc redrawRetainedIfClean(ui: var UI): bool {.discardable.} =
+  ## Service a timer-driven repaint without rebuilding the application when
+  ## the retained widget tree is still valid. Input and dirty state still take
+  ## the normal full render path.
+  if not ui.hasRetainedFrame() or ui.needsFullRender() or ui.hasPendingFullRenderInput():
+    return false
+  ui.clearRedrawRequest()
+  ui.setDrawTicks(input.getTicks())
+  if ui.hasPendingInput():
+    discard ui.updateRetainedFrame()
+  else:
+    discard ui.drawRetainedFrame()
+  if ui.redrewFrame():
+    refresh()
+  true
 
 template application*(cfg: AppConfig; blk: untyped) =
   ## Run `blk` as an application main loop against a raw update/draw context.
@@ -390,6 +416,8 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
     firstFrame = true
     nextFrameTicks = input.getTicks()
     frameRemainder = 0
+    hasResizeRedraw = false
+    resizeRedrawTicks = 0
     resizePacer = ResizePacer.init(resizeStrategy())
   while running:
     var e = Event()
@@ -423,7 +451,13 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
     let
       nowTicks = input.getTicks()
       redrawWaitMs = ui.redrawDelayMs()
-      waitMs = resizePacer.waitMs(nowTicks, redrawWaitMs)
+      resizeWaitMs =
+        if hasResizeRedraw:
+          max(resizeRedrawTicks - nowTicks, 0)
+        else:
+          -1
+      appWaitMs = mergedAppWaitMs(redrawWaitMs, resizeWaitMs)
+      waitMs = resizePacer.waitMs(nowTicks, appWaitMs)
     let frameEvent =
       if shouldRender:
         false
@@ -436,11 +470,22 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
     elif pumpDue:
       if resizeTraceEnabled():
         inc resizeTrace.fastResizePresents
+      let strategy = resizeStrategy()
+      if strategy in {rsRetained, rsPump} and ui.hasRetainedFrame():
+        ui.setDrawTicks(input.getTicks())
+        discard ui.drawRetainedFrame()
       refresh()
       resizePacer.finishedPumpPresent(afterWaitTicks)
       reportResizeTrace("pump")
       continue
-    elif redrawWaitMs >= 0:
+    elif hasResizeRedraw and resizeRedrawTicks <= afterWaitTicks:
+      shouldRender = true
+      hasResizeRedraw = false
+      if redrawWaitMs >= 0 and ui.redrawDelayMs() == 0:
+        ui.clearRedrawRequest()
+    elif redrawWaitMs >= 0 and ui.redrawDelayMs() == 0:
+      if ui.redrawRetainedIfClean():
+        continue
       shouldRender = true
       ui.clearRedrawRequest()
     if not shouldRender:
@@ -468,16 +513,18 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
         if e.kind == WindowResizeEvent and resizeTraceEnabled():
           inc resizeTrace.resizeEvents
         handleEvent(e, running, ui)
-    if sawResizeEvent and not sawNonResizeEvent and ui.hasRetainedFrame():
+    if sawResizeEvent and not sawNonResizeEvent:
       if resizeTraceEnabled():
         inc resizeTrace.fastResizePresents
-      if resizeStrategy() == rsRetained:
+      let strategy = resizeStrategy()
+      if strategy in {rsRetained, rsPump} and ui.hasRetainedFrame():
         ui.setDrawTicks(input.getTicks())
         discard ui.drawRetainedFrame()
       refresh()
       let now = input.getTicks()
       resizePacer.startedResizePresent(now)
-      ui.requestRedrawAfter(resizePacer.config.settleMs)
+      resizeRedrawTicks = now + resizePacer.config.settleMs
+      hasResizeRedraw = true
       ui.finishInputFrame()
       reportResizeTrace("fast")
       continue

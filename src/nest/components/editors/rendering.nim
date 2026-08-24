@@ -505,6 +505,8 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
     return
 
   ctx.setActive(widget.id)
+  if self.readOnly:
+    return
   let previousCursor = self.state.cursor
   let previousTextLen = self.state.text.len
   for input in ctx.keyInputs:

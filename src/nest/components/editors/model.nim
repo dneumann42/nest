@@ -79,6 +79,7 @@ type
     singleLine*: bool
     lineNumbers*: bool
     scrollbars*: bool
+    readOnly*: bool
     syntax*: string
     gutterMarkers*: HashSet[int]
     activeLine*: int
@@ -111,6 +112,8 @@ proc clearSyntax*(state: EditorState) =
 
 proc setSyntax*(state: EditorState, syntax: SyntaxDefinition) =
   ## Replace this editor state's syntax highlighting definition.
+  if state.syntax == syntax:
+    return
   state.syntax = syntax
   inc state.syntaxVersion
 
@@ -195,6 +198,7 @@ proc new*(
     singleLine = false,
     lineNumbers = false,
     scrollbars = true,
+    readOnly = false,
     syntax = "",
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
@@ -213,6 +217,7 @@ proc new*(
     singleLine: singleLine,
     lineNumbers: lineNumbers and not singleLine,
     scrollbars: scrollbars and not singleLine,
+    readOnly: readOnly,
     syntax: syntax.normalize,
     gutterMarkers: gutterMarkers,
     activeLine: activeLine,

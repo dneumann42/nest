@@ -1,3 +1,5 @@
+import std/[os, strutils]
+
 import ../[layouts, resources, widgets2]
 import component
 import nest/[coords, screen]
@@ -6,6 +8,9 @@ const
   ButtonPaddingX = 8
   ButtonPaddingY = 3
   ButtonMinHeight = ControlHeight
+
+let AnimateTextScroll = getEnv("NEST_TEXT_SCROLL_ANIMATION").normalize in
+  ["1", "true", "yes", "on"]
 
 type Button* = ref object of Interactive
   label: string
@@ -25,9 +30,10 @@ proc new*(T: typedesc[Button], label = "", textScroll = false,
     textAlign = JustifyCenter): T =
   ## Create a button component labelled `label`.
   ##
-  ## `textScroll` lets a label wider than the button scroll instead of being
-  ## clipped, `fontName` picks a loaded font, and `padding` overrides the
-  ## default insets around the text; negative insets keep the default.
+  ## `textScroll` clips text wider than the button. Marquee animation is
+  ## opt-in with NEST_TEXT_SCROLL_ANIMATION=1. `fontName` picks a loaded font,
+  ## and `padding` overrides the default insets around the text; negative
+  ## insets keep the default.
   T(label: label, textScroll: textScroll, fontName: fontName, padding: padding,
       borderStyle: borderStyle, chromeStyle: chromeStyle,
       textAlign: textAlign)
@@ -138,11 +144,15 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, paddingTop)
     textWidth = max(f.width.toInt - paddingLeft - paddingRight, 0)
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
-    ctx.requestRedrawAfter(33)
-    let
-      gap = 32
-      cycle = textExtent.width + gap
-      offset = (ctx.ticks div 24) mod cycle
+    let offset =
+      if AnimateTextScroll:
+        ctx.requestRedrawAfter(33)
+        let
+          gap = 32
+          cycle = textExtent.width + gap
+        (ctx.ticks div 24) mod cycle
+      else:
+        0
     saveState()
     setClipRect(ctx.clippedRect(rect(textX, f.y.toInt, textWidth,
         f.height.toInt)))
@@ -154,14 +164,16 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       ctx.palette.textColor,
       color(0, 0, 0, 0),
     )
-    discard drawText(
-      Font(font),
-      textX - offset + cycle,
-      textY,
-      self.label,
-      ctx.palette.textColor,
-      color(0, 0, 0, 0),
-    )
+    if AnimateTextScroll:
+      let gap = 32
+      discard drawText(
+        Font(font),
+        textX - offset + textExtent.width + gap,
+        textY,
+        self.label,
+        ctx.palette.textColor,
+        color(0, 0, 0, 0),
+      )
     restoreState()
   else:
     discard drawText(
