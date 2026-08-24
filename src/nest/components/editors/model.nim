@@ -36,8 +36,21 @@ type
     name*: string
     rules*: seq[SyntaxRule]
 
+  HighlightSegment* = object
+    start*, stop*: int
+    highlighted*: bool
+    color*: Color
+
+  LineHighlightCache* = object
+    textVersion*: int
+    syntaxVersion*: int
+    lineText*: string
+    segments*: seq[HighlightSegment]
+
   EditorState* = ref object
     text*: string
+    textVersion*: int
+    syntaxVersion*: int
     cursor*: int
     selectionAnchor*: int
     undoStack*, redoStack*: seq[string]
@@ -46,6 +59,14 @@ type
     targetX*, targetY*: float64
     maxX*, maxY*: float64
     contentWidth*, contentHeight*: float64
+    cachedTextVersion*: int
+    cachedTextLen*: int
+    cachedLines*: seq[string]
+    cachedLineStarts*: seq[int]
+    cachedLineWidths*: seq[int]
+    cachedWidthFont*: string
+    cachedWidestLine*: int
+    cachedHighlights*: seq[LineHighlightCache]
     dragging*: EditorScrollAxis
     dragStartMouse*: float64
     dragStartScroll*: float64
@@ -65,15 +86,33 @@ type
 proc new*(T: typedesc[EditorState], text = ""): T =
   ## Create editor state holding `text`, with the cursor at its end and
   ## nothing selected.
-  T(text: text, cursor: text.len, selectionAnchor: -1, preferredColumn: -1)
+  T(text: text, textVersion: 1, cursor: text.len, selectionAnchor: -1,
+      preferredColumn: -1, cachedTextVersion: -1, cachedTextLen: -1)
+
+proc touchText*(state: EditorState) =
+  ## Mark cached line and width data stale after changing `text`.
+  inc state.textVersion
+  state.cachedTextVersion = -1
+
+proc replaceText*(state: EditorState, text: string) =
+  ## Replace the whole buffer, keeping the cursor and selection valid.
+  if state.text == text:
+    return
+  state.text = text
+  state.cursor = min(state.cursor, state.text.len)
+  state.selectionAnchor = -1
+  state.preferredColumn = -1
+  state.touchText()
 
 proc clearSyntax*(state: EditorState) =
   ## Remove syntax highlighting from this editor state.
   state.syntax = SyntaxDefinition()
+  inc state.syntaxVersion
 
 proc setSyntax*(state: EditorState, syntax: SyntaxDefinition) =
   ## Replace this editor state's syntax highlighting definition.
   state.syntax = syntax
+  inc state.syntaxVersion
 
 proc clampCursor*(state: EditorState) =
   ## Pull the cursor, and the selection anchor when there is one, back inside
@@ -131,6 +170,7 @@ proc undo*(state: EditorState) =
     return
   state.redoStack.add state.text
   state.text = state.undoStack[^1]
+  state.touchText()
   state.undoStack.setLen(state.undoStack.len - 1)
   state.cursor = min(state.cursor, state.text.len)
   state.clearSelection()
@@ -142,6 +182,7 @@ proc redo*(state: EditorState) =
     return
   state.undoStack.add state.text
   state.text = state.redoStack[^1]
+  state.touchText()
   state.redoStack.setLen(state.redoStack.len - 1)
   state.cursor = min(state.cursor, state.text.len)
   state.clearSelection()
@@ -243,6 +284,7 @@ proc deleteSelection*(state: EditorState): bool {.discardable.} =
   state.rememberUndo()
   let r = state.selectionRange
   state.text.delete(r.first .. r.last - 1)
+  state.touchText()
   state.cursor = r.first
   state.clearSelection()
   state.resetPreferredColumn()
@@ -274,6 +316,7 @@ proc insertText*(state: EditorState, text: string, singleLine = false) =
     state.text.delete(r.first .. r.last - 1)
     state.cursor = r.first
   state.text.insert(inserted, state.cursor)
+  state.touchText()
   inc state.cursor, inserted.len
   state.clearSelection()
   state.resetPreferredColumn()
@@ -287,6 +330,7 @@ proc deleteBackward*(state: EditorState) =
   if state.cursor > 0:
     state.rememberUndo()
     state.text.delete(state.cursor - 1 .. state.cursor - 1)
+    state.touchText()
     dec state.cursor
     state.clearSelection()
     state.resetPreferredColumn()
@@ -300,6 +344,7 @@ proc deleteForward*(state: EditorState) =
   if state.cursor < state.text.len:
     state.rememberUndo()
     state.text.delete(state.cursor .. state.cursor)
+    state.touchText()
     state.clearSelection()
     state.resetPreferredColumn()
 
@@ -310,6 +355,7 @@ proc killToStart*(state: EditorState) =
   if state.cursor > start:
     state.rememberUndo()
     state.text.delete(start .. state.cursor - 1)
+    state.touchText()
     state.cursor = start
     state.clearSelection()
     state.resetPreferredColumn()
@@ -321,6 +367,7 @@ proc killToEnd*(state: EditorState) =
   if state.cursor < stop:
     state.rememberUndo()
     state.text.delete(state.cursor .. stop - 1)
+    state.touchText()
     state.clearSelection()
     state.resetPreferredColumn()
 

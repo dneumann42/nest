@@ -86,8 +86,8 @@ type
 
 var fonts: seq[FontSlot]
 
-const MaxMeasureCacheEntries = 512
-const MaxTextCacheEntries = 64
+const MaxMeasureCacheEntries = 8192
+const MaxTextCacheEntries = 2048
 
 var layerShellConfig* = LayerShellConfig(
   namespace: "nest",

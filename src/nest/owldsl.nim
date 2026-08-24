@@ -2117,6 +2117,23 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     discard bodyNodes
     number(runtime.requireUi().windowHeight.float64)
 
+  runtime.evaluator.native "scrollY":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "scrollY expects widget id")
+    number(runtime.requireUi().scrollOffset(runtime.asWidgetID(values[0])).y)
+
+  runtime.evaluator.native "widgetHeight":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "widgetHeight expects widget id")
+    let frame = runtime.requireUi().widgetFrame(runtime.asWidgetID(values[0]))
+    number(if frame.ok: frame.frame.height else: 0.0)
+
   runtime.evaluator.native "shellAsync":
     discard layout
     discard bodyNodes
@@ -2326,12 +2343,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     if key notin runtime.editorStates:
       runtime.editorStates[key] = EditorState.new("")
     let replacement = values[1].asString
-    if runtime.editorStates[key].text != replacement:
-      runtime.editorStates[key].text = replacement
-      runtime.editorStates[key].cursor = min(runtime.editorStates[key].cursor,
-          replacement.len)
-      runtime.editorStates[key].selectionAnchor = -1
-      runtime.editorStates[key].preferredColumn = -1
+    runtime.editorStates[key].replaceText(replacement)
     nothing()
 
   runtime.evaluator.native "clearEditor":
@@ -2343,10 +2355,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let key = env.idKey(arguments[0], values[0].asString)
     if key notin runtime.editorStates:
       runtime.editorStates[key] = EditorState.new("")
-    runtime.editorStates[key].text = ""
-    runtime.editorStates[key].cursor = 0
-    runtime.editorStates[key].selectionAnchor = -1
-    runtime.editorStates[key].preferredColumn = -1
+    runtime.editorStates[key].replaceText("")
     nothing()
 
   runtime.evaluator.native "insertEditorText":

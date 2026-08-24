@@ -454,6 +454,11 @@ proc widgetFrame*(
       return (true, box.frame)
   (false, Frame())
 
+proc scrollOffset*(self: UI, id: WidgetID): tuple[x, y: float64] {.raises: [].} =
+  ## Return the retained scroll offset for a scroll container.
+  let state = self.scrollStates.getOrDefault(id)
+  (state.scrollX, state.scrollY)
+
 proc pointerInputBlocked*(self: UI, x, y: int): bool {.raises: [].} =
   ## Test whether the point `x`, `y` lands on a surface that swallows pointer
   ## input, such as an open menu or a floating card.
@@ -4471,9 +4476,9 @@ proc textEditor*(
     height,
     alignSelf,
     renderKey(
-      "textEditor:" & state.text & ":" & $state.cursor & ":" & fontName & ":" &
-        $lineNumbers & ":" & $scrollbars & ":" & syntax & ":" & $gutterMarkers &
-        ":" & $activeLine,
+      "textEditor:" & $state.textVersion & ":" & $state.cursor & ":" &
+        $state.selectionAnchor & ":" & fontName & ":" & $lineNumbers & ":" &
+        $scrollbars & ":" & syntax & ":" & $gutterMarkers & ":" & $activeLine,
       width,
       height,
       alignSelf,

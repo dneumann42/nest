@@ -1,9 +1,11 @@
-import std/[math, re, sets, strutils]
+import std/[math, re, sets, strutils, tables]
 
 import ../../[resources, widgets2]
 import nest/[coords, screen]
 
 import model
+
+var regexCache: Table[string, Regex]
 
 proc frameContains(f: Frame, x, y: int): bool =
   x.float64 >= f.x and x.float64 < f.x + f.width and
@@ -33,8 +35,93 @@ proc editorSnapTarget(value, lo, hi: float64): float64 =
 proc expandTabs(text: string): string =
   text.replace("\t", "    ")
 
-proc isIdentStart(ch: char): bool =
-  ch == '_' or ch.isAlphaAscii
+proc ensureLineCache(state: EditorState) =
+  if state.cachedTextVersion == state.textVersion and
+      state.cachedTextLen == state.text.len and state.cachedLines.len > 0:
+    return
+  state.cachedLines.setLen(0)
+  state.cachedLineStarts.setLen(0)
+  var start = 0
+  for index, ch in state.text:
+    if ch == '\n':
+      state.cachedLineStarts.add start
+      state.cachedLines.add state.text[start ..< index]
+      start = index + 1
+  state.cachedLineStarts.add start
+  state.cachedLines.add state.text[start ..< state.text.len]
+  state.cachedLineWidths.setLen(state.cachedLines.len)
+  state.cachedHighlights.setLen(state.cachedLines.len)
+  for width in state.cachedLineWidths.mitems:
+    width = -1
+  state.cachedWidestLine = -1
+  state.cachedTextVersion = state.textVersion
+  state.cachedTextLen = state.text.len
+
+proc editorLineCount(state: EditorState): int =
+  state.ensureLineCache()
+  state.cachedLines.len
+
+proc editorLine(state: EditorState, index: int): string =
+  state.ensureLineCache()
+  if index >= 0 and index < state.cachedLines.len:
+    state.cachedLines[index]
+  else:
+    ""
+
+proc editorLineStart(state: EditorState, index: int): int =
+  state.ensureLineCache()
+  if index >= 0 and index < state.cachedLineStarts.len:
+    state.cachedLineStarts[index]
+  else:
+    state.text.len
+
+proc resetWidthCache(state: EditorState, fontName: string) =
+  state.cachedWidthFont = fontName
+  state.cachedLineWidths.setLen(state.cachedLines.len)
+  for width in state.cachedLineWidths.mitems:
+    width = -1
+  state.cachedWidestLine = -1
+
+proc measuredLineWidth(state: EditorState, resources: Resources, fontName: string,
+    index: int): int =
+  state.ensureLineCache()
+  if state.cachedWidthFont != fontName or state.cachedLineWidths.len !=
+      state.cachedLines.len:
+    state.resetWidthCache(fontName)
+  if index < 0 or index >= state.cachedLines.len:
+    return 0
+  if state.cachedLineWidths[index] < 0:
+    state.cachedLineWidths[index] =
+      resources.measureText(fontName, state.cachedLines[index].expandTabs).width
+  state.cachedLineWidths[index]
+
+proc widestLineWidth(state: EditorState, resources: Resources,
+    fontName: string): int =
+  state.ensureLineCache()
+  if state.cachedWidthFont != fontName or state.cachedLineWidths.len !=
+      state.cachedLines.len:
+    state.resetWidthCache(fontName)
+  if state.cachedWidestLine >= 0:
+    return state.cachedWidestLine
+  result = 0
+  for index in 0 ..< state.cachedLines.len:
+    result = max(result, state.measuredLineWidth(resources, fontName, index))
+  state.cachedWidestLine = result
+
+proc visibleLineRange(
+    lineCount, lineHeight, textTop: int, scrollY: float64, f: Frame
+): tuple[first, last: int] =
+  if lineCount <= 0 or lineHeight <= 0:
+    return (0, -1)
+  let
+    top = f.y.toInt
+    bottom = (f.y + f.height).toInt
+    firstLine = floor(((top - textTop).float64 + scrollY) /
+        lineHeight.float64).toInt
+    lastLine = ceil(((bottom - textTop).float64 + scrollY) /
+        lineHeight.float64).toInt
+  result.first = clamp(firstLine - 1, 0, lineCount - 1)
+  result.last = clamp(lastLine + 1, 0, lineCount - 1)
 
 proc isIdentPart(ch: char): bool =
   ch == '_' or ch.isAlphaNumeric
@@ -49,11 +136,17 @@ proc wordMatch(line: string, cursor: int, word: string): bool =
   let afterOk = after >= line.len or not line[after].isIdentPart
   beforeOk and afterOk
 
+proc compiledRegex(pattern: string): Regex =
+  if pattern in regexCache:
+    return regexCache[pattern]
+  result = re(pattern)
+  regexCache[pattern] = result
+
 proc matchRule(line: string, cursor: int, rule: SyntaxRule): int =
   case rule.kind
   of SyntaxRegex:
     try:
-      result = line.matchLen(re(rule.pattern), cursor)
+      result = line.matchLen(compiledRegex(rule.pattern), cursor)
       if result < 0:
         result = 0
     except CatchableError:
@@ -95,11 +188,54 @@ proc firstSyntaxMatch(
       return (length, rule.color)
   (0, Color())
 
+proc highlightedLineSegments(
+    self: Editor,
+    lineIndex: int,
+    line: string,
+): seq[HighlightSegment] =
+  if lineIndex < 0 or lineIndex >= self.state.cachedHighlights.len:
+    return
+  let cache = self.state.cachedHighlights[lineIndex]
+  if cache.textVersion == self.state.textVersion and
+      cache.syntaxVersion == self.state.syntaxVersion and cache.lineText == line:
+    return cache.segments
+
+  var
+    cursor = 0
+    plainStart = 0
+    segments: seq[HighlightSegment]
+  template addPlain(stopIndex: int) =
+    block:
+      if plainStart < stopIndex:
+        segments.add HighlightSegment(start: plainStart, stop: stopIndex)
+
+  while cursor < line.len:
+    let matched = self.state.syntax.firstSyntaxMatch(line, cursor)
+    if matched.length > 0:
+      addPlain(cursor)
+      let stop = min(cursor + matched.length, line.len)
+      segments.add HighlightSegment(start: cursor, stop: stop,
+          highlighted: true, color: matched.color)
+      cursor = stop
+      plainStart = cursor
+    else:
+      inc cursor
+  addPlain(line.len)
+
+  self.state.cachedHighlights[lineIndex] = LineHighlightCache(
+    textVersion: self.state.textVersion,
+    syntaxVersion: self.state.syntaxVersion,
+    lineText: line,
+    segments: segments,
+  )
+  segments
+
 proc drawHighlightedLine(
     self: Editor,
     ctx: var DrawContext,
     font: Font,
     x, y: int,
+    lineIndex: int,
     line: string,
     bg: Color,
 ) =
@@ -107,25 +243,20 @@ proc drawHighlightedLine(
     discard drawText(font, x, y, line.expandTabs, ctx.palette.textColor, bg)
     return
 
-  var
-    cursor = 0
-    drawX = x
-  template drawSegment(segment: string, color: Color) =
-    block:
-      let rendered = segment.expandTabs
-      if rendered.len > 0:
-        let extent = drawText(font, drawX, y, rendered, color, bg)
-        drawX += extent.w
-
-  while cursor < line.len:
-    let matched = self.state.syntax.firstSyntaxMatch(line, cursor)
-    if matched.length > 0:
-      let stop = min(cursor + matched.length, line.len)
-      drawSegment(line[cursor ..< stop], matched.color)
-      cursor = stop
-    else:
-      drawSegment($line[cursor], ctx.palette.textColor)
-      inc cursor
+  var drawX = x
+  for segment in self.highlightedLineSegments(lineIndex, line):
+    if segment.stop <= segment.start:
+      continue
+    let
+      rendered = line[segment.start ..< segment.stop].expandTabs
+      fg =
+        if segment.highlighted:
+          segment.color
+        else:
+          ctx.palette.textColor
+    if rendered.len > 0:
+      let extent = drawText(font, drawX, y, rendered, fg, bg)
+      drawX += extent.w
 
 proc nearlyEqual(a, b: float64): bool =
   abs(a - b) < 0.5
@@ -201,30 +332,19 @@ proc editorTextTop(self: Editor, f: Frame, lineHeight: int): int =
   else:
     f.y.toInt + EditorPaddingY
 
-proc editorLines(text: string): seq[string] =
-  result = text.split('\n')
-  if result.len == 0:
-    result = @[""]
-
 proc editorContentSize(
     self: Editor, resources: Resources
 ): tuple[width, height: float64] =
-  let lines =
-    if self.singleLine:
-      @[self.state.text]
-    else:
-      editorLines(self.state.text)
-  var width = 0
-  var height = 0
+  self.state.ensureLineCache()
   let (_, metrics) = resources.get(self.fontName)
-  for line in lines:
-    let measurement = resources.measureText(self.fontName, line.expandTabs)
-    width = max(width, measurement.width)
-    height += max(metrics.lineHeight, measurement.height)
-  width += self.editorLineNumberWidth(resources, lines.len)
+  let
+    lineCount = if self.singleLine: 1 else: self.state.editorLineCount()
+    lineHeight = max(metrics.lineHeight, resources.measureText(self.fontName, "M").height)
+  var width = self.state.widestLineWidth(resources, self.fontName)
+  width += self.editorLineNumberWidth(resources, lineCount)
   (
     max(width + EditorPaddingX * 2, EditorMinWidth).toFloat,
-    max(height + EditorPaddingY * 2, EditorMinHeight).toFloat,
+    max(lineCount * lineHeight + EditorPaddingY * 2, EditorMinHeight).toFloat,
   )
 
 proc columnAtContentX(resources: Resources, fontName, line: string,
@@ -246,24 +366,17 @@ proc cursorAtMouse(
   let
     (_, metrics) = resources.get(self.fontName)
     lineHeight = max(metrics.lineHeight, resources.measureText(self.fontName, "M").height)
-    lines =
-      if self.singleLine:
-        @[self.state.text]
-      else:
-        editorLines(self.state.text)
-    gutterWidth = self.editorLineNumberWidth(resources, lines.len)
+    lineCount = if self.singleLine: 1 else: self.state.editorLineCount()
+    gutterWidth = self.editorLineNumberWidth(resources, lineCount)
     textLeft = f.x.toInt + EditorPaddingX + gutterWidth
     textTop = self.editorTextTop(f, lineHeight)
     contentY = mouseY.toFloat - textTop.toFloat + self.state.scrollY
-    lineIndex = floor(contentY / lineHeight.toFloat).toInt.clamp(0, lines.len - 1)
+    lineIndex = floor(contentY / lineHeight.toFloat).toInt.clamp(0, lineCount - 1)
     contentX = mouseX.toFloat - textLeft.toFloat + self.state.scrollX
-    column = resources.columnAtContentX(self.fontName, lines[lineIndex], contentX)
+    line = self.state.editorLine(lineIndex)
+    column = resources.columnAtContentX(self.fontName, line, contentX)
 
-  for index in 0 ..< lineIndex:
-    result += lines[index].len
-    if not self.singleLine:
-      inc result
-  result + column
+  self.state.editorLineStart(lineIndex) + column
 
 proc updateScrollBounds(state: EditorState, f: Frame) =
   state.maxX = max(state.contentWidth - f.width, 0.0)
@@ -370,12 +483,8 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
       ctx.setFocus(widget.id)
       if not clickedScrollbar and ctx.resources.ready:
         let
-          lines =
-            if self.singleLine:
-              @[self.state.text]
-            else:
-              editorLines(self.state.text)
-          gutterWidth = self.editorLineNumberWidth(ctx.resources, lines.len)
+          lineCount = if self.singleLine: 1 else: self.state.editorLineCount()
+          gutterWidth = self.editorLineNumberWidth(ctx.resources, lineCount)
           textLeft = f.x.toInt + EditorPaddingX + gutterWidth
         if ctx.mouseX >= textLeft:
           self.state.cursor = self.cursorAtMouse(ctx.resources, f, ctx.mouseX, ctx.mouseY)
@@ -437,14 +546,19 @@ proc getFrameStyle*(ctx: var DrawContext, hot, focused: bool): tuple[bg,
   result = (bg, border)
 
 proc cursorLineAndColumn(state: EditorState): tuple[line, column: int] =
-  var lineStart = 0
-  for index, ch in state.text:
-    if index >= state.cursor:
-      break
-    if ch == '\n':
-      inc result.line
-      lineStart = index + 1
-  result.column = state.cursor - lineStart
+  state.ensureLineCache()
+  let cursor = state.cursor.clamp(0, state.text.len)
+  var
+    lo = 0
+    hi = state.cachedLineStarts.len - 1
+  while lo <= hi:
+    let mid = (lo + hi) div 2
+    if state.cachedLineStarts[mid] <= cursor:
+      result.line = mid
+      lo = mid + 1
+    else:
+      hi = mid - 1
+  result.column = cursor - state.cachedLineStarts[result.line]
 
 method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
   ## Draw the editor: its frame, the gutter and line numbers, highlighted
@@ -457,20 +571,13 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
     (font, metrics) = ctx.resources.get(self.fontName)
     lineHeight = max(metrics.lineHeight, ctx.resources.measureText(
         self.fontName, "M").height)
-    lines =
-      if self.singleLine:
-        @[self.state.text]
-      else:
-        editorLines(self.state.text)
-    gutterWidth = self.editorLineNumberWidth(ctx.resources, lines.len)
+    lineCount = if self.singleLine: 1 else: self.state.editorLineCount()
+    gutterWidth = self.editorLineNumberWidth(ctx.resources, lineCount)
     textLeft = f.x.toInt + EditorPaddingX + gutterWidth
     textTop = self.editorTextTop(f, lineHeight)
-    contentHeight = EditorPaddingY * 2 + lines.len * lineHeight
-  var widestLine = 0
-  for line in lines:
-    widestLine = max(widestLine, ctx.resources.measureText(self.fontName,
-        line.expandTabs).width)
-  let contentWidth = gutterWidth + EditorPaddingX * 2 + widestLine
+    contentHeight = EditorPaddingY * 2 + lineCount * lineHeight
+    widestLine = self.state.widestLineWidth(ctx.resources, self.fontName)
+    contentWidth = gutterWidth + EditorPaddingX * 2 + widestLine
 
   fillRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), bg)
   lineRect(rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt), border)
@@ -489,8 +596,8 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
   if focused and self.state.ensureCursorVisible:
     let cursor = self.state.cursorLineAndColumn()
     let lineText =
-      if cursor.line >= 0 and cursor.line < lines.len:
-        lines[cursor.line]
+      if cursor.line >= 0 and cursor.line < lineCount:
+        self.state.editorLine(cursor.line)
       else:
         ""
     let beforeCursor =
@@ -536,57 +643,57 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
       not self.state.scrollY.nearlyEqual(self.state.targetY):
     ctx.requestRedrawAfter(16)
 
-  var y = textTop - self.state.scrollY.toInt
-  for index in 0 ..< lines.len:
-    if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
+  let visible = visibleLineRange(lineCount, lineHeight, textTop,
+      self.state.scrollY, f)
+  for index in visible.first .. visible.last:
+    let y = textTop - self.state.scrollY.toInt + index * lineHeight
+    if self.activeLine == index + 1:
+      fillRect(
+        rect(
+          f.x.toInt + 1,
+          y,
+          max(f.width.toInt - 2, 0),
+          lineHeight,
+        ),
+        ctx.palette.panelMuted,
+      )
+      fillRect(
+        rect(
+          f.x.toInt + 1,
+          y,
+          max(gutterWidth, 8),
+          lineHeight,
+        ),
+        ctx.palette.sky,
+      )
+    if self.lineNumbers:
+      let number = $(index + 1)
+      let numberWidth = ctx.resources.measureText(self.fontName, number).width
+      if (index + 1) in self.gutterMarkers:
+        let
+          markerSize = min(8, max(lineHeight div 2, 5))
+          markerX = f.x.toInt + max((EditorPaddingX - markerSize) div 2, 1)
+          markerY = y + max((lineHeight - markerSize) div 2, 0)
+        fillRect(rect(markerX, markerY, markerSize, markerSize),
+            ctx.palette.rose)
+      discard drawText(
+        Font(font),
+        f.x.toInt + EditorPaddingX + gutterWidth - EditorPaddingX -
+            numberWidth,
+        y,
+        number,
+        ctx.palette.foreground,
+        bg,
+      )
       if self.activeLine == index + 1:
-        fillRect(
-          rect(
-            f.x.toInt + 1,
-            y,
-            max(f.width.toInt - 2, 0),
-            lineHeight,
-          ),
-          ctx.palette.panelMuted,
-        )
-        fillRect(
-          rect(
-            f.x.toInt + 1,
-            y,
-            max(gutterWidth, 8),
-            lineHeight,
-          ),
-          ctx.palette.sky,
-        )
-      if self.lineNumbers:
-        let number = $(index + 1)
-        let numberWidth = ctx.resources.measureText(self.fontName, number).width
-        if (index + 1) in self.gutterMarkers:
-          let
-            markerSize = min(8, max(lineHeight div 2, 5))
-            markerX = f.x.toInt + max((EditorPaddingX - markerSize) div 2, 1)
-            markerY = y + max((lineHeight - markerSize) div 2, 0)
-          fillRect(rect(markerX, markerY, markerSize, markerSize),
-              ctx.palette.rose)
         discard drawText(
           Font(font),
-          f.x.toInt + EditorPaddingX + gutterWidth - EditorPaddingX -
-              numberWidth,
+          f.x.toInt + 2,
           y,
-          number,
-          ctx.palette.foreground,
-          bg,
+          ">",
+          ctx.palette.textColor,
+          ctx.palette.sky,
         )
-        if self.activeLine == index + 1:
-          discard drawText(
-            Font(font),
-            f.x.toInt + 2,
-            y,
-            ">",
-            ctx.palette.textColor,
-            ctx.palette.sky,
-          )
-    y += lineHeight
 
   if self.lineNumbers:
     drawLine(
@@ -609,9 +716,11 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
   )))
   if self.state.hasSelection:
     let selection = self.state.selectionRange
-    var lineStartIndex = 0
-    y = textTop - self.state.scrollY.toInt
-    for index, line in lines:
+    for index in visible.first .. visible.last:
+      let
+        line = self.state.editorLine(index)
+        lineStartIndex = self.state.editorLineStart(index)
+        y = textTop - self.state.scrollY.toInt + index * lineHeight
       let lineStopIndex = lineStartIndex + line.len
       let lineSelectionStart = max(selection.first, lineStartIndex)
       let lineSelectionStop = min(selection.last, lineStopIndex)
@@ -642,32 +751,31 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
           rect(startX, y, max(stopX - startX, 2), lineHeight),
           ctx.palette.backgroundActive,
         )
-      lineStartIndex = lineStopIndex + 1
-      y += lineHeight
 
-  y = textTop - self.state.scrollY.toInt
-  for index, line in lines:
-    if y + lineHeight >= f.y.toInt and y <= (f.y + f.height).toInt:
-      let lineBg =
+  for index in visible.first .. visible.last:
+    let
+      line = self.state.editorLine(index)
+      y = textTop - self.state.scrollY.toInt + index * lineHeight
+      lineBg =
         if self.activeLine == index + 1:
           ctx.palette.panelMuted
         else:
           bg
-      self.drawHighlightedLine(
-        ctx,
-        Font(font),
-        textLeft - self.state.scrollX.toInt,
-        y,
-        line,
-        lineBg,
-      )
-    y += lineHeight
+    self.drawHighlightedLine(
+      ctx,
+      Font(font),
+      textLeft - self.state.scrollX.toInt,
+      y,
+      index,
+      line,
+      lineBg,
+    )
 
   if focused:
     let cursor = self.state.cursorLineAndColumn()
     let lineText =
-      if cursor.line >= 0 and cursor.line < lines.len:
-        lines[cursor.line]
+      if cursor.line >= 0 and cursor.line < lineCount:
+        self.state.editorLine(cursor.line)
       else:
         ""
     let beforeCursor =
