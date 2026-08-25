@@ -258,6 +258,40 @@ proc drawHighlightedLine(
       let extent = drawText(font, drawX, y, rendered, fg, bg)
       drawX += extent.w
 
+proc drawEditorCursor(
+    self: Editor,
+    ctx: var DrawContext,
+    font: Font,
+    x, y, lineHeight: int,
+    lineText: string,
+    column: int,
+    bg: Color,
+) =
+  let cursorStyle =
+    if self.state.cursorStyle == EditorBlockCursor: EditorBlockCursor else: self.cursorStyle
+  case cursorStyle
+  of EditorLineCursor:
+    drawLine(
+      x,
+      y,
+      x,
+      y + lineHeight,
+      ctx.palette.textColor,
+    )
+  of EditorBlockCursor:
+    let
+      ch =
+        if column >= 0 and column < lineText.len:
+          $lineText[column]
+        else:
+          " "
+      rendered = ch.expandTabs
+      width = max(ctx.resources.measureText(self.fontName, rendered).width,
+          ctx.resources.measureText(self.fontName, "M").width)
+      cursorRect = ctx.clippedRect(rect(x, y, width, lineHeight))
+    fillRect(cursorRect, ctx.palette.textColor)
+    discard drawText(font, x, y, rendered, bg, ctx.palette.textColor)
+
 proc nearlyEqual(a, b: float64): bool =
   abs(a - b) < 0.5
 
@@ -506,6 +540,10 @@ method update*(self: Editor, widget: Widget, ctx: var UpdateContext) =
 
   ctx.setActive(widget.id)
   if self.readOnly:
+    return
+  let inputDriver =
+    if self.inputDriver.len > 0: self.inputDriver else: self.state.inputDriver.normalize
+  if inputDriver.len > 0 and inputDriver notin ["builtin", "native"]:
     return
   let previousCursor = self.state.cursor
   let previousTextLen = self.state.text.len
@@ -789,12 +827,15 @@ method draw*(self: Editor, widget: Widget, ctx: var DrawContext) =
       textLeft - self.state.scrollX.toInt +
       ctx.resources.measureText(self.fontName, beforeCursor.expandTabs).width
     let cursorY = textTop - self.state.scrollY.toInt + cursor.line * lineHeight
-    drawLine(
+    self.drawEditorCursor(
+      ctx,
+      Font(font),
       cursorX,
       cursorY,
-      cursorX,
-      min(cursorY + lineHeight, (f.y + f.height).toInt - EditorPaddingY),
-      ctx.palette.textColor,
+      lineHeight,
+      lineText,
+      cursor.column,
+      bg,
     )
   restoreState()
   if self.scrollbars:

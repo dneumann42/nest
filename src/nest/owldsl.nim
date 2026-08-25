@@ -514,6 +514,29 @@ proc syntaxDefinition(value: Value): SyntaxDefinition =
       if rule.pattern.len > 0:
         result.rules.add rule
 
+proc editorState(runtime: NestOwlRuntime, key: string): EditorState =
+  if key notin runtime.editorStates:
+    runtime.editorStates[key] = EditorState.new("")
+  runtime.editorStates[key]
+
+proc editorKey(
+    env: Environment, arguments: seq[SyntaxNode], values: seq[Value],
+    commandName: string
+): string {.raises: [EvaluatorError].} =
+  if values.len == 0:
+    raise newException(EvaluatorError, commandName & " expects editor id")
+  env.idKey(arguments[0], values[0].asString)
+
+proc editorSelecting(values: seq[Value], index: int): bool =
+  values.len > index and values[index].isTruthy
+
+proc editorCursorStyle(value: Value): EditorCursorStyle =
+  case value.asString.normalize
+  of "block", "box":
+    EditorBlockCursor
+  else:
+    EditorLineCursor
+
 proc mixChannel(a, b: uint8, amount: float64): uint8 =
   uint8((a.float64 + (b.float64 - a.float64) * amount).round.int.clamp(0, 255))
 
@@ -1858,6 +1881,33 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       runtime.requireUi().markAllDirty()
     boolean(pressed)
 
+  runtime.evaluator.native "textInput":
+    discard env
+    discard layout
+    discard bodyNodes
+    if arguments.len != 0:
+      raise newException(EvaluatorError, "textInput expects no arguments")
+    text(runtime.requireUi().textInput())
+
+  runtime.evaluator.native "textInputs":
+    discard env
+    discard layout
+    discard bodyNodes
+    if arguments.len != 0:
+      raise newException(EvaluatorError, "textInputs expects no arguments")
+    var values: seq[Value]
+    for item in runtime.requireUi().textInputs():
+      values.add text(item)
+    list(values)
+
+  runtime.evaluator.native "keyboardInput?":
+    discard env
+    discard layout
+    discard bodyNodes
+    if arguments.len != 0:
+      raise newException(EvaluatorError, "keyboardInput? expects no arguments")
+    boolean(runtime.requireUi().keyboardInputPending())
+
   runtime.evaluator.native "external":
     discard layout
     discard bodyNodes
@@ -2392,19 +2442,104 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     else:
       number(0)
 
+  runtime.evaluator.native "editorSelectionStart":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorSelectionStart expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "editorSelectionStart"))
+    number(state.selectionRange.first.float64)
+
+  runtime.evaluator.native "editorSelectionStop":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorSelectionStop expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "editorSelectionStop"))
+    number(state.selectionRange.last.float64)
+
+  runtime.evaluator.native "editorHasSelection":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorHasSelection expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "editorHasSelection"))
+    boolean(state.hasSelection)
+
+  runtime.evaluator.native "editorSelectedText":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorSelectedText expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "editorSelectedText"))
+    text(state.selectedText())
+
+  runtime.evaluator.native "editorInputDriver":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorInputDriver expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "editorInputDriver"))
+    text(state.inputDriver)
+
+  runtime.evaluator.native "editorCursorStyle":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "editorCursorStyle expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "editorCursorStyle"))
+    case state.cursorStyle
+    of EditorBlockCursor:
+      text("block")
+    of EditorLineCursor:
+      text("line")
+
   runtime.evaluator.native "setEditorCursor":
     discard layout
     discard bodyNodes
     let values = env.evalArgs(arguments)
     if values.len != 2:
       raise newException(EvaluatorError, "setEditorCursor expects editor id and cursor")
-    let key = env.idKey(arguments[0], values[0].asString)
-    if key notin runtime.editorStates:
-      runtime.editorStates[key] = EditorState.new("")
-    runtime.editorStates[key].cursor = values[1].asNumber.int.clamp(
-      0, runtime.editorStates[key].text.len
-    )
-    runtime.editorStates[key].preferredColumn = -1
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "setEditorCursor"))
+    state.setCursor(values[1].asNumber.int)
+    state.ensureCursorVisible = true
+    nothing()
+
+  runtime.evaluator.native "setEditorInputDriver":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError,
+          "setEditorInputDriver expects editor id and driver")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "setEditorInputDriver"))
+    state.inputDriver = values[1].asString.normalize
+    nothing()
+
+  runtime.evaluator.native "setEditorCursorStyle":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError,
+          "setEditorCursorStyle expects editor id and cursor style")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "setEditorCursorStyle"))
+    state.cursorStyle = values[1].editorCursorStyle()
     nothing()
 
   runtime.evaluator.native "setEditorText":
@@ -2448,12 +2583,13 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     discard layout
     discard bodyNodes
     let values = env.evalArgs(arguments)
-    if values.len != 2:
-      raise newException(EvaluatorError, "insertEditorText expects editor id and text")
-    let key = env.idKey(arguments[0], values[0].asString)
-    if key notin runtime.editorStates:
-      runtime.editorStates[key] = EditorState.new("")
-    runtime.editorStates[key].insertText(values[1].asString)
+    if values.len < 2 or values.len > 3:
+      raise newException(EvaluatorError,
+          "insertEditorText expects editor id, text, and optional singleLine")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "insertEditorText"))
+    state.insertText(values[1].asString, values.editorSelecting(2))
+    state.ensureCursorVisible = true
     nothing()
 
   runtime.evaluator.native "editorLine":
@@ -2482,16 +2618,16 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     discard layout
     discard bodyNodes
     let values = env.evalArgs(arguments)
-    if values.len != 3:
-      raise newException(EvaluatorError, "setEditorLineColumn expects editor id, line, and column")
-    let key = env.idKey(arguments[0], values[0].asString)
-    if key notin runtime.editorStates:
-      runtime.editorStates[key] = EditorState.new("")
-    let cursor = runtime.editorStates[key].cursorForLineColumn(
+    if values.len < 3 or values.len > 4:
+      raise newException(EvaluatorError,
+          "setEditorLineColumn expects editor id, line, column, and optional selecting")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "setEditorLineColumn"))
+    let cursor = state.cursorForLineColumn(
       values[1].asNumber.int, values[2].asNumber.int
     )
-    runtime.editorStates[key].setCursor(cursor)
-    runtime.editorStates[key].ensureCursorVisible = true
+    state.setCursor(cursor, values.editorSelecting(3))
+    state.ensureCursorVisible = true
     nothing()
 
   runtime.evaluator.native "setEditorSelection":
@@ -2567,6 +2703,65 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     if key notin runtime.editorStates:
       runtime.editorStates[key] = EditorState.new("")
     discard runtime.editorStates[key].deleteSelection()
+    nothing()
+
+  runtime.evaluator.native "clearEditorSelection":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "clearEditorSelection expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "clearEditorSelection"))
+    state.clearSelection()
+    nothing()
+
+  runtime.evaluator.native "deleteEditorBackward":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "deleteEditorBackward expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "deleteEditorBackward"))
+    state.deleteBackward()
+    state.ensureCursorVisible = true
+    nothing()
+
+  runtime.evaluator.native "deleteEditorForward":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "deleteEditorForward expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "deleteEditorForward"))
+    state.deleteForward()
+    state.ensureCursorVisible = true
+    nothing()
+
+  runtime.evaluator.native "killEditorLineStart":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "killEditorLineStart expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "killEditorLineStart"))
+    state.killToStart()
+    state.ensureCursorVisible = true
+    nothing()
+
+  runtime.evaluator.native "killEditorLineEnd":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "killEditorLineEnd expects editor id")
+    let state = runtime.editorState(env.editorKey(arguments, values,
+        "killEditorLineEnd"))
+    state.killToEnd()
+    state.ensureCursorVisible = true
     nothing()
 
   runtime.evaluator.native "undoEditor":

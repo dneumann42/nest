@@ -125,6 +125,7 @@ type
     retainedScrollWheelContainers: HashSet[WidgetID]
     retainedFrameValid: bool
     retainedRealtimeWidgets: Table[WidgetID, ComponentWidget]
+    forceNextFullRedraw: bool
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
     layoutChildren: Table[WidgetID, seq[Widget]]
@@ -524,6 +525,12 @@ proc requestRedrawAfter*(self: var UI, ms: int,
     self.hasScheduledRedraw = true
     traceRedrawRequest(ms, ticks, loc)
 
+proc requestFullRedrawAfter*(self: var UI, ms: int,
+    loc: tuple[filename: string, line: int, column: int] = instantiationInfo()) =
+  ## Ask for another full application frame in at most `ms` milliseconds.
+  self.forceNextFullRedraw = true
+  self.requestRedrawAfter(ms, loc)
+
 proc requestRedrawAfterSafe(self: var UI, ms: int,
     loc: tuple[filename: string, line: int, column: int] = instantiationInfo()) {.raises: [].} =
   try:
@@ -880,7 +887,8 @@ proc hasPendingFullRenderInput*(self: UI): bool {.raises: [].} =
 
 proc needsFullRender*(self: UI): bool {.raises: [].} =
   ## Test whether anything has been marked dirty since the last draw.
-  self.context.draw.dirtyAll or self.context.draw.dirtyWidgets.len > 0
+  self.forceNextFullRedraw or self.context.draw.dirtyAll or
+      self.context.draw.dirtyWidgets.len > 0
 
 proc hasRetainedFrame*(self: UI): bool {.raises: [].} =
   ## Test whether a retained frame is available to redraw from.
@@ -1037,6 +1045,7 @@ proc renderKey(kind: string, width, height: SizePolicy,
 proc beginInputFrame*(self: var UI) =
   ## Start collecting a frame's input, clearing what the last frame left
   ## behind.
+  self.forceNextFullRedraw = false
   self.context.update.keyInputs.setLen(0)
   self.context.update.textInputs.setLen(0)
   self.context.update.mouseWheelX = 0
@@ -1488,6 +1497,17 @@ proc clicked*(self: UI, id: WidgetID): bool =
   ## again as the widget tree is built.
   self.phase == EventPhase and self.active(id)
 
+proc clickedIn*(self: UI, id: WidgetID): bool =
+  ## Test whether the mouse was pressed inside the widget's solved frame.
+  if self.phase != EventPhase or not self.pointerReaches(id):
+    return false
+  let located = self.widgetFrame(id)
+  located.ok and self.context.update.mouseLeftPressed and
+    self.context.update.mouseX.toFloat >= located.frame.x and
+    self.context.update.mouseX.toFloat < located.frame.x + located.frame.width and
+    self.context.update.mouseY.toFloat >= located.frame.y and
+    self.context.update.mouseY.toFloat < located.frame.y + located.frame.height
+
 proc dragWindow*(self: var UI, id: WidgetID) =
   ## Makes this widget a drag handle for the application window.
   ## Call this from a popup or dialog title region to opt into dragging.
@@ -1677,6 +1697,11 @@ proc keyPressed*(self: UI, name: string): bool =
     if wanted == "esc" and keyName == "keyesc":
       return true
 
+proc keyNameMatches(wanted, keyName: string): bool =
+  keyName == wanted or keyName == "key" & wanted or
+    (wanted == "escape" and keyName == "keyesc") or
+    (wanted == "esc" and keyName == "keyesc")
+
 proc keyComboPressed*(self: UI, name: string, ctrl = false, alt = false,
     shift = false, gui = false): bool =
   ## Test whether `name` was pressed with exactly the requested modifiers.
@@ -1685,7 +1710,7 @@ proc keyComboPressed*(self: UI, name: string, ctrl = false, alt = false,
   let wanted = normalizedKeyName(name)
   for input in self.context.update.keyInputs:
     let keyName = normalizedKeyName($input.key)
-    if keyName != wanted and keyName != "key" & wanted:
+    if not keyNameMatches(wanted, keyName):
       continue
     if ctrl != (CtrlPressed in input.mods):
       continue
@@ -1696,6 +1721,23 @@ proc keyComboPressed*(self: UI, name: string, ctrl = false, alt = false,
     if gui != (GuiPressed in input.mods):
       continue
     return true
+
+proc textInput*(self: UI): string =
+  ## Return all text input received during this event frame.
+  if self.phase != EventPhase:
+    return ""
+  self.context.update.textInputs.join("")
+
+proc textInputs*(self: UI): seq[string] =
+  ## Return each text input chunk received during this event frame.
+  if self.phase == EventPhase:
+    result = self.context.update.textInputs
+
+proc keyboardInputPending*(self: UI): bool =
+  ## Test whether this event frame contains keyboard or text input.
+  self.phase == EventPhase and (
+    self.context.update.keyInputs.len > 0 or self.context.update.textInputs.len > 0
+  )
 
 proc listKey*(index: int, value: string): string =
   ## Return the list key identifying the item `value` at `index`.
@@ -3098,6 +3140,9 @@ proc drawRealtime*(self: var UI): bool {.discardable.} =
   self.context.update = updateContext
   self.context.draw.hasRedrawRequest = drawContext.hasRedrawRequest
   self.context.draw.redrawDelayMs = drawContext.redrawDelayMs
+  if drawContext.hasRedrawRequest:
+    self.requestRedrawAfterSafe(drawContext.redrawDelayMs)
+  self.frameRedrawn = true
   true
 
 proc drawRetainedFrame*(self: var UI): bool {.discardable.} =

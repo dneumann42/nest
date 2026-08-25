@@ -221,6 +221,7 @@ var
   currentCursor = curDefault
   drawColorValid: bool
   drawColor: screen.Color
+  windowWidth, windowHeight: int
   rendererWidth, rendererHeight: int
   frameTarget: sdl3.Texture
   frameTargetWidth, frameTargetHeight: int
@@ -232,6 +233,8 @@ var
   traceRefreshes: int
   traceTargetGrows: int
   traceLastReportTicks: int
+
+const ResizeProbeMs = 16
 
 proc currentSdlWindow*(): sdl3.Window =
   ## Return the SDL window this driver is rendering into, or nil before one
@@ -793,15 +796,45 @@ proc sdlCreateWindow(layout: var ScreenLayout) =
   discard getWindowSize(win, w, h)
   layout.width = w
   layout.height = h
+  windowWidth = layout.width
+  windowHeight = layout.height
   rendererWidth = layout.width
   rendererHeight = layout.height
-  discard ensureFrameTarget(rendererWidth, rendererHeight)
-  frameContentWidth = rendererWidth
-  frameContentHeight = rendererHeight
+  discard ensureFrameTarget(windowWidth, windowHeight)
+  frameContentWidth = windowWidth
+  frameContentHeight = windowHeight
   layout.scaleX = 1
   layout.scaleY = 1
   currentClip = ClipState()
   applyClipState()
+
+proc currentWindowSize(logicalWidth, logicalHeight: var int): bool =
+  result = false
+  if win != nil:
+    var w, h: cint
+    if getWindowSize(win, w, h):
+      logicalWidth = max(w.int, 0)
+      logicalHeight = max(h.int, 0)
+      result = true
+  if not result:
+    logicalWidth = windowWidth
+    logicalHeight = windowHeight
+
+proc setResizeEvent(e: var input.Event, logicalWidth, logicalHeight: int) =
+  windowWidth = max(logicalWidth, 0)
+  windowHeight = max(logicalHeight, 0)
+  rendererWidth = windowWidth
+  rendererHeight = windowHeight
+  e = input.Event(kind: WindowResizeEvent, x: windowWidth, y: windowHeight)
+
+proc pollWindowResize(e: var input.Event): bool =
+  var logicalW, logicalH: int
+  if not currentWindowSize(logicalW, logicalH):
+    return false
+  if logicalW == windowWidth and logicalH == windowHeight:
+    return false
+  setResizeEvent(e, logicalW, logicalH)
+  true
 
 proc sdlRefresh() =
   if resizeTraceEnabled():
@@ -825,8 +858,8 @@ proc sdlRefresh() =
     dst = FRect(
       x: 0,
       y: 0,
-      w: max(rendererWidth, 1).cfloat,
-      h: max(rendererHeight, 1).cfloat,
+      w: max(frameContentWidth, 1).cfloat,
+      h: max(frameContentHeight, 1).cfloat,
     )
   discard renderTexture(ren, frameTarget, addr src, addr dst)
   discard renderPresent(ren)
@@ -976,10 +1009,10 @@ proc sdlGetFontMetrics(f: screen.Font): FontMetrics =
 
 proc sdlFillRect(r: coords.Rect, color: screen.Color) =
   discard ensureFrameTarget(rendererWidth, rendererHeight)
-  if color.a == 0 and r.x == 0 and r.y == 0 and r.w >= rendererWidth and
-      r.h >= rendererHeight:
-    frameContentWidth = rendererWidth
-    frameContentHeight = rendererHeight
+  if color.a == 0 and r.x == 0 and r.y == 0 and r.w >= windowWidth and
+      r.h >= windowHeight:
+    frameContentWidth = windowWidth
+    frameContentHeight = windowHeight
     discard setRenderDrawColor(ren, color.r, color.g, color.b, color.a)
     discard renderClear(ren)
     drawColorValid = false
@@ -1260,11 +1293,22 @@ proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
     e.kind = QuitEvent
   elif evType == uint32(EVENT_WINDOW_RESIZED) or
       evType == uint32(EVENT_WINDOW_PIXEL_SIZE_CHANGED):
-    e.kind = WindowResizeEvent
-    e.x = sdlEvent.window.data1
-    e.y = sdlEvent.window.data2
-    rendererWidth = e.x
-    rendererHeight = e.y
+    var logicalW, logicalH: int
+    if currentWindowSize(logicalW, logicalH):
+      setResizeEvent(e, logicalW, logicalH)
+    else:
+      setResizeEvent(e, sdlEvent.window.data1, sdlEvent.window.data2)
+  elif evType == uint32(EVENT_WINDOW_EXPOSED) or
+      evType == uint32(EVENT_WINDOW_MOVED) or
+      evType == uint32(EVENT_WINDOW_RESTORED) or
+      evType == uint32(EVENT_WINDOW_DISPLAY_CHANGED) or
+      evType == uint32(EVENT_WINDOW_DISPLAY_SCALE_CHANGED) or
+      evType == uint32(EVENT_WINDOW_SAFE_AREA_CHANGED):
+    var logicalW, logicalH: int
+    if currentWindowSize(logicalW, logicalH):
+      setResizeEvent(e, logicalW, logicalH)
+    else:
+      setResizeEvent(e, windowWidth, windowHeight)
   elif evType == uint32(EVENT_WINDOW_CLOSE_REQUESTED):
     e.kind = WindowCloseEvent
   elif evType == uint32(EVENT_WINDOW_FOCUS_GAINED):
@@ -1339,20 +1383,46 @@ proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
 proc sdlPollEvent(e: var input.Event, flags: set[InputFlag]): bool =
   var sdlEvent: sdl3.Event
   if not pollEvent(sdlEvent):
-    return false
+    return pollWindowResize(e)
   translateEvent(sdlEvent, e)
   result = true
 
 proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[
     InputFlag]): bool =
+  if pollWindowResize(e):
+    return true
   var sdlEvent: sdl3.Event
+  if not useLayerShell:
+    if pollEvent(sdlEvent):
+      translateEvent(sdlEvent, e)
+      return true
+    let sleepMs =
+      if timeoutMs < 0:
+        ResizeProbeMs
+      else:
+        min(timeoutMs, ResizeProbeMs)
+    if sleepMs > 0:
+      sdl3.delay(sleepMs.uint32)
+    if pollWindowResize(e):
+      return true
+    if pollEvent(sdlEvent):
+      translateEvent(sdlEvent, e)
+      return true
+    return false
+  let boundedTimeout =
+    if useLayerShell:
+      timeoutMs
+    elif timeoutMs < 0:
+      ResizeProbeMs
+    else:
+      min(timeoutMs, ResizeProbeMs)
   let ok =
-    if timeoutMs < 0:
+    if boundedTimeout < 0:
       waitEvent(sdlEvent)
     else:
-      waitEventTimeout(sdlEvent, timeoutMs.int32)
+      waitEventTimeout(sdlEvent, boundedTimeout.int32)
   if not ok:
-    return false
+    return pollWindowResize(e)
   translateEvent(sdlEvent, e)
   result = true
 

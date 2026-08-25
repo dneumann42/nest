@@ -16,6 +16,10 @@ type
     EditorScrollX
     EditorScrollY
 
+  EditorCursorStyle* = enum
+    EditorLineCursor
+    EditorBlockCursor
+
   EditorCursor* = object
     index*: int
 
@@ -72,6 +76,8 @@ type
     dragStartScroll*: float64
     ensureCursorVisible*: bool
     syntax*: SyntaxDefinition
+    inputDriver*: string
+    cursorStyle*: EditorCursorStyle
 
   Editor* = ref object of Interactive
     state*: EditorState
@@ -81,6 +87,8 @@ type
     scrollbars*: bool
     readOnly*: bool
     syntax*: string
+    inputDriver*: string
+    cursorStyle*: EditorCursorStyle
     gutterMarkers*: HashSet[int]
     activeLine*: int
 
@@ -200,6 +208,8 @@ proc new*(
     scrollbars = true,
     readOnly = false,
     syntax = "",
+    inputDriver = "",
+    cursorStyle = EditorLineCursor,
     gutterMarkers: HashSet[int] = initHashSet[int](),
     activeLine = 0,
 ): T =
@@ -219,6 +229,8 @@ proc new*(
     scrollbars: scrollbars and not singleLine,
     readOnly: readOnly,
     syntax: syntax.normalize,
+    inputDriver: inputDriver.normalize,
+    cursorStyle: cursorStyle,
     gutterMarkers: gutterMarkers,
     activeLine: activeLine,
   )
@@ -293,7 +305,7 @@ proc deleteSelection*(state: EditorState): bool {.discardable.} =
   state.cursor = r.first
   state.clearSelection()
   state.resetPreferredColumn()
-  true
+  result = true
 
 proc selectAll*(state: EditorState) =
   ## Select the whole text, leaving the cursor at its end.

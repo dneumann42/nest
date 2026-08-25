@@ -20,7 +20,7 @@ type
 const DefaultResizePacerConfig* = ResizePacerConfig(
   settleMs: 250,
   pumpFrameMs: 16,
-  pumpDurationMs: 250,
+  pumpDurationMs: 1000,
 )
 
 proc parseResizeStrategy*(value: string): ResizeStrategy =
