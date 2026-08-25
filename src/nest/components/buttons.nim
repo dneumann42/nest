@@ -58,6 +58,9 @@ proc topPadding(self: Button): float64 =
 proc bottomPadding(self: Button): float64 =
   if self.padding.bottom < 0: ButtonPaddingY.toFloat else: self.padding.bottom
 
+proc isIconButton(self: Button): bool =
+  self.fontName.startsWith("icon")
+
 method measure*(self: Button, resources: Resources): IntrinsicSize =
   ## Return the size of the label plus the button's padding.
   let measurement = resources.measureText(self.fontName, self.label)
@@ -89,24 +92,28 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
     hot = ctx.hot(widget.id)
     active = ctx.active(widget.id)
     bounds = rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
-  if self.chromeStyle == ButtonChromeRaised:
+    iconButton = self.isIconButton()
+  if self.chromeStyle == ButtonChromeRaised and not iconButton:
     self.drawShadow(bounds)
-  if self.chromeStyle == ButtonChromeRaised and not self.style.hasShadow:
+  if self.chromeStyle == ButtonChromeRaised and not iconButton and
+      not self.style.hasShadow:
     self.styledFillRect(
       rect(f.x.toInt + 2, f.y.toInt + 2, f.width.toInt, f.height.toInt),
       color(0, 0, 0))
-  self.styledFillRect(
-    bounds,
-    if self.style.hasBackground:
-      self.styledBackground(ctx.palette.background)
-    elif not active and hot:
-      ctx.palette.backgroundHot
-    elif active and hot:
-      ctx.palette.backgroundActive
-    else:
-      ctx.palette.background,
-  )
-  if self.chromeStyle == ButtonChromeRaised and self.style.cornerStyle == FlatCorners:
+  if not iconButton:
+    self.styledFillRect(
+      bounds,
+      if self.style.hasBackground:
+        self.styledBackground(ctx.palette.background)
+      elif not active and hot:
+        ctx.palette.backgroundHot
+      elif active and hot:
+        ctx.palette.backgroundActive
+      else:
+        ctx.palette.background,
+    )
+  if self.chromeStyle == ButtonChromeRaised and not iconButton and
+      self.style.cornerStyle == FlatCorners:
     drawLine(
       f.x.toInt + 1,
       f.y.toInt + 1,
@@ -114,7 +121,7 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       f.y.toInt + 1,
       ctx.palette.buttonHighlight,
     )
-  if self.borderStyle == ButtonBorderLine:
+  if self.borderStyle == ButtonBorderLine and not iconButton:
     self.drawBorder(
       f,
       if active and hot:
@@ -143,6 +150,13 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
         f.x.toInt + paddingLeft
     textY = f.y.toInt + max((f.height.toInt - textExtent.height) div 2, paddingTop)
     textWidth = max(f.width.toInt - paddingLeft - paddingRight, 0)
+    textColor =
+      if iconButton and active and hot:
+        ctx.palette.buttonBorderActive
+      elif iconButton and hot:
+        ctx.palette.buttonBorderHot
+      else:
+        ctx.palette.textColor
   if self.textScroll and textExtent.width > textWidth and textWidth > 0:
     let offset =
       if AnimateTextScroll:
@@ -161,7 +175,7 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
       textX - offset,
       textY,
       self.label,
-      ctx.palette.textColor,
+      textColor,
       color(0, 0, 0, 0),
     )
     if AnimateTextScroll:
@@ -171,12 +185,17 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
         textX - offset + textExtent.width + gap,
         textY,
         self.label,
-        ctx.palette.textColor,
+        textColor,
         color(0, 0, 0, 0),
       )
     restoreState()
   else:
+    if iconButton and hot:
+      discard drawText(
+        Font(font), textX + 1, textY + 1, self.label, color(0, 0, 0, 150),
+        color(0, 0, 0, 0)
+      )
     discard drawText(
-      Font(font), textX, textY, self.label, ctx.palette.textColor, color(0, 0,
+      Font(font), textX, textY, self.label, textColor, color(0, 0,
           0, 0)
     )

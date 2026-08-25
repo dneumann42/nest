@@ -291,6 +291,7 @@ template application*(cfg: AppConfig; blk: untyped) =
     )
   drawContext.resources.loadFont("font", "", 18)
   drawContext.resources.loadFont("editor", "nerd-monospace", 18)
+  drawContext.resources.loadFont("icon", "nerd-monospace", 18)
   var
     firstFrame = true
     nextFrameTicks = input.getTicks()
@@ -416,6 +417,7 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
   ui.initContext(window.width, window.height)
   ui.loadFont("font", "", 18)
   ui.loadFont("editor", "nerd-monospace", 18)
+  ui.loadFont("icon", "nerd-monospace", 18)
   var
     firstFrame = true
     nextFrameTicks = input.getTicks()

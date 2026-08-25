@@ -27,6 +27,9 @@ type
   ButtonChromeStyleValue* = ref object of NativeValue
     value*: ButtonChromeStyle
 
+  ButtonVariantValue* = ref object of NativeValue
+    value*: ButtonVariant
+
   ColorValue* = ref object of NativeValue
     value*: Color
 
@@ -256,6 +259,9 @@ proc buttonBorderStyleValue(style: ButtonBorderStyle): Value =
 proc buttonChromeStyleValue(style: ButtonChromeStyle): Value =
   nativeValue(ButtonChromeStyleValue(value: style))
 
+proc buttonVariantValue(variant: ButtonVariant): Value =
+  nativeValue(ButtonVariantValue(value: variant))
+
 proc colorValue(color: Color): Value =
   nativeValue(ColorValue(value: color))
 
@@ -374,6 +380,22 @@ proc asButtonChromeStyle(value: Value,
       ButtonChromeFlat
     of "raised", "default", "chrome":
       ButtonChromeRaised
+    else:
+      fallback
+
+proc asButtonVariant(value: Value, fallback: ButtonVariant): ButtonVariant =
+  if value.kind == Native and value.native of ButtonVariantValue:
+    ButtonVariantValue(value.native).value
+  else:
+    case value.asString.normalize
+    of "normal", "default":
+      ButtonNormal
+    of "small", "compact":
+      ButtonSmall
+    of "large", "big":
+      ButtonLarge
+    of "icon", "plain", "bare":
+      ButtonIcon
     else:
       fallback
 
@@ -596,6 +618,8 @@ proc evalConfig(
       result.scrollY = value.isTruthy
     of "scrollWheel":
       result.scrollWheel = value.isTruthy
+    of "dismissOnClickaway":
+      result.dismissOnClickaway = value.isTruthy
     of "textScroll":
       result.textScroll = value.isTruthy
     of "lineNumbers":
@@ -622,6 +646,8 @@ proc evalConfig(
           result.buttonChromeStyle)
     of "buttonTextAlign", "textAlign":
       result.buttonTextAlign = value.asJustification(result.buttonTextAlign)
+    of "buttonVariant", "variant":
+      result = result.applyButtonVariant(value.asButtonVariant(ButtonNormal))
     of "syntax", "syntaxHighlighter":
       result.syntax = value.asString
     of "background", "backgroundColor":
@@ -1832,6 +1858,14 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       raise newException(EvaluatorError, "focused expects one widget ID")
     boolean(runtime.requireUi().focused(runtime.asWidgetID(env.eval(arguments[0]))))
 
+  runtime.evaluator.native "focus":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "focus expects one widget ID")
+    runtime.currentUi[].focus(runtime.asWidgetID(env.eval(arguments[0])))
+    nothing()
+
   runtime.evaluator.native "submitted":
     discard layout
     discard bodyNodes
@@ -2248,6 +2282,31 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     if values.len != 1:
       raise newException(EvaluatorError, "scrollY expects widget id")
     number(runtime.requireUi().scrollOffset(runtime.asWidgetID(values[0])).y)
+
+  runtime.evaluator.native "scrollByY":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "scrollByY expects widget id and delta")
+    runtime.currentUi[].scrollByY(runtime.asWidgetID(values[0]), values[1].asNumber)
+    nothing()
+
+  runtime.evaluator.native "scrollIntoView":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len notin [2, 3]:
+      raise newException(
+        EvaluatorError,
+        "scrollIntoView expects container id, child id, and optional padding",
+      )
+    runtime.currentUi[].scrollIntoView(
+      runtime.asWidgetID(values[0]),
+      runtime.asWidgetID(values[1]),
+      if values.len == 3: values[2].asNumber else: 0.0,
+    )
+    nothing()
 
   runtime.evaluator.native "widgetHeight":
     discard layout
@@ -3418,6 +3477,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       config.width,
       config.height,
       config.alignSelf,
+      dismissOnClickaway = config.dismissOnClickaway,
     )
     if runtime.requireUi().inEventPhase() and picked.changed:
       number(picked.index.float64)
@@ -3635,6 +3695,14 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       buttonChromeStyleValue(ButtonChromeFlat))
   runtime.evaluator.env.define("ButtonChromeRaised",
       buttonChromeStyleValue(ButtonChromeRaised))
+  runtime.evaluator.env.define("ButtonNormal",
+      buttonVariantValue(ButtonNormal))
+  runtime.evaluator.env.define("ButtonSmall",
+      buttonVariantValue(ButtonSmall))
+  runtime.evaluator.env.define("ButtonLarge",
+      buttonVariantValue(ButtonLarge))
+  runtime.evaluator.env.define("ButtonIcon",
+      buttonVariantValue(ButtonIcon))
 
 proc init*(T: typedesc[NestOwlRuntime]): T =
   ## Create a runtime with a fresh evaluator and Nest's owl builtins.

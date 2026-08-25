@@ -15,6 +15,7 @@ type
     selected: int
     open: bool
     optionHeight: int
+    dismissOnClickaway: bool
 
 proc new*(
     T: typedesc[ComboBox],
@@ -23,13 +24,15 @@ proc new*(
     selected = 0,
     open = false,
     optionHeight = ComboMinHeight,
+    dismissOnClickaway = true,
 ): T =
   ## Create a combo box.
   ##
   ## `label` is the text shown on the closed field, `options` are the
   ## choices, `selected` indexes the current one, `open` starts the popover
   ## open, and `optionHeight` sets the height of one row in the list.
-  T(label: label, options: @options, selected: selected, open: open, optionHeight: optionHeight)
+  T(label: label, options: @options, selected: selected, open: open,
+      optionHeight: optionHeight, dismissOnClickaway: dismissOnClickaway)
 
 proc contains(frame: Frame, x, y: int): bool =
   x.float64 >= frame.x and x.float64 < frame.x + frame.width and
@@ -77,7 +80,7 @@ method update*(self: ComboBox, widget: Widget, ctx: var UpdateContext) =
         ctx.clearFocus()
       else:
         ctx.setFocus(widget.id)
-    elif self.open and not popupHot:
+    elif self.open and self.dismissOnClickaway and not popupHot:
       ctx.clearFocus()
 
 proc drawTextClipped(ctx: var DrawContext, f: Frame, text: string, selected = false) =

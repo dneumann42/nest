@@ -37,6 +37,12 @@ type
     ColumnLayout
     OverlayLayout
 
+  ButtonVariant* = enum
+    ButtonNormal
+    ButtonSmall
+    ButtonLarge
+    ButtonIcon
+
   UIPhase = enum
     LayoutPhase
     EventPhase
@@ -75,6 +81,7 @@ type
     alignSelf*: Alignment
     scrollX*, scrollY*: bool
     scrollWheel*: bool
+    dismissOnClickaway*: bool
     textScroll*: bool
     lineNumbers*: bool
     scrollbars*: bool
@@ -232,6 +239,7 @@ proc cfg*(
     scrollX = false,
     scrollY = false,
     scrollWheel = true,
+    dismissOnClickaway = true,
     textScroll = false,
     lineNumbers = false,
     scrollbars = true,
@@ -308,6 +316,7 @@ proc cfg*(
     scrollX: scrollX,
     scrollY: scrollY,
     scrollWheel: scrollWheel,
+    dismissOnClickaway: dismissOnClickaway,
     textScroll: textScroll,
     lineNumbers: lineNumbers,
     scrollbars: scrollbars,
@@ -323,6 +332,49 @@ proc cfg*(
     syntax: syntax,
     style: resolvedStyle,
   )
+
+proc applyButtonVariant*(config: BoxConfig, variant: ButtonVariant): BoxConfig =
+  ## Return `config` with Nest's shared button sizing and chrome variant.
+  result = config
+  case variant
+  of ButtonNormal:
+    result.buttonPadding = insets(-1.0)
+    result.buttonBorderStyle = ButtonBorderLine
+    result.buttonChromeStyle = ButtonChromeRaised
+  of ButtonSmall:
+    result.buttonPadding = insets(6, 2, 6, 2)
+    result.buttonBorderStyle = ButtonBorderLine
+    result.buttonChromeStyle = ButtonChromeRaised
+  of ButtonLarge:
+    result.buttonPadding = insets(12, 5, 12, 5)
+    result.buttonBorderStyle = ButtonBorderLine
+    result.buttonChromeStyle = ButtonChromeRaised
+  of ButtonIcon:
+    result.buttonPadding = insets(0)
+    result.buttonBorderStyle = ButtonBorderNone
+    result.buttonChromeStyle = ButtonChromeFlat
+    result.style.hasBackground = true
+    result.style.background = color(0, 0, 0, 0)
+    result.style.hasShadow = true
+    result.style.shadowColor = color(0, 0, 0, 120)
+    result.style.shadowOffsetY = 2
+    result.style.shadowBlur = 5
+
+proc buttonConfig*(variant = ButtonNormal): BoxConfig =
+  ## Return a fit-sized button config for `variant`.
+  cfg(width = fit(), height = fit()).applyButtonVariant(variant)
+
+proc normalButtonConfig*(): BoxConfig =
+  buttonConfig(ButtonNormal)
+
+proc smallButtonConfig*(): BoxConfig =
+  buttonConfig(ButtonSmall)
+
+proc largeButtonConfig*(): BoxConfig =
+  buttonConfig(ButtonLarge)
+
+proc iconButtonConfig*(): BoxConfig =
+  buttonConfig(ButtonIcon)
 
 proc defaultUIDriverRelays*(): UIDriverRelays =
   ## Return the UI declaration defaults shared by language drivers.
@@ -854,6 +906,45 @@ proc markDirty*(self: var UI, id: WidgetID) {.raises: [].} =
   if id != InvalidWidgetID:
     self.context.draw.dirtyWidgets.incl id
 
+proc scrollByY*(self: var UI, id: WidgetID, delta: float64) {.raises: [].} =
+  ## Move a scroll container's vertical target by `delta` pixels.
+  if id == InvalidWidgetID:
+    return
+  var state = self.scrollStates.getOrDefault(id)
+  state.targetY = (state.targetY + delta).clamp(0.0, state.maxY)
+  self.scrollStates[id] = state
+  self.markDirty(id)
+  self.requestRedrawAfterSafe(16)
+
+proc scrollIntoView*(
+    self: var UI, containerID, childID: WidgetID, padding = 0.0
+) {.raises: [].} =
+  ## Adjust a scroll container's vertical target so `childID` is visible.
+  if containerID == InvalidWidgetID or childID == InvalidWidgetID:
+    return
+  let
+    container = self.widgetFrame(containerID)
+    child = self.widgetFrame(childID)
+  if not container.ok or not child.ok:
+    return
+  var state = self.scrollStates.getOrDefault(containerID)
+  let
+    childTop = child.frame.y - padding
+    childBottom = child.frame.y + child.frame.height + padding
+    visibleTop = container.frame.y
+    visibleBottom = container.frame.y + container.frame.height
+  if childTop < visibleTop:
+    state.targetY = (state.targetY - (visibleTop - childTop)).clamp(0.0,
+        state.maxY)
+  elif childBottom > visibleBottom:
+    state.targetY = (state.targetY + (childBottom - visibleBottom)).clamp(0.0,
+        state.maxY)
+  else:
+    return
+  self.scrollStates[containerID] = state
+  self.markDirty(containerID)
+  self.requestRedrawAfterSafe(16)
+
 proc markRealtime*(self: var UI, id: WidgetID) {.raises: [].} =
   ## Mark a widget as animating, so it is redrawn every frame for as long as
   ## it stays in the tree. Ignores `InvalidWidgetID`.
@@ -1027,9 +1118,10 @@ proc renderKey(kind: string, config: BoxConfig): string =
   kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
     paddingKey & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
     $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
-    $config.scrollWheel & "|" & $config.textScroll & "|" & $config.lineNumbers &
-    "|" & $config.scrollbars & "|" & $config.readOnly & "|" & config.fontName &
-    "|" & $config.fontSize & "|" & buttonPaddingKey & "|" & config.syntax &
+    $config.scrollWheel & "|" & $config.dismissOnClickaway & "|" &
+    $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars &
+    "|" & $config.readOnly & "|" & config.fontName & "|" & $config.fontSize &
+    "|" & buttonPaddingKey & "|" & config.syntax &
     styleKey
 
 proc styleRenderKey(style: ComponentStyle): string =
@@ -1496,6 +1588,10 @@ proc clicked*(self: UI, id: WidgetID): bool =
   ## being dispatched, so a handler built on it runs once a frame rather than
   ## again as the widget tree is built.
   self.phase == EventPhase and self.active(id)
+
+proc mouseLeftPressed*(self: UI): bool =
+  ## Test whether the left mouse button was pressed this frame.
+  self.phase == EventPhase and self.context.update.mouseLeftPressed
 
 proc clickedIn*(self: UI, id: WidgetID): bool =
   ## Test whether the mouse was pressed inside the widget's solved frame.
@@ -3824,6 +3920,7 @@ proc button*(
     buttonBorderStyle = ButtonBorderLine,
     buttonChromeStyle = ButtonChromeRaised,
     buttonTextAlign = JustifyCenter,
+    buttonVariant = ButtonNormal,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Declare a button with the id `id` labelled `label`.
@@ -3833,19 +3930,29 @@ proc button*(
   ## text, and `style` sets an explicit background or opacity.
   if ui.phase == EventPhase:
     return ui.clicked(id)
+  var variantConfig = cfg(style = style)
+  variantConfig.buttonPadding = buttonPadding
+  variantConfig.buttonBorderStyle = buttonBorderStyle
+  variantConfig.buttonChromeStyle = buttonChromeStyle
+  variantConfig.buttonTextAlign = buttonTextAlign
+  if buttonVariant != ButtonNormal:
+    variantConfig = variantConfig.applyButtonVariant(buttonVariant)
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
     renderKey("button:" & label & ":" & $textScroll & ":" & fontName & ":" &
-        $buttonPadding.left & "," & $buttonPadding.top & "," &
-        $buttonPadding.right & "," & $buttonPadding.bottom, width, height,
-        alignSelf) & "|" & $buttonBorderStyle & "|" & $buttonChromeStyle & "|" &
-      $buttonTextAlign & "|" &
-      styleRenderKey(style),
+        $variantConfig.buttonPadding.left & "," &
+        $variantConfig.buttonPadding.top & "," &
+        $variantConfig.buttonPadding.right & "," &
+        $variantConfig.buttonPadding.bottom, width, height, alignSelf) & "|" &
+      $variantConfig.buttonBorderStyle & "|" & $variantConfig.buttonChromeStyle &
+      "|" & $variantConfig.buttonTextAlign & "|" &
+      styleRenderKey(variantConfig.style),
   )
-  let btn = Button.new(label, textScroll, fontName, buttonPadding,
-      buttonBorderStyle, buttonChromeStyle, buttonTextAlign)
-  btn.style = style
+  let btn = Button.new(label, textScroll, fontName, variantConfig.buttonPadding,
+      variantConfig.buttonBorderStyle, variantConfig.buttonChromeStyle,
+      variantConfig.buttonTextAlign)
+  btn.style = variantConfig.style
   ui.attach(box, Component(btn))
   ui.addChild(box)
 
@@ -3862,6 +3969,7 @@ proc button*(
     buttonBorderStyle = ButtonBorderLine,
     buttonChromeStyle = ButtonChromeRaised,
     buttonTextAlign = JustifyCenter,
+    buttonVariant = ButtonNormal,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Declare a button with the same `buttonPadding` on every edge.
@@ -3877,6 +3985,7 @@ proc button*(
     buttonBorderStyle = buttonBorderStyle,
     buttonChromeStyle = buttonChromeStyle,
     buttonTextAlign = buttonTextAlign,
+    buttonVariant = buttonVariant,
     style = style,
   )
 
@@ -4485,6 +4594,7 @@ proc combobox*(
     height = fit(),
     alignSelf = AlignAuto,
     closeOnSelect = true,
+    dismissOnClickaway = true,
 ): tuple[changed: bool, index: int] {.discardable.} =
   ## Declare a combo box with the id `id` offering `options`, with `selected`
   ## as the current index.
@@ -4494,7 +4604,8 @@ proc combobox*(
   ## closes when the pointer goes elsewhere, and `index` stays at `selected`
   ## for empty `options`. Picking an option closes the list too, unless
   ## `closeOnSelect` is false, which suits a list the user picks from more
-  ## than once.
+  ## than once. `dismissOnClickaway` controls whether a click outside the
+  ## field and open list closes it.
   result.index = selected
   if options.len == 0:
     return
@@ -4522,6 +4633,8 @@ proc combobox*(
             ui.showChoicePopover(id, f, clampedSelected, options)
             ui.eventActiveWidgets.clear()
             ui.context.draw.activeWidgets.clear()
+          elif dismissOnClickaway:
+            ui.closeChoicePopover(id)
         return
     if open:
       let located = ui.widgetFrame(id)
@@ -4546,7 +4659,7 @@ proc combobox*(
           if closeOnSelect:
             ui.closeFocus(id)
           return (optionIndex != clampedSelected, optionIndex)
-        elif not inField:
+        elif dismissOnClickaway and not inField:
           ui.closeFocus(id)
     return
 
@@ -4559,7 +4672,7 @@ proc combobox*(
       width,
       height,
       alignSelf,
-    ),
+    ) & "|" & $dismissOnClickaway,
   )
   # One option is as tall as the field, which is only known once the frame is
   # solved; until then the standard control height stands in.
@@ -4575,9 +4688,10 @@ proc combobox*(
     box,
     Component(
       ComboBox.new(
-        options[clampedSelected], options, clampedSelected, open, optionHeight
-    )
-  ),
+        options[clampedSelected], options, clampedSelected, open, optionHeight,
+        dismissOnClickaway,
+      )
+    ),
   )
   ui.addChild(box)
   if open:
