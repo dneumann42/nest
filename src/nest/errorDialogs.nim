@@ -18,10 +18,13 @@ proc pollOwlErrorDialog*(app: NestOwlApp) =
   ## The reported error is remembered as dismissed, so the same error does
   ## not immediately raise the dialog again.
   if app.errorDialogProcess != nil and not app.errorDialogProcess.running:
+    let exitCode = app.errorDialogProcess.peekExitCode()
     app.errorDialogProcess.close
     app.errorDialogProcess = nil
-    if app.errorDialogMessage.len > 0:
+    if exitCode == 0 and app.errorDialogMessage.len > 0:
       app.runtime.dismissedError = app.errorDialogMessage
+    elif exitCode != 0:
+      app.errorDialogLaunchError = "Owl error dialog exited with code " & $exitCode
 
 proc detailsJson(details: ErrorDetails): string =
   var frames = newJArray()
@@ -83,27 +86,34 @@ proc diagnosticLines(details: ErrorDetails): seq[string] =
     for frame in details.frames:
       result.add "  at " & frame.locationText()
 
-proc launchOwlErrorDialog*(app: NestOwlApp, details: ErrorDetails) =
+proc launchOwlErrorDialog*(app: NestOwlApp, details: ErrorDetails): bool {.discardable.} =
   ## Show `details` in a separate error dialog process.
   ##
   ## Does nothing for an empty report, for an error the user has already
   ## dismissed, or while a dialog for it is still open.
+  app.errorDialogLaunchError = ""
   let message = details.errorReport()
   if message.len == 0 or app.runtime.dismissedError == message:
-    return
+    return true
   app.pollOwlErrorDialog()
   if app.errorDialogProcess != nil and app.errorDialogMessage == message:
-    return
+    return true
   app.closeOwlErrorDialog()
+  app.lastError = message
+  app.lastErrorDetails = details
   try:
     app.errorDialogProcess = startProcess(
-      getAppFilename(), args = @["error-dialog-json", details.detailsJson()], options = {poUsePath}
+      getAppFilename(), args = @["error-dialog-json", details.detailsJson()],
+      options = {poUsePath, poParentStreams}
     )
     app.errorDialogMessage = message
-  except OSError:
-    discard
-  except IOError:
-    discard
+    true
+  except OSError as error:
+    app.errorDialogLaunchError = "could not launch Owl error dialog: " & error.msg
+    false
+  except IOError as error:
+    app.errorDialogLaunchError = "could not launch Owl error dialog: " & error.msg
+    false
 
 template owlErrorDialogBody(
     ui: var UI, details: ErrorDetails, copied: var bool, running: var bool

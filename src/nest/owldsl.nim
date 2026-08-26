@@ -115,6 +115,7 @@ type
     lastErrorDetails*: ErrorDetails
     errorDialogProcess*: Process
     errorDialogMessage*: string
+    errorDialogLaunchError*: string
     lastFullRenderTicks: int
     lastMaintenanceTicks: int
 
@@ -3895,12 +3896,17 @@ proc renderWidget*(
   runtime.currentUi = addr ui
   runtime.stateBindings.setLen(0)
   try:
-    if libraryPath.len > 0:
-      runtime.loadWidgetLibrary(libraryPath)
-    var nodes: seq[SyntaxNode]
-    for argument in arguments:
-      nodes.add argument
-    discard runtime.renderNodes(@[command(symbol(widgetName), nodes)])
+    try:
+      if libraryPath.len > 0:
+        runtime.loadWidgetLibrary(libraryPath)
+      var nodes: seq[SyntaxNode]
+      for argument in arguments:
+        nodes.add argument
+      discard runtime.renderNodes(@[command(symbol(widgetName), nodes)])
+    except EvaluatorError as error:
+      runtime.hasError = true
+      runtime.lastError = report(error)
+      runtime.lastErrorDetails = error.errorDetails()
   finally:
     runtime.commitState()
     runtime.currentUi = nil
