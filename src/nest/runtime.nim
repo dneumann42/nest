@@ -244,24 +244,6 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
   else:
     discard
 
-proc redrawRetainedIfClean(ui: var UI): bool {.discardable.} =
-  ## Service a timer-driven repaint without rebuilding the application when
-  ## the retained widget tree is still valid. Input and dirty state still take
-  ## the normal full render path.
-  if not ui.hasRetainedFrame() or ui.needsFullRender() or ui.hasPendingFullRenderInput():
-    return false
-  ui.clearRedrawRequest()
-  ui.setDrawTicks(input.getTicks())
-  if ui.hasPendingInput():
-    discard ui.updateRetainedFrame()
-  elif ui.hasRealtimeWidgets():
-    discard ui.drawRealtime()
-  else:
-    discard ui.drawRetainedFrame()
-  if ui.redrewFrame():
-    refresh()
-  true
-
 proc requestResizeFrame(ui: var UI) =
   ## Resize is an explicit redraw driver. The runtime still avoids doing work
   ## when idle, but while the compositor is delivering resize events the app
@@ -488,8 +470,11 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
         ui.clearRedrawRequest()
       shouldRender = true
     elif redrawWaitMs >= 0 and ui.redrawDelayMs() == 0:
-      if ui.redrawRetainedIfClean():
-        continue
+      ## Timed redraws must re-enter the application block so app-level render
+      ## code can decide whether the frame can stay retained or needs a full
+      ## rebuild. Servicing the timer here breaks view-driven updates such as
+      ## Owl clocks and scroll-window virtualization, which only advance when
+      ## the view is reevaluated.
       shouldRender = true
       ui.clearRedrawRequest()
     if not shouldRender:

@@ -2789,6 +2789,9 @@ template layout*(
     screen.commandMeasureImage = previousCommandMeasureImage
 
   ui.frameRedrawn = false
+  var savedIdScopes {.gensym.}: seq[string]
+  for scope in ui.idScopes:
+    savedIdScopes.add(scope)
   ui.beginEvents(drawContext)
   blk
 
@@ -2796,6 +2799,7 @@ template layout*(
   var layoutOk {.gensym.} = false
   try:
     ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
+    ui.idScopes = savedIdScopes
     blk
     ui.applyIntrinsicSizes(drawContext.resources)
     layoutOk = ui.endLayout()
@@ -2835,6 +2839,7 @@ template layout*(
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
   ui.reset()
+  ui.idScopes = savedIdScopes
 
 template layout*(ui: var UI, blk: untyped): auto =
   ## Run one frame of the UI.
@@ -2857,6 +2862,9 @@ template layout*(ui: var UI, blk: untyped): auto =
     screen.commandMeasureImage = previousCommandMeasureImage
 
   ui.frameRedrawn = false
+  var savedIdScopes {.gensym.}: seq[string]
+  for scope in ui.idScopes:
+    savedIdScopes.add(scope)
   ui.beginEvents(ui.context.draw)
   blk
 
@@ -2864,6 +2872,7 @@ template layout*(ui: var UI, blk: untyped): auto =
   var layoutOk {.gensym.} = false
   try:
     ui.beginLayout(ui.context.draw.windowWidth, ui.context.draw.windowHeight)
+    ui.idScopes = savedIdScopes
     blk
     ui.applyIntrinsicSizes(ui.context.draw.resources)
     layoutOk = ui.endLayout()
@@ -2906,6 +2915,7 @@ template layout*(ui: var UI, blk: untyped): auto =
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
   ui.reset()
+  ui.idScopes = savedIdScopes
 
 proc updateScrollbarDrag(self: var UI, parent: Widget,
     context: var UpdateContext) =

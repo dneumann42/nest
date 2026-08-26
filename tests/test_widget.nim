@@ -154,6 +154,14 @@ widget rootView(model: Model) emits Msg:
     if ui.button(ui.id("inc"), "+", fixed(40), fixed(24)):
       emit Increment
 
+var timedViewLayoutFrames = 0
+
+widget timedRedrawView(model: Model) emits Msg:
+  if ui.inLayoutPhase():
+    inc timedViewLayoutFrames
+  ui.column(ui.id("root"), cfg(padding = 8, gap = 6)):
+    ui.label(ui.id("count"), $model.count, fixed(60), fixed(24))
+
 suite "runApp":
   test "the loop runs frames and stops when running is cleared":
     var frames = 0
@@ -182,6 +190,18 @@ suite "runApp":
       if frames >= 2:
         running = false
     check frames == 2
+
+  test "timed redraws rerun the root view without input":
+    timedViewLayoutFrames = 0
+    var frames = 0
+    runApp(AppConfig.init(width = 120, height = 80), Model(), update,
+        timedRedrawView):
+      inc frames
+      ui.requestRedrawAfter(1)
+      if frames >= 3:
+        running = false
+    check frames == 3
+    check timedViewLayoutFrames == 3
 
   test "a root widget of neither shape is rejected":
     proc wrongArity(ui: var UI) = discard
