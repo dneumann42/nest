@@ -91,6 +91,7 @@ type
     pendingPathCallbacks: seq[PendingPathCallback]
     pathPickerResults: Table[string, string]
     editorStates: Table[string, EditorState]
+    imageViewerStates: Table[string, PanZoomImageState]
     shellProcesses*: Table[string, ShellProcess]
     shellCache*: Table[string, ShellCache]
     workspaceSubscriptions*: Table[string, WorkspaceSubscription]
@@ -272,6 +273,10 @@ proc requireUi(runtime: NestOwlRuntime): var UI {.raises: [EvaluatorError].} =
   if runtime.currentUi.isNil:
     raise newException(EvaluatorError, "Nest UI is not rendering")
   runtime.currentUi[]
+
+proc requireCurrentUi*(runtime: NestOwlRuntime): var UI {.raises: [
+    EvaluatorError].} =
+  runtime.requireUi()
 
 proc asString(value: Value): string =
   case value.kind
@@ -3613,6 +3618,72 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
         config.alignSelf)
     nothing()
 
+  runtime.evaluator.native "imageViewer":
+    discard layout
+    let values = env.evalArgs(arguments)
+    let
+      id =
+        if values.len > 0:
+          runtime.asWidgetID(values[0])
+        else:
+          nextWidgetID()
+      key =
+        if arguments.len > 0:
+          env.idKey(arguments[0], values[0].asString)
+        else:
+          $id
+      path =
+        if values.len > 1:
+          values[1].asString
+        else:
+          ""
+      config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+    if key notin runtime.imageViewerStates:
+      runtime.imageViewerStates[key] = PanZoomImageState.new()
+    discard runtime.currentUi[].component(
+      id,
+      Component(PanZoomImageView.new(path, runtime.imageViewerStates[key])),
+      config.width,
+      config.height,
+      config.alignSelf,
+      "imageViewer:" & path,
+    )
+    nothing()
+
+  runtime.evaluator.native "imageViewerZoom":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError, "imageViewerZoom expects id and factor")
+    let key = env.idKey(arguments[0], values[0].asString)
+    if key notin runtime.imageViewerStates:
+      runtime.imageViewerStates[key] = PanZoomImageState.new()
+    runtime.imageViewerStates[key].zoom =
+      (runtime.imageViewerStates[key].zoom * values[1].asNumber(1.0)).clamp(
+        0.05, 64.0)
+    if not runtime.currentUi.isNil:
+      try:
+        runtime.currentUi[].markAllDirty()
+      except Exception:
+        discard
+    nothing()
+
+  runtime.evaluator.native "imageViewerReset":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "imageViewerReset expects id")
+    let key = env.idKey(arguments[0], values[0].asString)
+    runtime.imageViewerStates[key] = PanZoomImageState.new()
+    if not runtime.currentUi.isNil:
+      try:
+        runtime.currentUi[].markAllDirty()
+      except Exception:
+        discard
+    nothing()
+
   runtime.evaluator.native "imageButton":
     discard layout
     let values = env.evalArgs(arguments)
@@ -3719,6 +3790,7 @@ proc init*(T: typedesc[NestOwlRuntime]): T =
     dialogResults: initTable[string, string](),
     openMenus: initTable[string, string](),
     editorStates: initTable[string, EditorState](),
+    imageViewerStates: initTable[string, PanZoomImageState](),
     pathPickerResults: initTable[string, string](),
     shellProcesses: initTable[string, ShellProcess](),
     shellCache: initTable[string, ShellCache](),

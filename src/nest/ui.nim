@@ -3930,7 +3930,8 @@ proc button*(
   ## text, and `style` sets an explicit background or opacity.
   if ui.phase == EventPhase:
     return ui.clicked(id)
-  var variantConfig = cfg(style = style)
+  var variantConfig = cfg()
+  variantConfig.style = style
   variantConfig.buttonPadding = buttonPadding
   variantConfig.buttonBorderStyle = buttonBorderStyle
   variantConfig.buttonChromeStyle = buttonChromeStyle

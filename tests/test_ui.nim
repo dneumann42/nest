@@ -109,6 +109,79 @@ suite "ui layout nesting":
     check styled.style.shadowBlur == 6
     check styled.style.shadowSpread == 1
 
+  test "rounded button caps survive recorded drawing":
+    let originalFontRelays = fontRelays
+    try:
+      fontRelays = FontRelays(
+        openFont: proc(path: string, size: int,
+            metrics: var FontMetrics): Font =
+          discard path
+          metrics = FontMetrics(ascent: 14, descent: 4, lineHeight: 22)
+          Font(size),
+        closeFont: proc(f: Font) =
+          discard f,
+        getFontMetrics: proc(f: Font): FontMetrics =
+          discard f
+          FontMetrics(ascent: 14, descent: 4, lineHeight: 22),
+        measureText: proc(f: Font, text: string): TextExtent =
+          discard f
+          TextExtent(w: max(text.len, 1) * 9, h: 18),
+        drawText: proc(f: Font, x, y: int, text: string, fg,
+            bg: Color): TextExtent =
+          discard f
+          discard x
+          discard y
+          discard text
+          discard fg
+          discard bg
+          TextExtent(w: max(text.len, 1) * 9, h: 18),
+      )
+      var
+        ui = UI.init()
+        updateContext = UpdateContext(windowWidth: 240, windowHeight: 80)
+        drawCommands: seq[DrawCommand]
+        drawContext = DrawContext(
+          resources: Resources.new(),
+          palette: Palette.init(),
+          windowWidth: 240,
+          windowHeight: 80,
+          dirtyAll: true,
+          drawCommands: addr drawCommands,
+        )
+      drawContext.resources.loadFont("font", "", 18)
+      ui.initContext(240, 80)
+
+      ui.layout(updateContext, drawContext):
+        ui.row(ui.id("bar"), cfg(width = fit(), height = fixed(28), gap = 0)):
+          discard ui.button(ui.id("left"), "L", width = fixed(40),
+              height = fixed(28), buttonPadding = 4,
+              style = cfg(cornerStyle = RoundedCorners, radiusTopLeft = 12,
+                radiusBottomLeft = 12).withBackground(color(20, 20, 20)).style)
+          discard ui.button(ui.id("right"), "R", width = fixed(40),
+              height = fixed(28), buttonPadding = 4,
+              style = cfg(cornerStyle = RoundedCorners, radiusTopRight = 12,
+                radiusBottomRight = 12).withBackground(color(20, 20, 20)).style)
+
+      var
+        leftRounded = false
+        rightRounded = false
+      for command in drawCommands:
+        if command.kind == FillRoundedRect:
+          if command.roundedRadii.topLeft == 12 and
+              command.roundedRadii.bottomLeft == 12 and
+              command.roundedRadii.topRight == 0 and
+              command.roundedRadii.bottomRight == 0:
+            leftRounded = true
+          if command.roundedRadii.topRight == 12 and
+              command.roundedRadii.bottomRight == 12 and
+              command.roundedRadii.topLeft == 0 and
+              command.roundedRadii.bottomLeft == 0:
+            rightRounded = true
+      check leftRounded
+      check rightRounded
+    finally:
+      fontRelays = originalFontRelays
+
   test "dialog anchors do not double-offset top layer-shell popovers":
     let app = AppConfig.init(width = 260, height = 120)
     let anchored = app.applyDialogAnchor(DialogAnchor(

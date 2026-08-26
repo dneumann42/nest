@@ -39,7 +39,9 @@ type
     RestoreState
     SetClipRect
     FillRect
+    FillRoundedRect
     LineRect
+    LineRoundedRect
     DrawLine
     DrawPoint
     DrawText
@@ -52,6 +54,10 @@ type
     of SetClipRect, FillRect, LineRect:
       rect*: Rect
       color*: Color
+    of FillRoundedRect, LineRoundedRect:
+      roundedRect*: Rect
+      roundedRadii*: CornerRadii
+      roundedColor*: Color
     of DrawLine:
       x1*, y1*, x2*, y2*: int
       lineColor*: Color
@@ -388,6 +394,10 @@ proc fillRoundedRect*(r: Rect, radii: CornerRadii, color: Color) =
   if tl == 0 and tr == 0 and br == 0 and bl == 0:
     fillRect(r, color)
     return
+  if drawCommands != nil:
+    drawCommands[].add DrawCommand(kind: FillRoundedRect, roundedRect: r,
+        roundedRadii: radii, roundedColor: color)
+    return
   fillCoverageRuns(
     r.x,
     r.y,
@@ -426,6 +436,10 @@ proc lineRoundedRect*(r: Rect, radii: CornerRadii, color: Color) =
     bl = clampRadius(radii.bottomLeft, r.w, r.h)
   if tl == 0 and tr == 0 and br == 0 and bl == 0:
     lineRect(r, color)
+    return
+  if drawCommands != nil:
+    drawCommands[].add DrawCommand(kind: LineRoundedRect, roundedRect: r,
+        roundedRadii: radii, roundedColor: color)
     return
   fillCoverageRuns(
     r.x,
@@ -528,6 +542,14 @@ proc transformedRect(r: Rect, originX, originY, scale, offsetX, offsetY: float64
 proc transformedCoord(value: int, origin, scale, offset: float64): int =
   (origin + (value.float64 - origin) * scale + offset).round.int
 
+proc transformedRadii(radii: CornerRadii, scale: float64): CornerRadii =
+  CornerRadii(
+    topLeft: radii.topLeft * scale,
+    topRight: radii.topRight * scale,
+    bottomRight: radii.bottomRight * scale,
+    bottomLeft: radii.bottomLeft * scale,
+  )
+
 proc replayDrawCommand*(
     command: DrawCommand,
     originX, originY, scale, opacity, offsetX, offsetY: float64,
@@ -550,10 +572,24 @@ proc replayDrawCommand*(
       command.rect.transformedRect(originX, originY, scale, offsetX, offsetY),
       command.color.scaledColor(opacity),
     )
+  of FillRoundedRect:
+    fillRoundedRect(
+      command.roundedRect.transformedRect(originX, originY, scale, offsetX,
+          offsetY),
+      command.roundedRadii.transformedRadii(scale),
+      command.roundedColor.scaledColor(opacity),
+    )
   of LineRect:
     lineRect(
       command.rect.transformedRect(originX, originY, scale, offsetX, offsetY),
       command.color.scaledColor(opacity),
+    )
+  of LineRoundedRect:
+    lineRoundedRect(
+      command.roundedRect.transformedRect(originX, originY, scale, offsetX,
+          offsetY),
+      command.roundedRadii.transformedRadii(scale),
+      command.roundedColor.scaledColor(opacity),
     )
   of DrawLine:
     drawLine(
