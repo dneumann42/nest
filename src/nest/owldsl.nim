@@ -57,6 +57,7 @@ type
     env: Environment
     symbol: string
     key: string
+    declared: Value ## what the binding held before the body ran
 
   WorkspaceSubscription = ref object
     lock: Lock
@@ -238,9 +239,36 @@ proc receiveMessage(runtime: NestOwlRuntime, topic: string): Value {.raises: [].
   else:
     runtime.messages[topic] = queue
 
+proc unchangedSince(current, declared: Value): bool {.raises: [].} =
+  ## Whether a state binding still holds exactly what it was declared with.
+  ##
+  ## Only the cases that can be answered without walking the value are
+  ## reported; anything else says no and is written back as before, so a wrong
+  ## answer here can only cost a copy, never lose an edit.
+  if current.kind != declared.kind:
+    return false
+  case current.kind
+  of Nothing:
+    true
+  of Boolean:
+    current.boolean == declared.boolean
+  of Number:
+    current.number == declared.number
+  of Text:
+    current.text == declared.text
+  of List:
+    # Lists are views onto a shared buffer, so this compares the view, not the
+    # contents.
+    current.buffer == declared.buffer and current.start == declared.start and
+      current.count == declared.count
+  else:
+    false
+
 proc commitState(runtime: NestOwlRuntime) {.raises: [].} =
   for binding in runtime.stateBindings:
     let value = binding.env.bindings.getOrDefault(binding.symbol)
+    if value.unchangedSince(binding.declared):
+      continue
     runtime.widgetState[binding.key] = value
 
 proc widgetValue(id: WidgetID, key = ""): Value =
@@ -1988,7 +2016,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       else:
         env.define(binding.bindingSymbol, value)
       runtime.stateBindings.add StateBinding(env: env,
-          symbol: binding.bindingSymbol, key: key)
+          symbol: binding.bindingSymbol, key: key, declared: value)
     nothing()
 
   runtime.evaluator.native "send":
@@ -2423,9 +2451,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       raise newException(EvaluatorError, "listAppend expects list and value")
     if values[0].kind != List:
       raise newException(EvaluatorError, "listAppend expects list and value")
-    var items = values[0].items
-    items.add values[1]
-    list(items)
+    values[0].listAppended(values[1])
 
   runtime.evaluator.native "textFind":
     discard layout

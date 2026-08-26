@@ -562,7 +562,7 @@ editor (id "editor")
 
       check app.runtime.lastError == ""
       check app.runtime.get("activeBuffer").number == 0
-      check app.runtime.get("buffers").items.len >= 1
+      check app.runtime.get("buffers").listLen >= 1
       check ui.widget(ui.id(ui.id("duck", "tabs"), "tab", 0)).frame.width > 0
       check ui.widget(ui.id("duck:workspace", "pane", "pane-1",
           "editor")).frame.height > 0
@@ -1706,11 +1706,11 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
 """))
 
     check parsed.kind == List
-    check parsed.items.len == 2
-    check parsed.items[0].entries["name"].text == "1"
-    check parsed.items[0].entries["num"].number == 1
-    check parsed.items[0].entries["focused"].boolean
-    check parsed.items[1].entries["urgent"].boolean
+    check parsed.listLen == 2
+    check parsed.at(0).entries["name"].text == "1"
+    check parsed.at(0).entries["num"].number == 1
+    check parsed.at(0).entries["focused"].boolean
+    check parsed.at(1).entries["urgent"].boolean
     check runtime.evaluator.exec(parse("swayWorkspaceCommand \"dev's\"\n")).text ==
       "swaymsg workspace 'dev'\\''s'"
 
