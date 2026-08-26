@@ -71,6 +71,7 @@ type
     KeyMinus
     KeyEqual
     KeyPlus
+    KeySemicolon
 
   EventKind* = enum
     NoEvent
