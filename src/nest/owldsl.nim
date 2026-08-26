@@ -1620,8 +1620,13 @@ proc diagnosticLocation*(
   let columnSep = text.rfind(':')
   if columnSep < 0:
     return
-  let lineSep = text.rfind(':', 0, columnSep - 1)
-  if lineSep < 0:
+  # `rfind` reads an explicit -1 as "search to the end", so a line whose only
+  # colon is its first character would otherwise find that same colon again
+  # and slice backwards.
+  let lineSep =
+    if columnSep > 0: text.rfind(':', 0, columnSep - 1)
+    else: -1
+  if lineSep < 0 or lineSep + 1 > columnSep:
     return
   try:
     result.line = parseInt(text[lineSep + 1 ..< columnSep])
