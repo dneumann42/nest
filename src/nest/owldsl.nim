@@ -3444,6 +3444,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       alignSelf = config.alignSelf,
       textScroll = config.textScroll,
       style = config.style,
+      padding = config.padding,
     )
     nothing()
 

@@ -1,6 +1,6 @@
 import std/[os, strutils]
 
-import ../[resources, widgets2]
+import ../[layouts, resources, widgets2]
 import component
 import nest/[coords, screen]
 
@@ -13,6 +13,7 @@ type Label* = ref object of Component
   hasColor: bool
   fg: Color
   textScroll: bool
+  padding: EdgeInsets
 
 type DiagnosticLabel* = ref object of Interactive
   text: string
@@ -27,13 +28,15 @@ proc new*(
     fg = color(0, 0, 0, 0),
     hasColor = false,
     textScroll = false,
+    padding = EdgeInsets(),
 ): T =
   ## Create a text label.
   ##
   ## `fg` together with `hasColor` overrides the palette's text colour.
   ## `textScroll` clips text wider than the widget; marquee animation is
   ## opt-in with NEST_TEXT_SCROLL_ANIMATION=1.
-  T(text: text, fontName: fontName, fg: fg, hasColor: hasColor, textScroll: textScroll)
+  T(text: text, fontName: fontName, fg: fg, hasColor: hasColor,
+      textScroll: textScroll, padding: padding)
 
 proc new*(T: typedesc[DiagnosticLabel], text = "", fontName = "font", fg = color(0, 0, 0, 0), hasColor = false): T =
   ## Create a label that reacts to the pointer, used for clickable
@@ -45,7 +48,10 @@ proc new*(T: typedesc[DiagnosticLabel], text = "", fontName = "font", fg = color
 method measure*(self: Label, resources: Resources): IntrinsicSize =
   ## Return the size the label's text occupies.
   let measurement = resources.measureText(self.fontName, self.text)
-  intrinsicSize(measurement.width.toFloat, measurement.height.toFloat)
+  intrinsicSize(
+    measurement.width.toFloat + self.padding.left + self.padding.right,
+    measurement.height.toFloat + self.padding.top + self.padding.bottom,
+  )
 
 method measure*(self: DiagnosticLabel, resources: Resources): IntrinsicSize =
   ## Return the size the diagnostic's text occupies.
@@ -73,7 +79,10 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
     (font, _) = ctx.resources.get(self.fontName)
     fg = if self.hasColor: self.fg else: ctx.palette.textColor
     textExtent = ctx.resources.measureText(self.fontName, self.text)
-    textWidth = max(f.width.toInt, 0)
+    textX = f.x.toInt + self.padding.left.toInt
+    textY = f.y.toInt + self.padding.top.toInt
+    textWidth = max(f.width.toInt - self.padding.left.toInt - self.padding.right.toInt, 0)
+    textHeight = max(f.height.toInt - self.padding.top.toInt - self.padding.bottom.toInt, 0)
   self.drawShadow(bounds)
   if self.style.hasBackground:
     self.styledFillRect(bounds, self.styledBackground(ctx.palette.panelMuted))
@@ -88,14 +97,14 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
       else:
         0
     saveState()
-    setClipRect(ctx.clippedRect(rect(f.x.toInt, f.y.toInt, textWidth, f.height.toInt)))
-    discard drawText(Font(font), f.x.toInt - offset, f.y.toInt, self.text, fg, color(0, 0, 0, 0))
+    setClipRect(ctx.clippedRect(rect(textX, textY, textWidth, textHeight)))
+    discard drawText(Font(font), textX - offset, textY, self.text, fg, color(0, 0, 0, 0))
     if AnimateTextScroll:
       let gap = 32
       discard drawText(
         Font(font),
-        f.x.toInt - offset + textExtent.width + gap,
-        f.y.toInt,
+        textX - offset + textExtent.width + gap,
+        textY,
         self.text,
         fg,
         color(0, 0, 0, 0),
@@ -104,8 +113,8 @@ method draw*(self: Label, widget: Widget, ctx: var DrawContext) =
   else:
     discard drawText(
       Font(font),
-      f.x.toInt,
-      f.y.toInt,
+      textX,
+      textY,
       self.text,
       fg,
       color(0, 0, 0, 0),

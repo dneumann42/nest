@@ -4133,6 +4133,7 @@ proc label*(
     alignSelf = AlignAuto,
     textScroll = false,
     style = ComponentStyle(),
+    padding = EdgeInsets(),
 ) {.layoutOnly.} =
   ## Declare a text label with the id `id`.
   ##
@@ -4143,9 +4144,9 @@ proc label*(
     id,
     renderKey(
       "label:" & text & ":" & fontName & ":" & $textScroll, width, height, alignSelf
-    ) & "|" & styleRenderKey(style),
+    ) & "|" & $padding & "|" & styleRenderKey(style),
   )
-  let lbl = Label.new(text, fontName, textScroll = textScroll)
+  let lbl = Label.new(text, fontName, textScroll = textScroll, padding = padding)
   lbl.style = style
   ui.attach(box, Component(lbl))
   ui.addChild(box)
