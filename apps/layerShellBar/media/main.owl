@@ -77,14 +77,14 @@ animation (id "media" "dialog") (not (dialogClosing?)):
     height = fill
     padding = DialogPaddingWide
     gap = DialogSectionGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = theme-color "panel"
     opacity = 1
     dialogHeader (id "media" "header"):
       width = fill
       height = fixed DialogHeaderHeightTall
       padding = DialogHeaderPadding
-      alignItems = AlignCenter
+      alignItems = Center
       label (id "media" "heading") "Now Playing":
         width = fill
         height = fit
@@ -96,12 +96,12 @@ animation (id "media" "dialog") (not (dialogClosing?)):
       width = fill
       height = fill
       gap = DialogPaddingWide
-      alignItems = AlignStretch
+      alignItems = Stretch
       column (id "media" "left"):
         width = (fixed MediaPopoverLeftWidth)
         height = fill
         gap = DialogSectionGap
-        alignItems = AlignStretch
+        alignItems = Stretch
         imageButton artworkID art:
           width = fill
           height = (fixed MediaPopoverArtworkHeight)
@@ -110,7 +110,7 @@ animation (id "media" "dialog") (not (dialogClosing?)):
           width = fill
           height = fit
           gap = MediaControlGap
-          justifyContent = JustifyCenter
+          justifyContent = Center
           button previousID "Prev":
             width = (fixed MediaControlButtonWidth)
             height = (fixed MediaControlHeight)
@@ -131,7 +131,7 @@ animation (id "media" "dialog") (not (dialogClosing?)):
         width = fill
         height = fill
         gap = MediaDetailsGap
-        alignItems = AlignStretch
+        alignItems = Stretch
         label (id "media" "title") title:
           width = fill
           height = fit
@@ -147,11 +147,11 @@ animation (id "media" "dialog") (not (dialogClosing?)):
         table (id "media" "metadata-table"):
           width = fill
           height = fit
-          alignItems = AlignCenter
+          alignItems = Center
           tableHeader (id "media" "metadata-header"):
             width = fill
             height = (fixed MediaMetadataRowHeight)
-            alignItems = AlignCenter
+            alignItems = Center
             tableCell (id "media" "metadata-header-field"):
               width = (fixed MediaMetadataLabelWidth)
               height = fill

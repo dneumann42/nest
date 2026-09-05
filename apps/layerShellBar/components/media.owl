@@ -41,7 +41,7 @@ fun mediaMetadataRow key labelText valueText:
   tableRow (id key "metadata" labelText):
     width = fill
     height = (fixed MediaMetadataRowHeight)
-    alignItems = AlignCenter
+    alignItems = Center
     tableCell (id key "metadata-label-cell" labelText):
       width = (fixed MediaMetadataLabelWidth)
       height = fill

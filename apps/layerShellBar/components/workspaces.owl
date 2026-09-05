@@ -30,7 +30,7 @@ widget workspaces key:
     width = fit
     height = fixed BarWidgetHeight
     gap = WorkspaceGap
-    alignItems = AlignCenter
+    alignItems = Center
     if (empty? workspaceList):
       label (id keyText "empty") "-":
         width = (fixed WorkspaceEmptyWidth)

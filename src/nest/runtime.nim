@@ -1,6 +1,6 @@
 import std/[macros, os, sets, strformat, strutils]
 
-import nest/[appConfig, palette, resources, ui]
+import nest/[appConfig, bench, palette, resources, ui]
 import nest/[input, screen]
 import nest/resizePacing
 
@@ -23,8 +23,16 @@ type ResizeTraceCounters = object
 
 var resizeTrace: ResizeTraceCounters
 
+var resizeTraceFlag = -1
+
 proc resizeTraceEnabled(): bool =
-  getEnv("NEST_RESIZE_TRACE").normalize in ["1", "true", "yes", "on"]
+  if resizeTraceFlag < 0:
+    resizeTraceFlag =
+      if getEnv("NEST_RESIZE_TRACE").normalize in ["1", "true", "yes", "on"]:
+        1
+      else:
+        0
+  resizeTraceFlag == 1
 
 proc resizeStrategy(): ResizeStrategy =
   resizeStrategyFromEnv()
@@ -122,6 +130,14 @@ proc wheelDeltaY(e: Event): float64 =
   else:
     e.y.toFloat
 
+proc resizeCoalescableEvent(kind: EventKind): bool {.inline.} =
+  ## Whether an event may be answered by re-solving the retained layout.
+  ##
+  ## Only sizing and pointer motion can: everything else either changes the
+  ## widget tree or has to reach a widget, and the fast path re-solves the
+  ## tree the last full frame left behind rather than rebuilding it.
+  kind in {NoEvent, WindowResizeEvent, MouseMoveEvent}
+
 proc resizeFastPathEvent(kind: EventKind): bool {.inline.} =
   kind in {
     NoEvent,
@@ -195,7 +211,22 @@ proc handleEvent(
   else:
     discard
 
+proc countEvent(kind: EventKind) =
+  ## Tally events by kind, so a profile says what is waking the loop.
+  case kind
+  of MouseMoveEvent: bench.count("event.motion", 1)
+  of MouseDownEvent, MouseUpEvent: bench.count("event.button", 1)
+  of MouseWheelEvent: bench.count("event.wheel", 1)
+  of KeyDownEvent, TextInputEvent: bench.count("event.key", 1)
+  of WindowResizeEvent: bench.count("event.resize", 1)
+  of WindowFocusGainedEvent, WindowFocusLostEvent,
+      WindowMouseEnterEvent, WindowMouseLeaveEvent:
+    bench.count("event.window", 1)
+  of NoEvent: bench.count("event.none", 1)
+  else: bench.count("event.other", 1)
+
 proc handleEvent(e: Event; running: var bool; ui: var UI) =
+  countEvent(e.kind)
   case e.kind
   of QuitEvent, WindowCloseEvent:
     running = false
@@ -243,6 +274,43 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
     ui.requestRedrawAfter(0)
   else:
     discard
+
+proc redrawRetainedIfClean*(ui: var UI): bool {.discardable.} =
+  ## Service a timer-driven repaint without rebuilding the application when
+  ## the retained widget tree is still valid. Timers which require Owl to be
+  ## reevaluated use `requestFullRedrawAfter`, so clocks and virtualized views
+  ## still take the application block once their deadline is due.
+  ##
+  ## A maintenance wake is not a repaint: it hands the frame back to the
+  ## application body, which polls whatever it woke for and decides for
+  ## itself whether anything now needs drawing.
+  if not ui.hasRetainedFrame() or ui.needsFullRender() or
+      ui.hasPendingFullRenderInput() or ui.maintenanceDue():
+    return false
+  ui.clearRedrawRequest()
+  ui.setDrawTicks(input.getTicks())
+  ui.clearRedrewFrame()
+  let ticksDue = ui.markDueTicks(input.getTicks())
+  if ui.hasPendingInput():
+    discard ui.updateRetainedFrame()
+  elif ui.hasSettlingScroll():
+    # A settling scroll moves the whole tree, not just the animating widgets,
+    # so it needs the repaint that redraws all of it.
+    discard ui.drawRetainedFrame()
+  elif ui.hasRealtimeWidgets():
+    discard ui.drawRealtime()
+  elif ticksDue or ui.hasRunningAnimations() or not ui.hasTickingWidgets():
+    discard ui.drawRetainedFrame()
+  let tickWait = ui.nextTickWaitMs(input.getTicks())
+  if tickWait >= 0:
+    ui.requestRedrawAfter(tickWait)
+  if ui.redrewFrame():
+    bench.classifyFrame(fkRetainedDraw)
+    bench.zone("present"):
+      refresh()
+  else:
+    bench.heldFrame()
+  true
 
 proc requestResizeFrame(ui: var UI) =
   ## Resize is an explicit redraw driver. The runtime still avoids doing work
@@ -306,9 +374,11 @@ template application*(cfg: AppConfig; blk: untyped) =
       drainPendingEvents(e, inputFlags, running, false):
         handleEvent(e, running, updateContext, drawContext)
       drawContext.ticks = input.getTicks()
-      blk
-      updateContext.mouseLeftPressed = false
-      refresh()
+      bench.frame:
+        blk
+        updateContext.mouseLeftPressed = false
+        bench.zone("present"):
+          refresh()
       scheduleNextFrame(nextFrameTicks, frameRemainder, input.getTicks())
       continue
 
@@ -377,11 +447,14 @@ template application*(cfg: AppConfig; blk: untyped) =
       hasResizeRedraw = true
     let fullFrameStart = input.getTicks()
     drawContext.ticks = input.getTicks()
-    blk
-    recordFullFrame(fullFrameStart, sawResizeEvent)
-    updateContext.mouseLeftPressed = false
-    refresh()
+    bench.frame:
+      blk
+      recordFullFrame(fullFrameStart, sawResizeEvent)
+      updateContext.mouseLeftPressed = false
+      bench.zone("present"):
+        refresh()
   reportResizeTrace("shutdown", true)
+  bench.finish()
   shutdown()
 
 template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
@@ -400,12 +473,16 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
   ui.loadFont("font", "", 18)
   ui.loadFont("editor", "nerd-monospace", 18)
   ui.loadFont("icon", "nerd-monospace", 18)
+  let
+    useResizeFastPath = resizeFastPathAllowed(cfg.resizeFastPath)
+    usePointerFastPath = pointerFastPathAllowed(cfg.pointerFastPath)
   var
     firstFrame = true
     nextFrameTicks = input.getTicks()
     frameRemainder = 0
     hasResizeRedraw = false
     resizeRedrawTicks = 0
+    lastResizeFullFrameTicks = input.getTicks()
     resizePacer = ResizePacer.init(resizeStrategy())
   while running:
     var e = Event()
@@ -427,10 +504,14 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       drainPendingEvents(e, inputFlags, running, false):
         handleEvent(e, running, ui)
       ui.setDrawTicks(input.getTicks())
-      blk
-      ui.finishInputFrame()
-      if ui.redrewFrame():
-        refresh()
+      bench.frame:
+        blk
+        ui.finishInputFrame()
+        if ui.redrewFrame():
+          bench.zone("present"):
+            refresh()
+        else:
+          bench.heldFrame()
       scheduleNextFrame(nextFrameTicks, frameRemainder, input.getTicks())
       continue
 
@@ -459,10 +540,24 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       if resizeTraceEnabled():
         inc resizeTrace.fastResizePresents
       resizePacer.finishedPumpPresent(afterWaitTicks)
+      # A pump is a present, not a frame. Nothing has changed since the last
+      # resize event; the compositor just wants pixels while the surface is
+      # being resized, so repaint what is already solved rather than running
+      # the application again.
+      var pumped = false
+      if ui.hasRetainedFrame() and not ui.fullRedrawDue():
+        bench.frame:
+          if ui.drawRetainedFrame():
+            pumped = true
+            bench.zone("present"):
+              refresh()
+      if pumped:
+        continue
       shouldRender = true
     elif hasResizeRedraw and resizeRedrawTicks <= afterWaitTicks:
       shouldRender = true
       hasResizeRedraw = false
+      resizePacer.settledResize()
       if redrawWaitMs >= 0 and ui.redrawDelayMs() == 0:
         ui.clearRedrawRequest()
     elif hasResizeRedraw:
@@ -470,11 +565,11 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
         ui.clearRedrawRequest()
       shouldRender = true
     elif redrawWaitMs >= 0 and ui.redrawDelayMs() == 0:
-      ## Timed redraws must re-enter the application block so app-level render
-      ## code can decide whether the frame can stay retained or needs a full
-      ## rebuild. Servicing the timer here breaks view-driven updates such as
-      ## Owl clocks and scroll-window virtualization, which only advance when
-      ## the view is reevaluated.
+      var serviced = false
+      bench.frame:
+        serviced = ui.redrawRetainedIfClean()
+      if serviced:
+        continue
       shouldRender = true
       ui.clearRedrawRequest()
     if not shouldRender:
@@ -483,15 +578,22 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
     var
       sawResizeEvent = false
       sawNonResizeEvent = false
+      sawUncoalescableEvent = false
+      sawPointerMotion = false
     if frameEvent:
       sawResizeEvent = e.kind == WindowResizeEvent
       sawNonResizeEvent = not resizeFastPathEvent(e.kind)
+      sawUncoalescableEvent = not resizeCoalescableEvent(e.kind)
+      sawPointerMotion = e.kind == MouseMoveEvent
       if sawResizeEvent and resizeTraceEnabled():
         inc resizeTrace.resizeEvents
       handleEvent(e, running, ui)
       drainPendingEvents(e, inputFlags, running, true):
         sawResizeEvent = sawResizeEvent or e.kind == WindowResizeEvent
         sawNonResizeEvent = sawNonResizeEvent or not resizeFastPathEvent(e.kind)
+        sawUncoalescableEvent =
+          sawUncoalescableEvent or not resizeCoalescableEvent(e.kind)
+        sawPointerMotion = sawPointerMotion or e.kind == MouseMoveEvent
         if e.kind == WindowResizeEvent and resizeTraceEnabled():
           inc resizeTrace.resizeEvents
         handleEvent(e, running, ui)
@@ -499,6 +601,9 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       drainPendingEvents(e, inputFlags, running, false):
         sawResizeEvent = sawResizeEvent or e.kind == WindowResizeEvent
         sawNonResizeEvent = sawNonResizeEvent or not resizeFastPathEvent(e.kind)
+        sawUncoalescableEvent =
+          sawUncoalescableEvent or not resizeCoalescableEvent(e.kind)
+        sawPointerMotion = sawPointerMotion or e.kind == MouseMoveEvent
         if e.kind == WindowResizeEvent and resizeTraceEnabled():
           inc resizeTrace.resizeEvents
         handleEvent(e, running, ui)
@@ -506,7 +611,6 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
       if resizeTraceEnabled():
         inc resizeTrace.fastResizePresents
       let now = input.getTicks()
-      ui.requestResizeFrame()
       resizePacer.startedResizePresent(now)
       resizeRedrawTicks = now + resizePacer.config.settleMs
       hasResizeRedraw = true
@@ -515,14 +619,62 @@ template application*(cfg: AppConfig; ui: var UI; blk: untyped) =
         inc resizeTrace.blockedNoRetained
       if sawNonResizeEvent:
         inc resizeTrace.blockedNonFastEvent
+    # The fast pass. A resize changes only the size suggested for the root
+    # box and pointer motion changes nothing at all about the tree, so both
+    # can be answered from the frame that is already solved: a resize by
+    # re-solving its constraint system, motion by re-running hit testing over
+    # it. Either is a fraction of the cost of rebuilding the frame, which
+    # means re-running the whole application body.
+    #
+    # The slow pass is not abandoned, only deferred. A resize burst gets a
+    # full frame every `resizeFullFrameMs`, and a fast pointer frame asks for
+    # one `pointerSettleMs` later, so anything the application draws from the
+    # pointer's own position still catches up.
+    var handledFast = false
+    if not sawUncoalescableEvent and not ui.fullRedrawDue() and
+        ui.hasRetainedFrame():
+      if sawResizeEvent and useResizeFastPath and
+          input.getTicks() - lastResizeFullFrameTicks < cfg.resizeFullFrameMs:
+        bench.frame:
+          handledFast = ui.resolveRetainedFrame(ui.windowWidth, ui.windowHeight)
+          if handledFast:
+            ui.finishInputFrame()
+            if ui.redrewFrame():
+              bench.zone("present"):
+                refresh()
+      elif not sawResizeEvent and sawPointerMotion and usePointerFastPath and
+          ui.canResolveRetained():
+        bench.frame:
+          # Hit testing against the frame already on screen. Whether it turns
+          # out to need repainting -- the pointer crossed into a widget -- or
+          # not, the frame is answered: motion alone cannot change the tree.
+          discard ui.updateRetainedFrame()
+          handledFast = true
+          ui.requestFullRedrawAfter(cfg.pointerSettleMs)
+          ui.finishInputFrame()
+          if ui.redrewFrame():
+            bench.zone("present"):
+              refresh()
+          else:
+            bench.heldFrame()
+    if handledFast:
+      continue
+    if sawResizeEvent:
+      lastResizeFullFrameTicks = input.getTicks()
+      ui.requestResizeFrame()
     let fullFrameStart = input.getTicks()
     ui.setDrawTicks(input.getTicks())
-    blk
-    recordFullFrame(fullFrameStart, sawResizeEvent)
-    ui.finishInputFrame()
-    if ui.redrewFrame():
-      refresh()
+    bench.frame:
+      blk
+      recordFullFrame(fullFrameStart, sawResizeEvent)
+      ui.finishInputFrame()
+      if ui.redrewFrame():
+        bench.zone("present"):
+          refresh()
+      else:
+        bench.heldFrame()
   reportResizeTrace("shutdown", true)
+  bench.finish()
   shutdown()
 
 proc eventTypeOf*[M, E](

@@ -45,7 +45,7 @@ widget mediaWidget key:
     width = fit
     height = fixed BarWidgetHeight
     gap = NoSpacing
-    alignItems = AlignCenter
+    alignItems = Center
     button previousID IconPrevious:
       width = (fixed MediaBarButtonWidth)
       height = fixed BarWidgetHeight

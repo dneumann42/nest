@@ -9,7 +9,7 @@ widget activeWindow key:
   row (id keyText "active-window"):
     width = fixed ActiveWindowWidth
     height = fixed BarWidgetHeight
-    alignItems = AlignCenter
+    alignItems = Center
     label (id keyText "active-window" "title") displayTitle:
       width = fill
       height = fit

@@ -56,9 +56,9 @@ proc update(model: var App, event: AppEvent) =
     model.lowest = model.counter.count
 
 widget counter(model: Counter) emits CounterEvent:
-  ui.column(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8, alignItems = AlignCenter)):
+  ui.column(ui.id("root"), cfg(width = fit(), height = fit(), gap = 8, alignItems = Center)):
     ui.label(ui.id("count"), $model.count)
-    ui.row(ui.id("controls"), cfg(width = fit(), height = fit(), gap = 8, alignItems = AlignCenter)):
+    ui.row(ui.id("controls"), cfg(width = fit(), height = fit(), gap = 8, alignItems = Center)):
       if ui.button(ui.id("dec"), "-", width = fixed(32)):
         emit Decremented
       if ui.button(ui.id("inc"), "+", width = fixed(32)):
@@ -67,7 +67,7 @@ widget counter(model: Counter) emits CounterEvent:
         emit StepChanged
 
 widget counterApp(model: var App) emits AppEvent:
-  ui.panel(ui.id("root"), cfg(padding = 16, gap = 12, alignItems = AlignCenter, justifyContent = JustifyCenter)):
+  ui.panel(ui.id("root"), cfg(padding = 16, gap = 12, alignItems = Center, justifyContent = Center)):
     ui.label(ui.id("title"), "Counter")
 
     for event in ui.counter(model.counter):
@@ -217,7 +217,7 @@ Parameters take the usual forms: a type each, a shared type, or a default.
 import nest
 
 widget field(label, value: string, labelWidth = fixed(90)):
-  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8, alignItems = AlignCenter)):
+  ui.row(ui.id("row"), cfg(width = fill(), height = fit(), gap = 8, alignItems = Center)):
     ui.label(ui.id("label"), label, width = labelWidth)
     ui.label(ui.id("value"), value, width = fill())
 
@@ -489,7 +489,7 @@ type
       discard
 
 widget taskRow(task: Task) emits RowEvent:
-  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8, alignItems = AlignCenter)):
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8, alignItems = Center)):
     ui.checkbox(ui.id("done"), task.title, task.done, width = fill())
     if ui.clicked(ui.id("done")):
       emit RowEvent(id: task.id, kind: Toggled)
@@ -669,7 +669,7 @@ type
 
 widget closablePanel(title: string, emitted: var seq[PanelEvent], body: untyped):
   ui.card(ui.id("root"), cfg(width = fill(), height = fit(), padding = 8, gap = 6)):
-    ui.row(ui.id("head"), cfg(width = fill(), height = fit(), gap = 6, alignItems = AlignCenter)):
+    ui.row(ui.id("head"), cfg(width = fill(), height = fit(), gap = 6, alignItems = Center)):
       ui.label(ui.id("title"), title, width = fill())
       if ui.button(ui.id("collapse"), "-", width = fixed(24)):
         emitted.add Collapsed
@@ -835,7 +835,7 @@ type Reading = object
   value: float64
 
 widget gauge(reading: Reading):
-  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8, alignItems = AlignCenter)):
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8, alignItems = Center)):
     ui.label(ui.id("label"), reading.label, width = fixed(90))
     discard ui.slider(ui.id("bar"), reading.value, 0.0, 1.0)
 #+end_src
@@ -1190,7 +1190,7 @@ type
     index: int
 
 widget filterBar(query: LineInputState, style: int, caseSensitive: bool) emits FilterEvent:
-  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8, alignItems = AlignCenter)):
+  ui.row(ui.id("root"), cfg(width = fill(), height = fit(), gap = 8, alignItems = Center)):
     ui.lineInput(ui.id("query"), query)
     let picked = ui.combobox(ui.id("style"), style, ["Any", "Exact"])
     if picked.changed:
@@ -1260,15 +1260,15 @@ widget cardExample():
 
 ** Alignment And Justification
 
-~alignItems~ places children across the container's axis, ~justifyContent~ distributes free space along it, and a child overrides ~alignItems~ with ~alignSelf~.
+~alignItems~ places children across the container's axis and ~justifyContent~ distributes free space along it. A child overrides those defaults with ~alignSelf~ and ~justifySelf~ when it is independently positioned, as in an overlay; a lone row or column child can also override the position of its one-item run. Alignment and justification use the same contextual names: ~Auto~, ~Start~, ~Center~, ~End~, and (for alignment) ~Stretch~.
 
 #+begin_src nim
 import nest
 
 widget toolbar():
   ui.row(ui.id("root"), cfg(width = fill(), height = fixed(40), gap = 6, padding = 6,
-      alignItems = AlignCenter, justifyContent = JustifyEnd)):
-    ui.label(ui.id("title"), "Title", alignSelf = AlignStart)
+      alignItems = Center, justifyContent = End)):
+    ui.label(ui.id("title"), "Title", alignSelf = Start)
     ui.button(ui.id("ok"), "OK")
     ui.button(ui.id("cancel"), "Cancel")
 #+end_src
@@ -1808,7 +1808,7 @@ widget counter key:
     width = fit
     height = fit
     gap = 8
-    alignItems = AlignCenter
+    alignItems = Center
     label (id keyText "count") count:
       width = fixed 80
       height = fit
@@ -1816,7 +1816,7 @@ widget counter key:
       width = fit
       height = fit
       gap = 8
-      alignItems = AlignCenter
+      alignItems = Center
       button decrementID "-":
         width = fixed 32
         height = fit
@@ -1839,8 +1839,8 @@ panel (id "root"):
   height = fill
   padding = 16
   gap = 12
-  alignItems = AlignCenter
-  justifyContent = JustifyCenter
+  alignItems = Center
+  justifyContent = Center
   label (id "title") "Counter":
     width = fit
     height = fit
@@ -1998,7 +1998,7 @@ row (id "controls"):
   width = fill          ; configuration
   height = fit
   gap = 8
-  alignItems = AlignCenter
+  alignItems = Center
   label (id "name") "Name":     ; a child
     width = fixed 80
     height = fit
@@ -2041,7 +2041,7 @@ widget labelledValue key labelText valueText:
     width = fill
     height = fit
     gap = 8
-    alignItems = AlignCenter
+    alignItems = Center
     label (id keyText "label") (eval labelText):
       width = fixed 96
       height = fit

@@ -67,14 +67,14 @@ widget duckMenuBar:
     width = fill
     height = fixed 24
     gap = 4
-    alignItems = AlignCenter
+    alignItems = Center
     menuBar menuID:
       width = fill
       height = fixed 24
       padding = 0
       gap = 4
       background = color 100 100 100
-      alignItems = AlignStretch
+      alignItems = Stretch
       menu "file" "File":
         menuItem "new" "New"
         menuItem "open" "Open..."

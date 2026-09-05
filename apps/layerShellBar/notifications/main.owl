@@ -33,14 +33,14 @@ animation (id "notifications" "panel") (not (dialogClosing?)):
     height = fill
     padding = DialogPadding
     gap = DialogGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 0 0 0
     opacity = 1
     dialogHeader (id "notifications" "header"):
       width = fill
       height = fixed DialogHeaderHeight
       padding = DialogHeaderPadding
-      alignItems = AlignCenter
+      alignItems = Center
       label (id "notifications" "title") "Mailbox":
         width = fill
         height = fit

@@ -43,7 +43,7 @@ block-command tree-node-content key path icon labelText:
       width = fill
       height = fit
       gap = 6
-      alignItems = AlignCenter
+      alignItems = Center
       label (id keyText "icon" pathText) iconText:
         width = fixed 24
         height = fit
@@ -66,7 +66,7 @@ block-command tree-row key node:
     height = fit
     gap = 0
     padding = 2
-    alignItems = AlignCenter
+    alignItems = Center
     background = (pick item.selected (color 43 83 106) (color 0 0 0 0))
     tree-indent-spacers keyText pathText item.depth
     tree-expander keyText pathText item.hasChildren item.expanded

@@ -1,0 +1,433 @@
+#+title: Frame Cost, Frame Pacing And Benchmarking
+
+Nest is immediate mode: an interface is declared from scratch every frame. That
+is the whole appeal of the model and also its whole cost problem, because the
+naive reading of it — rebuild everything, re-solve everything, repaint
+everything, sixty times a second — is far more work than any interface actually
+needs. Almost nothing changes between two frames of a text editor, and nothing
+at all changes between two frames of a status bar with the clock unchanged.
+
+So Nest keeps the declaration immediate and makes the *work* incremental. This
+document describes what it decides per frame, how to measure it, and what the
+measurements currently say.
+
+* Measuring First
+
+Nothing here should be taken on faith, including the numbers below. The
+instrumentation is compiled in on demand and the benchmarks are in the
+repository, so every claim is reproducible on your own machine and your own
+interface.
+
+** The Compile-Time Switch
+
+~src/nest/bench.nim~ is a zone-and-counter profiler that compiles to *nothing*
+unless the build asks for it.
+
+| Build flag             | What it adds                                            |
+|------------------------+---------------------------------------------------------|
+| (none)                 | Nothing. ~bench.zone~ expands to its body; no globals.  |
+| ~-d:nestBench~         | Phase zones: a few dozen clock reads per frame.         |
+| ~-d:nestBenchDetail~   | Per-widget and per-component zones on top of the above. |
+
+Use ~-d:nestBench~ to find which phase costs what, which is the honest number.
+Use ~-d:nestBenchDetail~ to find *which widget* inside a phase costs it, and
+read the absolute times with suspicion: at that granularity the clock reads
+distort what they measure.
+
+Reporting is driven by the environment, so a build can be left instrumented and
+stay silent:
+
+| Variable                    | Effect                                            |
+|-----------------------------+---------------------------------------------------|
+| ~NEST_BENCH_REPORT_MS=1000~ | Print a rolling table to stderr every second.     |
+| ~NEST_BENCH_SUMMARY=1~      | Print one table for the whole run when it ends.   |
+| ~NEST_BENCH_JSON=path~      | Write the whole run as JSON when it ends.         |
+| ~NEST_BENCH_LABEL=name~     | Name the run, so a report says which one it was.  |
+
+A report looks like this — a real one, from an idle Nide:
+
+#+begin_example
+[nest bench] span=9.12s frames=19 avg=6.513ms p50=6.182 p95=7.141 busy=1.4%
+  frames: retained-draw 15  full-reused 3  full 1
+  zone                            calls/f   total ms   self ms  ms/frame   max ms
+  -------------------------------------------------------------------------------
+  owl.renderWidget                    4.0     214.41    214.41     3.249    2.019
+  ui.eventPass                        1.0     132.31      2.07     2.005    2.426
+  ui.buildPass                        1.0     114.36      5.80     1.733    2.255
+  ...
+  counters: layout.boxes=41.0/f  layout.reused=1.0/f  text.measure=19.4/f
+#+end_example
+
+Three things to read off it. ~busy~ is the share of wall clock the process spent
+inside frames, which is the number that matters for a shell bar. ~frames~ says
+what *kind* of work the frames were, which is usually where a regression shows
+up first — a run that used to be mostly ~hold~ and is now mostly ~full~ has lost
+a fast path somewhere. And ~self~ versus ~total~ separates a zone's own cost
+from its children's.
+
+Instrumenting your own code is one line, and costs nothing when the flag is off:
+
+#+begin_src nim
+import nest/bench
+
+bench.zone("myapp.sidebar"):
+  ui.sidebar(model)
+
+bench.count("myapp.visibleRows", rows.len)
+#+end_src
+
+** The Benchmarks
+
+| Command                          | What it answers                                     |
+|----------------------------------+-----------------------------------------------------|
+| ~nimble bench~                   | Frame cost of resize, of an idle app, of a dialog.  |
+| ~nimble profile~                 | The same, built with ~-d:nestBench~.                |
+| ~tests/bench_resize.nim~         | Rebuild vs re-solve vs repaint, at a given size.    |
+| ~tests/bench_idle.nim~           | Wakes, repaints, presents and CPU while idle.       |
+| ~tests/bench_scroll.nim~         | A list's frame cost against how many rows it has.   |
+| ~tests/bench_network_dialog.nim~ | An owl-heavy dialog, at several data sizes.         |
+
+In Nide, ~tests/bench_palette.nim~ does the same for the editor's own states.
+All of them take the frame count as an argument and all of them print the bench
+breakdown when built with ~-d:nestBench~, so the loop is: measure, change one
+thing, measure again.
+
+* What A Frame Decides
+
+A frame is not one thing. The loop picks the cheapest answer that is still
+correct for the events it just drained.
+
+| Pass               | What it does                                                   | When |
+|--------------------+----------------------------------------------------------------+------|
+| *hold*             | Nothing. The frame on screen is still right; no present.       | No event, no timer due, nothing dirty |
+| *realtime*         | Redraws only the widgets marked animating.                     | ~markRealtime~ widgets and nothing else |
+| *retained draw*    | Repaints the retained tree.                                    | A tick is due, an animation is running, a pump |
+| *retained update*  | Re-runs hit testing over the retained tree, then repaints.     | Pointer motion alone |
+| *re-solve*         | Re-solves the retained constraint system, then repaints.       | A window resize |
+| *full, reusing*    | Runs the application and rebuilds the tree, but keeps the previous frame's constraint system. | The tree came out identical |
+| *full*             | Runs the application, rebuilds the tree, solves, draws.        | Anything that can change the tree |
+
+The three that do the heavy lifting are pointer motion, resize and reuse, and
+they exist because of what each kind of event can actually change.
+
+*Pointer motion cannot change the widget tree.* It can change which widget is
+hot, which is a repaint, not a rebuild. So motion re-runs hit testing against
+the frame already solved and repaints only if the hover changed — and if it did
+not, holds. The application body is not run. Since anything the application
+draws *from* the pointer position would then be a frame behind, a fast pointer
+frame asks for a full one ~pointerSettleMs~ later (33ms by default), so hovering
+still costs one rebuild every other frame rather than one per motion event.
+
+*A window resize changes only the size suggested for the root box.* The
+constraint system the last full frame built still describes the tree exactly, so
+the resize re-suggests the size and dual-optimises rather than reinserting every
+constraint. A resize burst gets one full frame every ~resizeFullFrameMs~ (200ms)
+so the application still sees its own per-frame work, and the settle frame at
+the end of the drag is always a full one.
+
+*A frame whose tree is unchanged produces the same constraints.* This is the
+general case of the resize path and it applies to every full frame: before
+building constraints, ~endLayout~ compares a signature of the frame — every
+box's id, size policies, alignment and measured intrinsic size, every layout's
+kind, parent, children, gap, padding and alignment — against the last frame that
+built its own. If they match, the previous solver is re-solved and its solution
+copied onto this frame's boxes. If they do not, or if the re-solve fails, the
+frame builds its own constraints as before.
+
+** Turning Them Off
+
+Each fast pass has a switch, on the config and in the environment, because the
+first question about a layout bug is whether it is a layout bug or a fast-path
+bug:
+
+| Environment                 | Config field                | Default |
+|-----------------------------+-----------------------------+---------|
+| ~NEST_LAYOUT_REUSE=0~       | ~UI.setLayoutReuse(false)~  | on      |
+| ~NEST_RESIZE_FAST_PATH=0~   | ~AppConfig.resizeFastPath~  | on      |
+| ~NEST_POINTER_FAST_PATH=0~  | ~AppConfig.pointerFastPath~ | on      |
+| ~NEST_RESIZE_PROBE_MS=0~    | —                           | 1000    |
+| ~NEST_SOURCE_WATCH_MS=0~    | —                           | 500     |
+| ~NEST_SCROLL_CULL=0~        | ~UI.setScrollCulling(false)~ | on      |
+
+If a change in behaviour disappears with one of these set to 0, the fast pass is
+at fault. If it does not, it is not.
+
+* Scrolling
+
+A list is the one place where an interface routinely declares far more than it
+shows. A file tree with five thousand entries fits about twenty on screen, and
+the other four thousand nine hundred and eighty are the whole performance
+question: everything spent on them is spent on nothing anyone can see.
+
+There are three separate places that cost is paid, and they need three separate
+answers.
+
+** Drawing And Hit Testing: Automatic
+
+Every scroll container clips its contents, so a row outside the viewport paints
+nothing — but only after it has been walked, drawn, and turned into draw
+commands the backend then throws away. Nest skips it instead: inside a scroll
+container, a widget whose frame lies outside the viewport is neither drawn nor
+hit tested.
+
+This needs nothing from the application and applies to every scroll area there
+is. Two things are deliberately exempt: a widget with a running animation, whose
+transform can move it back into view, and a widget an interaction has already
+reached — the focused one, whatever is being pressed or dragged — which has to
+keep hearing about input wherever it has scrolled to.
+
+~ScrollCullMargin~ (64px) is how far outside the viewport a widget still counts
+as visible, so a shadow or a border that overhangs its own frame cannot be
+clipped away by the cull. ~NEST_SCROLL_CULL=0~, or ~ui.setScrollCulling(false)~,
+turns it off.
+
+** Declaring: virtualColumn
+
+Culling a row still pays for building it: its widget, its solver variables, its
+component, and whatever the application ran to produce it. For a list built by
+an interpreted language that last part is most of the frame, and no amount of
+culling touches it. The only way not to pay for a row is not to declare it.
+
+#+begin_src nim
+ui.virtualColumn(ui.id("files"), cfg(width = fill(), height = fill()),
+    paths.len, 26.0):
+  discard ui.button(ui.id("file", paths[index]), paths[index],
+      width = fill(), height = fixed(26))
+#+end_src
+
+The body runs only for the rows in view, with ~index~ injected. The rows that
+are not declared are replaced by two spacers, so the column is the height it
+would have been and scrolls over the whole list. Which rows are in view comes
+from where the container was last frame, which is a frame out of date; four rows
+of overscan either side absorb that.
+
+Every row has to be ~rowHeight~ tall for the arithmetic to hold. A list whose
+rows size themselves wants an ordinary ~column~ — culled at draw and hit-test
+time, but still declared in full. ~visibleRows~ is the same calculation on its
+own, for a caller that lays the spacers out itself, which is what Nide's Owl
+panels do through their ~list-window~ and ~file-tree-window~ commands.
+
+** Settling: A Scroll Is An Animation
+
+Scrolling eases: a wheel notch moves the container's target and the offset
+moves toward it over the frames that follow. Two things have to be true for
+that to look like anything, and both were once wrong.
+
+*The easing must not depend on which kind of frame the loop picks.* It used to
+happen only in ~applyScrollOffsets~, while a frame was laid out, so every
+cheaper path — a repaint of the retained frame, pointer motion answered from
+it, a resize pump — consumed the frame the scroll had asked for without moving
+it. The list then sat still until unrelated input forced a rebuild, which in
+practice meant it animated only while the mouse was moving. Now ~advanceScroll~
+runs on the retained paths as well, so whichever frame happens, the scroll
+advances. It shifts the contents by the difference from where they already sit
+rather than by the whole offset, which is what makes it safe to run against a
+frame that is already scrolled.
+
+*A deadline must be on the clock the loop waits on.* Nest has two clocks and
+they are not interchangeable. The *frame clock* (~DrawContext.ticks~) is frozen
+for the length of a frame so everything drawn in it agrees on the time, and it
+is what animations interpolate against. The *backend clock* is real time, and
+it is what ~redrawDelayMs~ waits on. A deadline set against the frame clock and
+then compared against the frame clock can never arrive: the loop waits its
+sixteen milliseconds, asks whether the frame is due, and is told no by a clock
+that has not moved since the frame began. Every deadline is now on the backend
+clock; the frame clock is only ever used for interpolation.
+
+The other half is that it must stop. The request is made only on a frame where
+the offset actually moved, and the easing snaps the offset onto the target once
+it is within a quarter of a pixel, so the frame after a scroll comes to rest
+asks for nothing and the loop blocks again. ~ui.scrollByY~ and
+~ui.scrollIntoView~ animate the same way and ask the same way.
+~ui.hasSettlingScroll~ reports whether anything is still moving.
+
+A wheel notch is consumed while widgets are updated, which is after that
+frame's easing has run, so the first movement lands on the frame after the
+wheel — one frame of latency at the start of a scroll, and none after.
+
+** Producing The Rows
+
+The third cost is the application's own: whatever it does to work out what the
+rows *are*. No UI framework can fix that, and it is often the largest of the
+three. Nide's file explorer is the worked example, and it had the classic
+mistakes all at once — see [[*Scrolling][the measurements]] below.
+
+The shape of the fix is always the same. Work out the row set once and cache it
+against the things that actually determine it; keep it as plain data rather than
+as values for the UI; and convert only the window that is about to be declared.
+Selection in particular should not be in the cache key: it changes on every
+arrow key, and it changes one row's appearance, not which rows exist.
+
+* Idling
+
+An interface that is doing nothing should cost nothing. Three things used to
+stop that from happening, and all three are worth knowing about because they are
+easy to reintroduce.
+
+*A blanket poll.* Owl applications used to ask for a redraw every 100ms so the
+runtime would come back and poll their shell processes and re-stat their
+sources. That is ten full repaints and ten presents a second, forever, for an
+application with nothing running behind it. Maintenance is now a wake of its own
+(~requestMaintenanceAfter~) which runs the application body but draws nothing
+unless the body found something worth drawing, it is only scheduled when there
+is something live to poll, and hot-reload source watching runs on its own slower
+timer (~NEST_SOURCE_WATCH_MS~, 500ms, 0 to turn off).
+
+*A pump that outlived its resize.* While a surface is being resized the
+compositor wants pixels more often than resize events arrive, so Nest pumps
+presents at 60hz during a resize. It used to keep pumping for a full second
+after the last resize event, and each pumped frame ran the whole application.
+The pump now stops when the resize settles, and a pumped frame repaints the
+retained tree rather than rebuilding it.
+
+*A size probe that never slept.* SDL reports resizes as events, but the driver
+also polls the window's own size as a safety net for compositors that coalesce
+them. Polling every 16ms forever means a wake-up sixty times a second for the
+life of the process. The probe now runs only for a second after the last event
+and the driver blocks properly after that.
+
+** Per-Widget Frame Rates
+
+Not every widget needs the display's frame rate. A clock wants one repaint a
+second; a throughput readout maybe five; a spinner all of them. A widget says so
+for itself:
+
+#+begin_src nim
+ui.tickEvery(id, 1000)   # once a second
+ui.tickRate(id, 5.0)     # five times a second
+ui.markRealtime(id)      # every frame, for as long as it is declared
+#+end_src
+
+The request is keyed by widget id and forgotten when the widget leaves the tree,
+like ~animate~. Between ticks the loop is free to sleep: the next wake is the
+soonest deadline any widget asked for, so a bar with a clock in it costs one
+repaint a second and nothing in between.
+
+* Where The Time Goes
+
+Measured on this repository's benchmarks, release builds. Widget counts are
+boxes in the solved layout.
+
+** Layout
+
+~tests/bench_resize.nim~, one frame of an editor-shaped tree:
+
+| widgets | full frame, rebuilding | full frame, reusing | re-solve | repaint |
+|---------+------------------------+---------------------+----------+---------|
+|     112 |               11.56 ms |             0.42 ms |  0.06 ms | 0.04 ms |
+|     336 |              213.631ms |             1.39 ms |  0.26 ms | 0.12 ms |
+
+The rebuild column is what a frame used to cost. It is superlinear in widget
+count because Cassowary re-optimises after every constraint insertion, so a
+tableau that is twice as big costs more than twice as much to fill: at 336
+widgets a frame took 213ms, which is five frames a second. Reusing the solver
+makes the same frame 1.4ms and roughly linear.
+
+** Nide
+
+~nide/tests/bench_palette.nim~, 200 frames per state:
+
+| state                     | before  | after   |
+|---------------------------+---------+---------|
+| editor only               | 4.68 ms | 3.32 ms |
+| palette open, idle        | 9.94 ms | 7.34 ms |
+| palette, typing           | 11.3 ms | 9.21 ms |
+| palette, moving selection | 14.2 ms | 12.0 ms |
+| resize, rebuilding        | 5.16 ms | 3.02 ms |
+| resize, as the loop does  |       — | 0.16 ms |
+| hover, rebuilding         | 5.16 ms | 3.18 ms |
+| hover, as the loop does   |       — | 0.01 ms |
+
+The last two pairs are the ones a user feels. A resize event is answered in
+0.16ms instead of 5.16ms and a mouse move in 0.014ms instead of 5.16ms, which is
+the difference between a window that redraws while you drag it and one that
+lags behind the pointer.
+
+What is left of a Nide frame is almost entirely the owl interpreter:
+~owl.renderWidget~ is around 3ms of a 3.3ms frame, evaluated twice per frame
+because a frame's declarations run once to dispatch events and once to build the
+tree. Layout is now 0.04ms of it. Nide's own path forward is Nim widgets rather
+than owl for the parts of the editor that run every frame; the framework side of
+that bill is paid.
+
+** Scrolling
+
+~tests/bench_scroll.nim~, a list of fixed-height rows in a 600px viewport, so
+about twenty three of them are on screen whatever the row count:
+
+| rows | before  | culled  | virtual |
+|------+---------+---------+---------|
+|  100 | 0.37 ms | 0.32 ms | 0.18 ms |
+| 1000 | 5.05 ms | 3.35 ms | 0.21 ms |
+| 5000 | 32.7 ms | 23.8 ms | 0.22 ms |
+
+Culling takes the draw commands from 15003 a frame to 86, and that is the whole
+of what it can do: the rest of that column is the cost of declaring five
+thousand rows, and it is linear in the row count. The virtual column is flat,
+because it declares about thirty rows whether the list holds a hundred or five
+thousand.
+
+~nide/tests/bench_file_tree.nim~, the file explorer's row window over a
+directory of N files, per frame — a frame asks for it twice, once dispatching
+events and once building widgets:
+
+| entries | before   | after    |
+|---------+----------+----------|
+|     500 |  1.20 ms | 0.075 ms |
+|    2000 |  5.28 ms | 0.135 ms |
+|    5000 | 17.58 ms | 0.258 ms |
+
+Three things were wrong there, and all three are worth recognising elsewhere.
+The directory walk ran again for every frame of a scroll, recomputing the answer
+to a question that had not changed a hundred times a second. Every row in the
+tree was turned into an Owl record and all but twenty discarded. And the probe
+that decides whether a Nerd Font is installed — a recursive walk of every system
+font directory — ran twice per frame, for an answer that cannot change while the
+editor is running.
+
+** Idling
+
+~tests/bench_idle.nim~, layer shell bar with a seconds clock, no input:
+
+| measure                | before | after |
+|------------------------+--------+-------|
+| loop wake-ups a second |   19.7 |   2.0 |
+| repaints a second      |   10.0 |   0.0 |
+| presents a second      |   19.7 |   1.0 |
+| CPU                    | 10.5 % | 1.1 % |
+
+The one present a second is the clock, which is the only thing on the bar that
+actually changes. With hot-reload source watching off — which is what a deployed
+shell wants — an application with nothing to say schedules nothing at all and
+the loop blocks until the compositor or an external signal has something for it.
+
+* The Tests That Hold This Up
+
+Three test files exist to keep the fast passes honest, because every one of them
+is a claim that two different amounts of work produce the same picture:
+
+- ~tests/test_layout_reuse.nim~ runs each scenario twice, once reusing the
+  solver and once forced to rebuild, and fails on any widget that lands
+  somewhere different. It covers resizing, adding and removing widgets, changing
+  measured text, changing a size policy, changing a fixed size, opening a
+  floating dialog, and sixty interleaved frames of all of them at once.
+- ~tests/test_resize_fastpath.nim~ does the same for the re-solve path, and
+  checks that the settle frame at the end of a resize does not move anything.
+- ~tests/test_frame_pacing.nim~ drives the real loop against a scripted event
+  stream and counts what it decided: motion and resize streams must not rebuild
+  per event, and a click or a key press must always run the application body.
+- ~tests/test_scroll_culling.nim~ checks that a culled frame draws exactly the
+  rows an unculled one drew inside the viewport, and that a virtual column puts
+  its rows where a full one would and scrolls over the same extent.
+- ~tests/test_scroll_settle.nim~ drives the real ~application~ loop with no
+  input at all and checks that a scroll keeps easing on frames it asked for
+  itself, that a repaint of the retained frame advances it too, that a deadline
+  is due on the clock the loop waits on, and that it stops asking the moment it
+  comes to rest. ~nide/tests/test_scroll_settle.nim~ does the same against the
+  real editor, which is where the bug was reported.
+- ~nide/tests/test_file_tree.nim~ checks that the cached directory scan cannot
+  be told apart from no cache: each offset gets its own rows, selection follows
+  the selected path without a rescan, and a refresh sees a new file.
+
+A fast pass that produces a different layout is a bug, not a trade-off. If one
+of these fails, the fast pass is wrong.

@@ -117,8 +117,8 @@ suite "constraint layout":
     let button = ui.box("button", width = fixed(40), height = fixed(24))
 
     ui.root window
-    ui.column(window, [rowPanel], alignItems = AlignCenter,
-        justifyContent = JustifyCenter)
+    ui.column(window, [rowPanel], alignItems = Center,
+        justifyContent = Center)
     ui.row(rowPanel, [flexible, button])
     ui.resize(-1, -1)
     ui.solve()
@@ -161,10 +161,10 @@ suite "constraint layout":
     ui.root window
     ui.row(
       window,
-      [top.withAlignSelf(AlignStart), middle, bottom.withAlignSelf(AlignEnd)],
+      [top.withAlignSelf(Start), middle, bottom.withAlignSelf(End)],
       gap = 10,
       padding = 10,
-      alignItems = AlignCenter,
+      alignItems = Center,
     )
     ui.resize(300, 100)
     ui.solve()
@@ -183,10 +183,10 @@ suite "constraint layout":
     ui.root window
     ui.column(
       window,
-      [left.withAlignSelf(AlignStart), center, right.withAlignSelf(AlignEnd)],
+      [left.withAlignSelf(Start), center, right.withAlignSelf(End)],
       gap = 10,
       padding = 10,
-      alignItems = AlignCenter,
+      alignItems = Center,
     )
     ui.resize(200, 120)
     ui.solve()
@@ -194,6 +194,41 @@ suite "constraint layout":
     checkFrame left, 10, 10, 50, 20
     checkFrame center, 65, 40, 70, 20
     checkFrame right, 110, 70, 80, 20
+
+  test "overlay children override justification on the main axis":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let top = ui.box("top", width = fixed(40), height = fixed(20))
+    let bottom = ui.box("bottom", width = fixed(40), height = fixed(20))
+
+    ui.root window
+    ui.overlay(
+      window,
+      [top.withJustifySelf(Start), bottom.withJustifySelf(End)],
+      padding = 10,
+      alignItems = Center,
+      justifyContent = Center,
+    )
+    ui.resize(200, 100)
+    ui.solve()
+
+    checkFrame top, 80, 10, 40, 20
+    checkFrame bottom, 80, 70, 40, 20
+
+  test "a lone column child overrides main-axis justification":
+    let ui = newLayout()
+    let window = ui.box("window")
+    let card = ui.box("card", width = fixed(80), height = fixed(40))
+
+    ui.root window
+    ui.column(
+      window,
+      [card.withAlignSelf(Center).withJustifySelf(Center)],
+    )
+    ui.resize(300, 200)
+    ui.solve()
+
+    checkFrame card, 110, 80, 80, 40
 
   test "pin constrains all edges with an inset":
     let ui = newLayout()

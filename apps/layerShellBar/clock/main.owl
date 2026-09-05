@@ -1,43 +1,176 @@
 state "root":
   selectedDate = (today-date)
   clickedDate = nothing
+  closeID = (id "control-center" "close")
+  artworkID = (id "control-center" "artwork")
+  previousID = (id "control-center" "previous")
+  playPauseID = (id "control-center" "play-pause")
+  nextID = (id "control-center" "next")
+  seekID = (id "control-center" "seek")
+  title = ""
+  artist = ""
+  album = ""
+  status = ""
+  statusOverride = ""
+  displayStatus = ""
+  player = ""
+  length = ""
+  position = 0
+  lengthSeconds = 0
+  rawPosition = ""
+  rawLengthSeconds = ""
+  seekValue = nothing
+  art = ""
+  playPauseLabel = "Play"
 
 import "../variables.owl"
 import "../components/calendar.owl"
+import "../components/media.owl"
+
+set title (mediaCachedQuery (id "control-center" "query" "title") "control-center-title" "metadata --format '{{title}}' 2>/dev/null" "No media")
+set artist (mediaCachedQuery (id "control-center" "query" "artist") "control-center-artist" "metadata --format '{{artist}}' 2>/dev/null" "")
+set album (mediaCachedQuery (id "control-center" "query" "album") "control-center-album" "metadata --format '{{album}}' 2>/dev/null" "")
+set status (mediaCachedQuery (id "control-center" "query" "status") "control-center-status" "status 2>/dev/null" "Stopped")
+set player (mediaCachedQuery (id "control-center" "query" "player") "control-center-player" "metadata --format '{{playerName}}' 2>/dev/null" "")
+set length (mediaCachedQuery (id "control-center" "query" "length") "control-center-length" "metadata --format '{{mpris:length}}' 2>/dev/null" "")
+set rawLengthSeconds (mediaLengthSeconds (id "control-center" "query" "length-seconds"))
+set lengthSeconds (pick (= rawLengthSeconds "") lengthSeconds rawLengthSeconds)
+set rawPosition (mediaPositionSeconds (id "control-center" "query" "position"))
+set position (pick (= rawPosition "") position rawPosition)
+set art (mediaArtwork (id "control-center" "query" "art"))
+when (= status statusOverride):
+  set statusOverride ""
+set displayStatus (pick (= statusOverride "") status statusOverride)
+set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
+
+redrawAfter MediaPollInterval
 
 events:
   when (keyPressed "escape"):
     requestCloseDialog ""
+  when (clicked closeID):
+    requestCloseDialog ""
   when (not (= clickedDate nothing)):
     requestCloseDialog clickedDate
+  when (clicked previousID):
+    mediaAction (id "control-center" "action" "previous") "previous 2>/dev/null"
+  when (clicked playPauseID):
+    set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
+    set displayStatus statusOverride
+    set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
+    mediaAction (id "control-center" "action" "play-pause") "play-pause 2>/dev/null"
+  when (clicked nextID):
+    mediaAction (id "control-center" "action" "next") "next 2>/dev/null"
+  set seekValue (horizontalSlider seekID position 0 lengthSeconds)
+  when (not (= seekValue nothing)):
+    set position seekValue
+    shellAsync (id "control-center" "action" "seek") (mediaSeekCommand seekValue) ImmediateInterval
 
-animation (id "start-popover") (not (dialogClosing?)):
+animation (id "control-center") (not (dialogClosing?)):
   duration = DialogAnimationDuration
   curve = "backOut"
   fromOpacity = 0
   maxOpacity = 0.95
   fromScale = DialogAnimationFromScale
   offsetY = 6
-  card (id "start-popover"):
+  card (id "control-center"):
     width = fill
     height = fill
     padding = DialogPaddingWide
     gap = NoSpacing
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 0 0 0
     opacity = 1
-    dialogHeader (id "start-popover" "header"):
+    dialogHeader (id "control-center" "header"):
       width = fill
       height = (fixed DialogHeaderHeight)
       padding = DialogHeaderPadding
-      alignItems = AlignCenter
-      label (id "start-popover" "title") (clock "dddd, MMMM d"):
-        width = fit
+      alignItems = Center
+      label (id "control-center" "title") "Control Center":
+        width = fill
         height = fit
-    column (id "start-popover" "actions"):
+      button closeID "x":
+        width = fixed DialogCloseButtonWidthLarge
+        height = fit
+      tooltip closeID "Close"
+    row (id "control-center" "body"):
       width = fill
-      height = fit
+      height = fill
       padding = NoSpacing
-      gap = NoSpacing
-      alignItems = AlignStretch
-      dateSelectorWithSignal "clock-calendar" selectedDate clickedDate
+      gap = DialogSectionGap
+      alignItems = Stretch
+      column (id "control-center" "calendar"):
+        width = fit
+        height = fill
+        gap = DialogGap
+        alignItems = Stretch
+        label (id "control-center" "date") (clock "dddd, MMMM d"):
+          width = fill
+          height = fit
+        dateSelectorWithSignal "clock-calendar" selectedDate clickedDate
+      column (id "control-center" "media"):
+        width = fill
+        height = fill
+        gap = MediaDetailsGap
+        alignItems = Stretch
+        label (id "control-center" "now-playing") "Now Playing":
+          width = fill
+          height = fit
+        row (id "control-center" "media-body"):
+          width = fill
+          height = fill
+          gap = DialogPaddingWide
+          alignItems = Stretch
+          column (id "control-center" "media-left"):
+            width = fixed MediaPopoverLeftWidth
+            height = fill
+            gap = DialogSectionGap
+            alignItems = Stretch
+            image artworkID art:
+              width = fill
+              height = fixed MediaPopoverArtworkHeight
+            row (id "control-center" "media-controls"):
+              width = fill
+              height = fit
+              gap = MediaControlGap
+              justifyContent = Center
+              button previousID "Prev":
+                width = fixed MediaControlButtonWidth
+                height = fixed MediaControlHeight
+              tooltip previousID "Previous track"
+              button playPauseID playPauseLabel:
+                width = fixed MediaPlayButtonWidth
+                height = fixed MediaControlHeight
+              tooltip playPauseID (pick (= displayStatus "Playing") "Pause" "Play")
+              button nextID "Next":
+                width = fixed MediaControlButtonWidth
+                height = fixed MediaControlHeight
+              tooltip nextID "Next track"
+            horizontalSlider seekID position 0 lengthSeconds:
+              width = fill
+              height = fixed MediaSeekHeight
+            tooltip seekID "Seek"
+          column (id "control-center" "media-details"):
+            width = fill
+            height = fill
+            gap = MediaDetailsGap
+            alignItems = Stretch
+            label (id "control-center" "media-title") title:
+              width = fill
+              height = fit
+              textScroll = true
+            label (id "control-center" "media-artist") artist:
+              width = fill
+              height = fit
+              textScroll = true
+            label (id "control-center" "media-album") album:
+              width = fill
+              height = fit
+              textScroll = true
+            table (id "control-center" "metadata-table"):
+              width = fill
+              height = fit
+              alignItems = Center
+              mediaMetadataRow "control-center" "Status" displayStatus
+              mediaMetadataRow "control-center" "Player" player
+              mediaMetadataRow "control-center" "Length" length

@@ -139,7 +139,7 @@ template owlErrorDialogBody(
       height = fixed(ui.windowHeight.toFloat),
       padding = 0,
       gap = 0,
-      alignItems = AlignStretch,
+      alignItems = Stretch,
       cornerStyle = RoundedCorners,
       radius = 6,
       shadow = true,
@@ -152,7 +152,7 @@ template owlErrorDialogBody(
       ui.id("_nest_error_header"),
       cfg(
         width = fill(), height = fixed(36), padding = 4, gap = 4,
-            alignItems = AlignCenter
+            alignItems = Center
       ),
     ):
       let titleID = ui.id("_nest_error_title")
@@ -164,7 +164,7 @@ template owlErrorDialogBody(
       cfg(
         width = fill(), height = fill(), padding = 14, gap = 10,
             scrollY = true, scrollX = true,
-            alignItems = AlignStretch
+            alignItems = Stretch
       ),
     ):
       ui.label(ui.id("_nest_error_summary"), details.message, fill(), fit(),
@@ -197,7 +197,7 @@ template owlErrorDialogBody(
     ui.row(
       ui.id("_nest_error_actions"),
       cfg(width = fill(), height = fit(), gap = 8, padding = 10,
-          justifyContent = JustifyEnd),
+          justifyContent = End),
     ):
       if details.primary.path.len > 0:
         discard ui.button(ui.id("_nest_error_open_primary"), "Open Location", fit(), fit())

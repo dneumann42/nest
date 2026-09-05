@@ -10,6 +10,20 @@ type AppConfig* = object
   alwaysRun60Fps*: bool
   themeName*: string
   perfOptions*: PerfOptions
+  resizeFastPath*: bool
+    ## Whether a window resize may re-solve the retained layout instead of
+    ## rebuilding the frame. On by default; see `resizePacing`.
+  resizeFullFrameMs*: int
+    ## How long a resize burst may run on the fast path before one full frame
+    ## is forced, so a long drag still sees the application's own per-frame
+    ## work.
+  pointerFastPath*: bool
+    ## Whether pointer motion on its own may be answered by re-running hit
+    ## testing against the retained frame instead of rebuilding it. On by
+    ## default.
+  pointerSettleMs*: int
+    ## How long after a fast pointer frame the application body is run
+    ## anyway, so anything it draws from the pointer's position catches up.
 
 proc init*(
     T: typedesc[AppConfig],
@@ -30,6 +44,10 @@ proc init*(
     layerShellConfig: layerShellSdl3Driver.dockTop(height.Positive),
     alwaysRun60Fps: alwaysRun60Fps,
     themeName: "",
+    resizeFastPath: true,
+    resizeFullFrameMs: 200,
+    pointerFastPath: true,
+    pointerSettleMs: 33,
   )
 
 proc layerShell*(cfg: AppConfig, config: LayerShellConfig): AppConfig =

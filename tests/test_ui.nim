@@ -280,12 +280,12 @@ suite "ui layout nesting":
       ui.beginLayout(300, 180)
 
       ui.column(Body, cfg(width = fill(), height = fill(),
-          alignItems = AlignStretch)):
+          alignItems = Stretch)):
         ui.button(Button1, "File", fixed(60), fixed(24))
-        ui.label(Label1, "Duck", fit(), fit(), alignSelf = AlignCenter)
+        ui.label(Label1, "Duck", fit(), fit(), alignSelf = Center)
         ui.floatingCardBelow(FloatingPanel, Button1,
             cfg(width = fixed(120), height = fit(), padding = 4,
-                alignItems = AlignStretch)):
+                alignItems = Stretch)):
           ui.label(Label2, "Save As", fill(), fit())
 
       ui.applyIntrinsicSizes(resources)
@@ -334,6 +334,19 @@ suite "ui layout nesting":
       check intrinsic.hasHeight
       check intrinsic.width == 45
       check intrinsic.height == 18
+
+      let padded = Label.new("Paths", "body", padding = insets(1, 2, 3, 4))
+      let paddedIntrinsic = Component(padded).measure(resources)
+      check paddedIntrinsic.width == 49
+      check paddedIntrinsic.height == 24
+
+      var ui = UI.init()
+      ui.beginLayout(300, 80)
+      ui.label(Label1, "Paths", fontName = "body", padding = 8,
+          paddingLeft = 12, paddingBottom = 5)
+      ui.applyIntrinsicSizes(resources)
+      ui.endLayout()
+      checkFrame(ui.widget(Label1), 0, 0, 65, 31)
     finally:
       fontRelays = originalFontRelays
 
@@ -1032,13 +1045,13 @@ suite "ui layout nesting":
       ui.beginLayout(80, 40)
       ui.column(
         Body,
-        cfg(width = fill(), height = fill(), alignItems = AlignCenter,
-            justifyContent = JustifyCenter),
+        cfg(width = fill(), height = fill(), alignItems = Center,
+            justifyContent = Center),
       ):
         ui.panel(
           NarrowPanel,
           cfg(width = prefer(800, min = 400), height = fit(),
-              alignItems = AlignCenter),
+              alignItems = Center),
         ):
           ui.row(NarrowHeader, cfg(width = fill(), height = fit())):
             ui.lineInput(Input1, state, width = fill(), height = fit())
@@ -1271,13 +1284,13 @@ suite "ui layout nesting":
     ui.row(
       Body,
       cfg(width = fill(), height = fixed(80), gap = 10.0, padding = 10.0,
-          alignItems = AlignCenter),
+          alignItems = Center),
     ):
       ui.button(Button1, "One", width = fixed(40), height = fixed(20))
       ui.button(Button2, "Two", width = fixed(40), height = fixed(20),
-          alignSelf = AlignEnd)
+          alignSelf = End)
       ui.button(Button5, "Three", width = fixed(40), height = fixed(20),
-          alignSelf = AlignStart)
+          alignSelf = Start)
 
     ui.endLayout()
 
@@ -1296,8 +1309,8 @@ suite "ui layout nesting":
           width = fill(),
           height = fixed(40),
           gap = 10.0,
-          alignItems = AlignCenter,
-          justifyContent = JustifyCenter,
+          alignItems = Center,
+          justifyContent = Center,
         ),
       ):
         ui.button(Button1, "One", width = fixed(40), height = fixed(20))
@@ -1308,8 +1321,8 @@ suite "ui layout nesting":
           width = fill(),
           height = fixed(40),
           gap = 10.0,
-          alignItems = AlignCenter,
-          justifyContent = JustifyEnd,
+          alignItems = Center,
+          justifyContent = End,
         ),
       ):
         ui.button(Button3, "Three", width = fixed(40), height = fixed(20))
@@ -1321,6 +1334,37 @@ suite "ui layout nesting":
     checkFrame(ui.widget(Button2), 150, 10, 50, 20)
     checkFrame(ui.widget(Button3), 200, 60, 40, 20)
     checkFrame(ui.widget(Button4), 250, 60, 50, 20)
+
+  test "overlay children allow justify self overrides":
+    var ui = UI.init()
+    ui.beginLayout(200, 100)
+
+    ui.overlay(Body, cfg(width = fill(), height = fill(),
+        alignItems = Center, justifyContent = Center)):
+      ui.panel(Sidebar, cfg(width = fixed(40), height = fixed(20),
+          justifySelf = Start)):
+        discard
+      ui.panel(Content, cfg(width = fixed(40), height = fixed(20),
+          justifySelf = End)):
+        discard
+
+    ui.endLayout()
+
+    checkFrame(ui.widget(Sidebar), 80, 0, 40, 20)
+    checkFrame(ui.widget(Content), 80, 80, 40, 20)
+
+  test "a lone column child centers itself on both axes":
+    var ui = UI.init()
+    ui.beginLayout(300, 200)
+
+    ui.column(Body, cfg(width = fill(), height = fill())):
+      ui.card(Sidebar, cfg(width = fixed(80), height = fixed(40),
+          alignSelf = Center, justifySelf = Center)):
+        discard
+
+    ui.endLayout()
+
+    checkFrame(ui.widget(Sidebar), 110, 80, 80, 40)
 
   test "block layouts center within asymmetric padding":
     var ui = UI.init()
@@ -1336,8 +1380,8 @@ suite "ui layout nesting":
         paddingTop = 5.0,
         paddingRight = 40.0,
         paddingBottom = 15.0,
-        alignItems = AlignCenter,
-        justifyContent = JustifyCenter,
+        alignItems = Center,
+        justifyContent = Center,
       ),
     ):
       ui.button(Button1, "One", width = fixed(40), height = fixed(20))
@@ -1360,8 +1404,8 @@ suite "ui layout nesting":
           height = fixed(100),
           gap = 10.0,
           padding = 10.0,
-          alignItems = AlignCenter,
-          justifyContent = JustifyCenter,
+          alignItems = Center,
+          justifyContent = Center,
         ),
       ):
         ui.label(Label1, "Counter", width = fixed(80), height = fixed(20))

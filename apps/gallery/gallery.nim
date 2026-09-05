@@ -435,7 +435,7 @@ widget modal(open: bool) emits OverlaysEvent:
       padding = 12, gap = 10)):
     ui.label(ui.id("text"), "A modal dialog.", width = fill())
     ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8,
-        justifyContent = JustifyEnd)):
+        justifyContent = End)):
       if ui.button(ui.id("close"), "Close"):
         emit OverlaysEvent(kind: ModalClosed)
 

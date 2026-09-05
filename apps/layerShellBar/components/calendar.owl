@@ -23,12 +23,12 @@ widget dateSelector key target:
     height = fit
     padding = CalendarPadding
     gap = CalendarGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     row (id keyText "calendar-header"):
       width = fill
       height = fit
       gap = CalendarGap
-      alignItems = AlignCenter
+      alignItems = Center
       button previousID "<":
         width = (fixed CalendarNavButtonWidth)
         height = fit
@@ -114,14 +114,14 @@ widget dateSelectorWithSignal key target clickedTarget:
     height = fit
     padding = CalendarPopoverPadding
     gap = CalendarGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 0 0 0
     opacity = CalendarPopoverOpacity
     row (id keyText "calendar-header"):
       width = fill
       height = fit
       gap = CalendarGap
-      alignItems = AlignCenter
+      alignItems = Center
       button previousID "<":
         width = (fixed CalendarNavButtonWidth)
         height = fit

@@ -1,0 +1,6 @@
+title = "System Updates"
+width = 360
+height = 180
+layerShell = "top-right"
+namespace = "nest-system-updates"
+exclusiveZone = -1

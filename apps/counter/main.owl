@@ -15,8 +15,8 @@ panel rootID:
   height = fill
   padding = 16
   gap = 12
-  alignItems = AlignCenter
-  justifyContent = JustifyCenter
+  alignItems = Center
+  justifyContent = Center
   label (id "title") "Counter":
     width = fit
     height = fit
@@ -24,7 +24,7 @@ panel rootID:
     width = fit
     height = fit
     gap = 8
-    alignItems = AlignCenter
+    alignItems = Center
     button decrementID "-":
       width = fixed 32
       height = fit

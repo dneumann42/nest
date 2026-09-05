@@ -58,14 +58,14 @@ animation (id "volume" "panel") (not (dialogClosing?)):
     height = fill
     padding = DialogPadding
     gap = DialogGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 0 0 0
     opacity = 1
     dialogHeader (id "volume" "header"):
       width = fill
       height = fixed DialogHeaderHeight
       padding = DialogHeaderPadding
-      alignItems = AlignCenter
+      alignItems = Center
       label (id "volume" "title") "Volume":
         width = fill
         height = fit
@@ -77,14 +77,14 @@ animation (id "volume" "panel") (not (dialogClosing?)):
       width = fill
       height = fill
       gap = VolumeBodyGap
-      alignItems = AlignCenter
-      justifyContent = JustifyStart
+      alignItems = Center
+      justifyContent = Start
       column (id "volume" "readout"):
         width = fill
         height = fill
         gap = DialogGap
-        alignItems = AlignStretch
-        justifyContent = JustifyCenter
+        alignItems = Stretch
+        justifyContent = Center
         label (id "volume" "status") (string "♫ " status):
           width = fill
           height = fit
@@ -95,8 +95,8 @@ animation (id "volume" "panel") (not (dialogClosing?)):
           width = fill
           height = fit
           gap = DialogGap
-          alignItems = AlignCenter
-          justifyContent = JustifyCenter
+          alignItems = Center
+          justifyContent = Center
           button downID "-":
             width = fixed VolumeSmallButtonWidth
             height = fit

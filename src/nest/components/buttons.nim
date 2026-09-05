@@ -27,7 +27,7 @@ proc drawBorder(self: Button, f: Frame, c: Color) =
 proc new*(T: typedesc[Button], label = "", textScroll = false,
     fontName = "font", padding = insets(-1.0),
     borderStyle = ButtonBorderLine, chromeStyle = ButtonChromeRaised,
-    textAlign = JustifyCenter): T =
+    textAlign: Justification = Center): T =
   ## Create a button component labelled `label`.
   ##
   ## `textScroll` clips text wider than the button. Marquee animation is
@@ -41,7 +41,7 @@ proc new*(T: typedesc[Button], label = "", textScroll = false,
 proc new*(T: typedesc[Button], label: string, textScroll: bool,
     fontName: string, padding: float64,
     borderStyle = ButtonBorderLine, chromeStyle = ButtonChromeRaised,
-    textAlign = JustifyCenter): T =
+    textAlign: Justification = Center): T =
   ## Create a button component with the same `padding` on every edge.
   T.new(label, textScroll, fontName, insets(padding), borderStyle, chromeStyle,
       textAlign)
@@ -141,10 +141,10 @@ method draw*(self: Button, widget: Widget, ctx: var DrawContext) =
         paddingLeft)
     textX =
       case self.textAlign
-      of JustifyEnd:
+      of End:
         f.x.toInt + max(f.width.toInt - textExtent.width - paddingRight,
             paddingLeft)
-      of JustifyCenter:
+      of Center:
         centeredTextX
       else:
         f.x.toInt + paddingLeft

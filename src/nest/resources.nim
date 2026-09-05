@@ -1,5 +1,5 @@
 import std/[os, tables, times]
-import nest/[coords, screen]
+import nest/[bench, coords, screen]
 export coords, screen
 
 type
@@ -13,13 +13,20 @@ type
     fontMetrics: TableRef[string, FontMetrics]
     fontPaths: TableRef[string, string]
     textMeasurements: TableRef[string, TextMeasurement]
+    coldMeasurements: TableRef[string, TextMeasurement]
     images: TableRef[string, Image]
     imageMeasurements: TableRef[string, TextExtent]
     imageTimes: TableRef[string, Time]
     imageLastUsed: TableRef[string, int]
     imageGeneration: ref int
 
-const MaxTextMeasurements = 1024
+const MaxTextMeasurements = 4096
+  ## How many measured strings to keep before rotating the cache.
+  ##
+  ## A list holds one string per row and measures them all, so a cache that
+  ## is smaller than the list misses on every row of every frame. Two
+  ## generations are kept, so the limit is a rotation rather than a purge and
+  ## a working set of up to twice this still hits.
 const MaxImages = 32
 
 proc new*(T: typedesc[Resources]): T =
@@ -29,6 +36,7 @@ proc new*(T: typedesc[Resources]): T =
     fontPaths: newTable[string, string](),
     resources: newTable[string, int](),
     textMeasurements: newTable[string, TextMeasurement](),
+    coldMeasurements: newTable[string, TextMeasurement](),
     images: newTable[string, Image](),
     imageMeasurements: newTable[string, TextExtent](),
     imageTimes: newTable[string, Time](),
@@ -52,6 +60,7 @@ proc loadFont*(resources: Resources, name, path: string, size: Positive) =
   resources.fontMetrics[name] = metrics
   resources.fontPaths[name] = path
   resources.textMeasurements.clear()
+  resources.coldMeasurements.clear()
 
 proc fontAtSize*(resources: Resources, name: string, size: int): string =
   ## Return a font resource at `size`, creating it from the named font when needed.
@@ -82,10 +91,18 @@ proc measureText*(resources: Resources, fontName,
   ##
   ## Results are memoised per font and string; the cache is dropped whole
   ## once it grows past its limit or a font is reloaded.
+  bench.count("text.measure", 1)
   let key = fontName & "\0" & text
   if resources.textMeasurements.hasKey(key):
     return resources.textMeasurements[key]
+  if resources.coldMeasurements.hasKey(key):
+    # Still in use, so bring it back into the generation that survives the
+    # next rotation.
+    result = resources.coldMeasurements[key]
+    resources.textMeasurements[key] = result
+    return
 
+  bench.count("text.measure.miss", 1)
   let (font, metrics) = resources.get(fontName)
   let extent = screen.measureText(Font(font), text)
   result = TextMeasurement(
@@ -98,6 +115,10 @@ proc measureText*(resources: Resources, fontName,
     lineHeight: metrics.lineHeight,
   )
   if resources.textMeasurements.len >= MaxTextMeasurements:
+    # Rotate rather than purge: everything measured since the last rotation
+    # stays reachable for one more generation, so a working set larger than
+    # the limit degrades instead of missing on every lookup.
+    resources.coldMeasurements[] = resources.textMeasurements[]
     resources.textMeasurements.clear()
   resources.textMeasurements[key] = result
 

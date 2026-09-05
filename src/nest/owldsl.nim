@@ -3,9 +3,16 @@ import
       tables, times]
 
 import owl, palette, ui, dialogs
-import nest/[input, perf, screen]
+import nest/[bench, input, perf, screen]
 
-const MaintenancePollMs = 100
+const
+  MaintenancePollMs = 100
+    ## How often to poll while there is something live to poll: a shell
+    ## command running, a dialog open, a file picker in flight.
+  DefaultSourceWatchMs = 500
+    ## How often an otherwise idle app re-stats its owl sources for a hot
+    ## reload. This is the only reason a quiet app wakes at all, so it is
+    ## deliberately slower than the poll interval and can be turned off.
 
 type
   WidgetIDValue* = ref object of NativeValue
@@ -84,7 +91,7 @@ type
     widgetState: Table[string, Value]
     stateBindings: seq[StateBinding]
     messages: Table[string, seq[Value]]
-    loadedFiles*: Table[string, Time]
+    loadedFiles*: OwlFileWatcher
     loadedModules*: HashSet[string]
     dialogProcesses*: Table[string, DialogProcess]
     dialogResults*: Table[string, string]
@@ -119,6 +126,7 @@ type
     errorDialogLaunchError*: string
     lastFullRenderTicks: int
     lastMaintenanceTicks: int
+    lastSourceWatchTicks: int
 
   MenuEntryKind = enum
     MenuEntryItem
@@ -383,13 +391,24 @@ proc asAlignment(value: Value, fallback: Alignment): Alignment =
   if value.kind == Native and value.native of AlignmentValue:
     AlignmentValue(value.native).value
   else:
-    fallback
+    case value.asString.normalize
+    of "auto": Auto
+    of "start": Start
+    of "center": Center
+    of "end": End
+    of "stretch": Stretch
+    else: fallback
 
 proc asJustification(value: Value, fallback: Justification): Justification =
   if value.kind == Native and value.native of JustificationValue:
     JustificationValue(value.native).value
   else:
-    fallback
+    case value.asString.normalize
+    of "auto": Auto
+    of "start": Start
+    of "center": Center
+    of "end": End
+    else: fallback
 
 proc asButtonBorderStyle(value: Value,
     fallback: ButtonBorderStyle): ButtonBorderStyle =
@@ -520,25 +539,24 @@ proc syntaxColor(value: Value): Color =
   case value.kind
   of Native:
     value.asColor(color(241, 246, 247))
-  of Dictionary:
+  of Record:
     color(
-      value.entries.getOrDefault("r").asByte(241),
-      value.entries.getOrDefault("g").asByte(246),
-      value.entries.getOrDefault("b").asByte(247),
-      value.entries.getOrDefault("a").asByte(255),
+      value["r"].asByte(241),
+      value["g"].asByte(246),
+      value["b"].asByte(247),
+      value["a"].asByte(255),
     )
   else:
     color(241, 246, 247)
 
 proc valueText(value: Value, key: string): string =
-  if value.kind == Dictionary and key in value.entries and
-      value.entries[key].kind == Text:
-    value.entries[key].text
+  if value.kind == Record and value.hasKey(key) and value[key].kind == Text:
+    value[key].text
   else:
     ""
 
 proc syntaxRule(value: Value): SyntaxRule =
-  if value.kind != Dictionary:
+  if value.kind != Record:
     return
   let kind = value.valueText("kind")
   result.kind =
@@ -555,17 +573,17 @@ proc syntaxRule(value: Value): SyntaxRule =
       SyntaxRegex
   result.pattern = value.valueText("pattern")
   result.stopPattern = value.valueText("stop")
-  if "color" in value.entries:
-    result.color = value.entries["color"].syntaxColor()
+  if value.hasKey("color"):
+    result.color = value["color"].syntaxColor()
   else:
     result.color = color(241, 246, 247)
 
 proc syntaxDefinition(value: Value): SyntaxDefinition =
-  if value.kind != Dictionary:
+  if value.kind != Record:
     return
   result.name = value.valueText("name")
-  if "rules" in value.entries and value.entries["rules"].kind == List:
-    for item in value.entries["rules"].items:
+  if value.hasKey("rules") and value["rules"].kind == List:
+    for item in value["rules"].items:
       let rule = item.syntaxRule()
       if rule.pattern.len > 0:
         result.rules.add rule
@@ -646,6 +664,8 @@ proc evalConfig(
       result.justifyContent = value.asJustification(result.justifyContent)
     of "alignSelf":
       result.alignSelf = value.asAlignment(result.alignSelf)
+    of "justifySelf":
+      result.justifySelf = value.asJustification(result.justifySelf)
     of "scrollX":
       result.scrollX = value.isTruthy
     of "scrollY":
@@ -873,10 +893,7 @@ proc resolveModulePath(runtime: NestOwlRuntime, path: string): string =
   (getCurrentDir() / path).normalizedPath
 
 proc rememberFile(runtime: NestOwlRuntime, path: string) =
-  try:
-    runtime.loadedFiles[path] = getLastModificationTime(path)
-  except OSError:
-    discard
+  runtime.loadedFiles.watch(path)
 
 proc padInt(value, width: int): string =
   result = $value
@@ -917,7 +934,7 @@ proc requestRedrawAfter(
     let due = input.getTicks() + max(ms, 0)
     if runtime.nextFullRenderTicks == 0 or due < runtime.nextFullRenderTicks:
       runtime.nextFullRenderTicks = due
-    runtime.requireUi().requestRedrawAfter(ms)
+    runtime.requireUi().requestFullRedrawAfter(ms)
   except EvaluatorError as error:
     raise error
   except Exception:
@@ -1069,7 +1086,7 @@ proc parseSwayWorkspaceValues(output: string): Value {.raises: [].} =
       entry["focused"] = boolean(workspaceBoolField(node, "focused"))
       entry["visible"] = boolean(workspaceBoolField(node, "visible"))
       entry["urgent"] = boolean(workspaceBoolField(node, "urgent"))
-      items.add dictionary(entry)
+      items.add record(entry)
   except JsonParsingError:
     discard
   except ValueError:
@@ -1462,28 +1479,24 @@ proc dialogLaunchOptions(value: Value): DialogLaunchOptions {.raises: [
     result.dismissOnInactive = value.boolean
     result.inactiveGraceMs = 350
     result.hasValues = true
-  of Dictionary:
+  of Record:
     result.inactiveGraceMs = 350
     result.hasValues = true
-    if value.entries.hasKey("dismissOnInactive"):
-      result.dismissOnInactive = value.entries.getOrDefault(
-          "dismissOnInactive").isTruthy
-    elif value.entries.hasKey("autoDismiss"):
-      result.dismissOnInactive = value.entries.getOrDefault(
-          "autoDismiss").isTruthy
-    elif value.entries.hasKey("dismissWhenInactive"):
-      result.dismissOnInactive = value.entries.getOrDefault(
-          "dismissWhenInactive").isTruthy
-    if value.entries.hasKey("inactiveGraceMs"):
+    if value.hasKey("dismissOnInactive"):
+      result.dismissOnInactive = value["dismissOnInactive"].isTruthy
+    elif value.hasKey("autoDismiss"):
+      result.dismissOnInactive = value["autoDismiss"].isTruthy
+    elif value.hasKey("dismissWhenInactive"):
+      result.dismissOnInactive = value["dismissWhenInactive"].isTruthy
+    if value.hasKey("inactiveGraceMs"):
       result.inactiveGraceMs = max(
-        value.entries.getOrDefault("inactiveGraceMs").asNumber.int, 0
+        value["inactiveGraceMs"].asNumber.int, 0
       )
-    elif value.entries.hasKey("graceMs"):
-      result.inactiveGraceMs = max(value.entries.getOrDefault(
-          "graceMs").asNumber.int, 0)
-    elif value.entries.hasKey("dismissGraceMs"):
+    elif value.hasKey("graceMs"):
+      result.inactiveGraceMs = max(value["graceMs"].asNumber.int, 0)
+    elif value.hasKey("dismissGraceMs"):
       result.inactiveGraceMs = max(
-        value.entries.getOrDefault("dismissGraceMs").asNumber.int, 0
+        value["dismissGraceMs"].asNumber.int, 0
       )
   else:
     raise newException(
@@ -1737,14 +1750,14 @@ proc renderErrorDialog*(runtime: NestOwlRuntime, ui: var UI, message: string) =
         height = fit(),
         padding = 12,
         gap = 10,
-        alignItems = AlignStretch,
+        alignItems = Stretch,
       ),
     ):
       ui.dialogHeader(
         ui.id("_nest_error_header"),
         cfg(
           width = fill(), height = fit(), padding = 8, gap = 8,
-              alignItems = AlignCenter
+              alignItems = Center
         ),
       ):
         ui.label(ui.id("_nest_error_title"), "Owl error", fill(), fit())
@@ -1756,7 +1769,7 @@ proc renderErrorDialog*(runtime: NestOwlRuntime, ui: var UI, message: string) =
           height = fit(),
           padding = 8,
           gap = 4,
-          alignItems = AlignStretch,
+          alignItems = Stretch,
         ),
       ):
         for index, line in owlErrorLines(message):
@@ -1764,7 +1777,7 @@ proc renderErrorDialog*(runtime: NestOwlRuntime, ui: var UI, message: string) =
       ui.row(
         ui.id("_nest_error_actions"),
         cfg(width = fill(), height = fit(), gap = 8,
-            justifyContent = JustifyEnd),
+            justifyContent = End),
       ):
         discard ui.button(copyID, "Copy", fit(), fit())
 
@@ -2451,7 +2464,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       raise newException(EvaluatorError, "listAppend expects list and value")
     if values[0].kind != List:
       raise newException(EvaluatorError, "listAppend expects list and value")
-    values[0].listAppended(values[1])
+    values[0] & values[1]
 
   runtime.evaluator.native "textFind":
     discard layout
@@ -3048,7 +3061,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       anchorID = runtime.requireUi().id(key)
       options = DialogLaunchOptions()
     if values.len > 3:
-      if values[3].kind in {Dictionary, Boolean}:
+      if values[3].kind in {Record, Boolean}:
         options = dialogLaunchOptions(values[3])
       else:
         anchorID = runtime.asWidgetID(values[3])
@@ -3080,7 +3093,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       anchorID = runtime.requireUi().id(key)
       options = DialogLaunchOptions()
     if values.len > 3:
-      if values[3].kind in {Dictionary, Boolean}:
+      if values[3].kind in {Record, Boolean}:
         options = dialogLaunchOptions(values[3])
       else:
         anchorID = runtime.asWidgetID(values[3])
@@ -3196,7 +3209,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
           env.idKey(arguments[0], values[0].asString)
         else:
           $id
-      config = env.evalConfig(bodyNodes)
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes))
       menus = env.collectMenus(bodyNodes.childNodes)
       dialogKey = menuKey(key)
     runtime.currentUi[].menuBar(id, config):
@@ -3230,7 +3243,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
               height = fit(),
               padding = 6,
               gap = 0,
-              alignItems = AlignStretch,
+              alignItems = Stretch,
             )
               .withBackground(color(0, 0, 0))
               .withOpacity(0.9),
@@ -3238,7 +3251,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
             runtime.currentUi[].column(
               runtime.requireUi().id(key, "items", menu.path),
               cfg(width = fill(), height = fit(), gap = 0,
-                  alignItems = AlignStretch),
+                  alignItems = Stretch),
             ):
               for index, entry in entries:
                 case entry.kind
@@ -3254,7 +3267,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
                       width = fill(),
                       height = fit(),
                       padding = 4,
-                      alignItems = AlignCenter,
+                      alignItems = Center,
                     ),
                   ):
                     if entry.body.len == 0:
@@ -3280,7 +3293,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].menuItem(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     boolean(runtime.requireUi().inEventPhase() and runtime.requireUi().clicked(id))
@@ -3290,7 +3303,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.menuDividerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.menuDividerConfig()))
     runtime.currentUi[].menuDivider(id, config.width, config.height,
         config.alignSelf)
     nothing()
@@ -3321,7 +3334,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].panel(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3331,7 +3344,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].card(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3341,7 +3354,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].dialogHeader(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3351,7 +3364,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].table(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3361,7 +3374,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].tableHeader(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3371,7 +3384,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].tableRow(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3381,7 +3394,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].tableCell(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3391,7 +3404,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].row(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3401,7 +3414,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].column(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3411,7 +3424,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].overlay(id, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3421,7 +3434,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let values = env.evalArgs(arguments)
     let
       id = runtime.widgetID(values)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     discard
       runtime.currentUi[].spacer(id, config.width, config.height,
           config.alignSelf)
@@ -3433,7 +3446,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let
       id = runtime.widgetID(values)
       labelText = values.textArg(1)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
       fontName = runtime.fontName(config)
     runtime.currentUi[].label(
       id,
@@ -3454,7 +3467,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let
       id = runtime.widgetID(values)
       labelText = values.textArg(1)
-      config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
       fontName = runtime.fontName(config)
     boolean(
       runtime.currentUi[].button(
@@ -3482,7 +3495,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       id = runtime.asWidgetID(values[0])
       labelText = values[1].asString
       checked = values[2].isTruthy
-      config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
     runtime.currentUi[].checkbox(
       id,
       labelText,
@@ -3504,7 +3517,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let
       id = runtime.asWidgetID(values[0])
       selected = values[1].asNumber.int
-      config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
     var options: seq[string]
     for item in values[2].items:
       options.add item.asString
@@ -3538,7 +3551,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
           values[1].asString
         else:
           ""
-      config = env.evalConfig(bodyNodes, uiDriverRelays.lineInputConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.lineInputConfig()))
     if key notin runtime.editorStates:
       runtime.editorStates[key] = EditorState.new(initial)
     runtime.currentUi[].lineInput(
@@ -3559,7 +3572,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     let
       id = runtime.asWidgetID(values[0])
       open = values[1].isTruthy
-      config = env.evalConfig(bodyNodes, uiDriverRelays.containerConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.containerConfig()))
     runtime.currentUi[].modalDialog(id, open, config):
       discard runtime.renderNodes(env, bodyNodes.childNodes)
     nothing()
@@ -3575,7 +3588,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       values = env.evalArgs(arguments)
       id = runtime.asWidgetID(values[0])
       selectedSymbol = arguments[2].symbol
-      config = env.evalConfig(bodyNodes, uiDriverRelays.tabsConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.tabsConfig()))
 
     var labels: seq[string]
     if values[1].kind != List:
@@ -3614,7 +3627,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
           env.idKey(arguments[0], values[0].asString)
         else:
           "editor"
-      config = env.evalConfig(bodyNodes, uiDriverRelays.editorConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.editorConfig()))
     if key notin runtime.editorStates:
       runtime.editorStates[key] = EditorState.new("")
     runtime.currentUi[].textEditor(
@@ -3646,7 +3659,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
         values[1].asString
       else:
         ""
-    let config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+    let config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
     runtime.currentUi[].image(id, path, config.width, config.height,
         config.alignSelf)
     nothing()
@@ -3670,7 +3683,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
           values[1].asString
         else:
           ""
-      config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
     if key notin runtime.imageViewerStates:
       runtime.imageViewerStates[key] = PanZoomImageState.new()
     discard runtime.currentUi[].component(
@@ -3730,7 +3743,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
         values[1].asString
       else:
         ""
-    let config = env.evalConfig(bodyNodes, uiDriverRelays.leafConfig())
+    let config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.leafConfig()))
     boolean(
       runtime.currentUi[].imageButton(
         id, path, config.width, config.height, config.alignSelf, config.style
@@ -3749,7 +3762,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       current = values[1].asNumber
       minimum = values[2].asNumber
       maximum = values[3].asNumber
-      config = env.evalConfig(bodyNodes, uiDriverRelays.sliderConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.sliderConfig()))
       changed = runtime.currentUi[].slider(
         id, current, minimum, maximum, config.width, config.height,
         SliderHorizontal,
@@ -3772,7 +3785,7 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       current = values[1].asNumber
       minimum = values[2].asNumber
       maximum = values[3].asNumber
-      config = env.evalConfig(bodyNodes, uiDriverRelays.sliderConfig())
+      config = runtime.currentUi[].prepareConfig(id, env.evalConfig(bodyNodes, uiDriverRelays.sliderConfig()))
       changed = runtime.currentUi[].slider(
         id, current, minimum, maximum, config.width, config.height,
         SliderVertical,
@@ -3783,14 +3796,11 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     else:
       nothing()
 
-  runtime.evaluator.env.define("AlignAuto", alignValue(AlignAuto))
-  runtime.evaluator.env.define("AlignStart", alignValue(AlignStart))
-  runtime.evaluator.env.define("AlignCenter", alignValue(AlignCenter))
-  runtime.evaluator.env.define("AlignEnd", alignValue(AlignEnd))
-  runtime.evaluator.env.define("AlignStretch", alignValue(AlignStretch))
-  runtime.evaluator.env.define("JustifyStart", justifyValue(JustifyStart))
-  runtime.evaluator.env.define("JustifyCenter", justifyValue(JustifyCenter))
-  runtime.evaluator.env.define("JustifyEnd", justifyValue(JustifyEnd))
+  runtime.evaluator.env.define("Auto", text("Auto"))
+  runtime.evaluator.env.define("Start", text("Start"))
+  runtime.evaluator.env.define("Center", text("Center"))
+  runtime.evaluator.env.define("End", text("End"))
+  runtime.evaluator.env.define("Stretch", text("Stretch"))
   runtime.evaluator.env.define("ButtonBorderNone",
       buttonBorderStyleValue(ButtonBorderNone))
   runtime.evaluator.env.define("ButtonBorderLine",
@@ -3818,6 +3828,7 @@ proc init*(T: typedesc[NestOwlRuntime]): T =
     externalEvents: initCountTable[string](),
     widgetState: initTable[string, Value](),
     messages: initTable[string, seq[Value]](),
+    loadedFiles: initOwlFileWatcher(),
     loadedModules: initHashSet[string](),
     dialogProcesses: initTable[string, DialogProcess](),
     dialogResults: initTable[string, string](),
@@ -3849,12 +3860,7 @@ proc widgetID*(
 
 proc dependenciesChanged*(runtime: NestOwlRuntime): bool =
   ## Test whether any loaded owl file has changed on disk since it was read.
-  for path, lastTime in runtime.loadedFiles:
-    try:
-      if getLastModificationTime(path) != lastTime:
-        return true
-    except OSError:
-      return true
+  runtime.loadedFiles.changed()
 
 proc reload*(app: NestOwlApp): bool {.discardable.} =
   ## Reload the app's owl program from disk and report whether it parsed.
@@ -3903,7 +3909,8 @@ proc render*(runtime: NestOwlRuntime, ui: var UI, program: SyntaxNode) =
   runtime.stateBindings.setLen(0)
   try:
     ui.layout:
-      discard runtime.renderNodes(program.statements)
+      bench.zone("owl.eval"):
+        discard runtime.renderNodes(program.statements)
   finally:
     runtime.commitState()
     runtime.currentUi = nil
@@ -3930,17 +3937,20 @@ proc renderWidget*(
   try:
     try:
       if libraryPath.len > 0:
-        runtime.loadWidgetLibrary(libraryPath)
+        bench.zone("owl.import"):
+          runtime.loadWidgetLibrary(libraryPath)
       var nodes: seq[SyntaxNode]
       for argument in arguments:
         nodes.add argument
-      discard runtime.renderNodes(@[command(symbol(widgetName), nodes)])
+      bench.zone("owl.renderWidget"):
+        discard runtime.renderNodes(@[command(symbol(widgetName), nodes)])
     except EvaluatorError as error:
       runtime.hasError = true
       runtime.lastError = report(error)
       runtime.lastErrorDetails = error.errorDetails()
   finally:
-    runtime.commitState()
+    bench.zone("owl.commitState"):
+      runtime.commitState()
     runtime.currentUi = nil
 
 proc renderWidget*(
@@ -3979,22 +3989,78 @@ proc renderLayoutOnly*(
     runtime.commitState()
     runtime.currentUi = nil
 
+proc hasLiveWork(runtime: NestOwlRuntime): bool =
+  ## Whether anything in the program needs polling at all.
+  ##
+  ## A bar that is only showing a clock has nothing running behind it, and a
+  ## poll it does not need is a wake-up it does not need.
+  ## Workspace subscriptions are deliberately not counted: they run on their
+  ## own threads and wake the loop when they have something, so polling for
+  ## them would be a wake-up that never finds anything.
+  runtime.shellProcesses.len > 0 or runtime.dialogProcesses.len > 0 or
+    runtime.pendingPathCallbacks.len > 0
+
+proc sourceWatchMs(): int =
+  ## How often to re-stat owl sources for a hot reload.
+  ##
+  ## `NEST_SOURCE_WATCH_MS` overrides it, and 0 turns hot reload off, which
+  ## is what a deployed shell wants: nothing then wakes it but its own
+  ## widgets and the compositor.
+  var cached {.global.} = -1
+  if cached < 0:
+    cached =
+      try:
+        let raw = getEnv("NEST_SOURCE_WATCH_MS")
+        if raw.len == 0: DefaultSourceWatchMs else: max(parseInt(raw), 0)
+      except CatchableError:
+        DefaultSourceWatchMs
+  cached
+
+proc scheduleNextWake(app: NestOwlApp, ui: var UI, now: int) =
+  ## Ask to be woken only for work that actually exists.
+  ##
+  ## Three things can want the loop back: something the program is running,
+  ## a source file it would hot-reload, and a widget on its own cadence.
+  ## When none of them do, nothing is scheduled and the loop blocks until the
+  ## compositor or an external signal has something to say -- which is the
+  ## difference between a bar that idles at zero and one that wakes ten times
+  ## a second to repaint an unchanged frame.
+  if app.runtime.hasLiveWork():
+    ui.requestMaintenanceAfter(MaintenancePollMs)
+  let watchMs = sourceWatchMs()
+  if watchMs > 0:
+    let elapsed = now - app.lastSourceWatchTicks
+    ui.requestMaintenanceAfter(max(watchMs - elapsed, 0))
+  let tickWait = ui.nextTickWaitMs(now)
+  if tickWait >= 0:
+    ui.requestRedrawAfter(tickWait)
+
 proc render*(app: NestOwlApp, ui: var UI) =
   ## Render the app's program into `ui` for this frame.
   ##
   ## Reloads the program when a source file changed, decides between a full
-  ## and an incremental render, and keeps the program's shell and dialog
-  ## processes polled. Does nothing when no program is loaded.
+  ## render, a repaint of the retained frame and holding what is already on
+  ## screen, and keeps the program's shell and dialog processes polled. Does
+  ## nothing when no program is loaded.
   if app.isNil:
     return
   let now = currentTicks()
   let maintenanceDue = app.lastMaintenanceTicks == 0 or
     now - app.lastMaintenanceTicks >= MaintenancePollMs
-  if maintenanceDue:
+  if maintenanceDue and (app.runtime.hasLiveWork() or
+      app.lastMaintenanceTicks == 0):
     app.lastMaintenanceTicks = now
-    app.runtime.pollShellProcesses(ui)
-    app.runtime.pollDialogProcesses()
-  if app.program.isNil or (maintenanceDue and app.runtime.dependenciesChanged()):
+    bench.zone("owl.maintenance"):
+      app.runtime.pollShellProcesses(ui)
+      app.runtime.pollDialogProcesses()
+  var sourcesChanged = false
+  let watchMs = sourceWatchMs()
+  if watchMs > 0 and
+      (app.lastSourceWatchTicks == 0 or now - app.lastSourceWatchTicks >= watchMs):
+    app.lastSourceWatchTicks = now
+    bench.zone("owl.depsCheck"):
+      sourcesChanged = app.runtime.dependenciesChanged()
+  if app.program.isNil or sourcesChanged:
     discard app.reload()
     ui.requestRedrawAfter(0)
   if app.program.isNil:
@@ -4008,15 +4074,21 @@ proc render*(app: NestOwlApp, ui: var UI) =
         app.runtime.nextFullRenderTicks)
   if not fullRenderDue and ui.hasRetainedFrame():
     ui.setDrawTicks(now)
+    ui.clearMaintenanceRequest()
+    let ticksDue = ui.markDueTicks(now)
     if ui.hasPendingInput():
       discard ui.updateRetainedFrame()
-    else:
+    elif ticksDue or ui.hasRealtimeWidgets() or ui.hasRunningAnimations() or
+        ui.hasSettlingScroll():
       discard ui.drawRetainedFrame()
-    ui.requestRedrawAfter(MaintenancePollMs)
+    # Otherwise the frame on screen is still right, so it is left alone: no
+    # repaint, no present, and the loop goes back to sleep.
+    app.scheduleNextWake(ui, now)
     return
   app.lastFullRenderTicks = now
   app.runtime.nextFullRenderTicks = 0
-  ui.requestRedrawAfter(MaintenancePollMs)
+  ui.clearMaintenanceRequest()
+  discard ui.markDueTicks(now)
   app.runtime.moduleStack.add app.rootPath
   app.runtime.render(ui, app.program)
   app.runtime.moduleStack.setLen(app.runtime.moduleStack.len - 1)
@@ -4026,3 +4098,4 @@ proc render*(app: NestOwlApp, ui: var UI) =
   else:
     app.lastError = ""
     app.lastErrorDetails = ErrorDetails()
+  app.scheduleNextWake(ui, currentTicks())

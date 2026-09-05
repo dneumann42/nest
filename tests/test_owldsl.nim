@@ -66,8 +66,8 @@ state "tree":
   value = (leaf)
 """)
 
-    check runtime.get("value").kind == Dictionary
-    check runtime.get("value").entries["kind"].text == "leaf"
+    check runtime.get("value").kind == Record
+    check runtime.get("value")["kind"].text == "leaf"
 
   test "Owl functions retain dictionary arguments in dictionary fields":
     let runtime = NestOwlRuntime.init()
@@ -85,8 +85,8 @@ fun split direction left right:
 dict-get (split "vertical" (leaf "one") (leaf "two")) "first"
 """))
 
-    check value.kind == Dictionary
-    check value.entries["kind"].text == "leaf"
+    check value.kind == Record
+    check value["kind"].text == "leaf"
 
   test "imports are loaded once per runtime":
     let dir = getTempDir() / "nest-owl-import-once-test"
@@ -339,11 +339,12 @@ panel (id "root"):
   height = (fixed 80)
   padding = 10
   gap = 5
-  alignItems = AlignCenter
-  justifyContent = JustifyCenter
+  alignItems = Center
+  justifyContent = Center
   label (id "label") "Counter":
     width = fit
     height = fit
+    justifySelf = End
 """), 300, 120)
 
       check not runtime.hasError
@@ -353,6 +354,7 @@ panel (id "root"):
       check ui.widget(root).frame.height == 80
       check ui.widget(label).frame.width > 0
       check ui.widget(label).frame.height > 0
+      check ui.widget(label).justifySelf == End
     finally:
       fontRelays = originalFontRelays
 
@@ -456,7 +458,7 @@ row (id "leaf-row"):
   width = (fixed 420)
   height = (fixed 60)
   gap = 8
-  alignItems = AlignStart
+  alignItems = Start
   label (id "label") "Label"
   button (id "button") "Button"
   checkbox (id "checkbox") "Check" true
@@ -465,7 +467,7 @@ row (id "fill-row"):
   width = (fixed 420)
   height = (fixed 60)
   gap = 8
-  alignItems = AlignStart
+  alignItems = Start
   lineInput (id "input") ""
   horizontalSlider (id "slider") 20 0 100
   tabs (id "tabs") options selected
@@ -562,7 +564,7 @@ editor (id "editor")
 
       check app.runtime.lastError == ""
       check app.runtime.get("activeBuffer").number == 0
-      check app.runtime.get("buffers").listLen >= 1
+      check app.runtime.get("buffers").len >= 1
       check ui.widget(ui.id(ui.id("duck", "tabs"), "tab", 0)).frame.width > 0
       check ui.widget(ui.id("duck:workspace", "pane", "pane-1",
           "editor")).frame.height > 0
@@ -1706,11 +1708,11 @@ swayWorkspaces "[{\"name\":\"1\",\"num\":1,\"focused\":true,\"visible\":true,\"u
 """))
 
     check parsed.kind == List
-    check parsed.listLen == 2
-    check parsed.at(0).entries["name"].text == "1"
-    check parsed.at(0).entries["num"].number == 1
-    check parsed.at(0).entries["focused"].boolean
-    check parsed.at(1).entries["urgent"].boolean
+    check parsed.len == 2
+    check parsed[0]["name"].text == "1"
+    check parsed[0]["num"].number == 1
+    check parsed[0]["focused"].boolean
+    check parsed[1]["urgent"].boolean
     check runtime.evaluator.exec(parse("swayWorkspaceCommand \"dev's\"\n")).text ==
       "swaymsg workspace 'dev'\\''s'"
 

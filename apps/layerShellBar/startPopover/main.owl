@@ -8,14 +8,24 @@ state "root":
       cmd = "shelly-ui"
       place = "left"
     {}:
+      label = "Alatar"
+      name = (id "menu" "alatar")
+      cmd = "ghostty --title='Alatar' -e bash -lc 'exec $HOME/.alatar/bin/alatar'"
+      place = "left"
+    {}:
       label = "Wallpaper"
       name = (id "menu" "wallpaper")
-      cmd = "open-wallpaper-switcher"
+      cmd = "wallpaper switch"
       place = "left"
     {}:
       label = "Monitor On/Off"
       name = (id "menu" "monitors")
       cmd = "foot /home/dneumann/.config/sway/scripts/monitors.sh pick"
+      place = "left"
+    {}:
+      label = "Recording Resolution"
+      name = (id "menu" "recording-resolution")
+      cmd = "/home/dneumann/.alatar/bin/toggle-main-monitor-resolution"
       place = "left"
     {}:
       label = "Float Rules"
@@ -35,7 +45,12 @@ state "root":
     {}:
       label = "Files"
       name = (id "menu" "files")
-      cmd = "pcmanfm"
+      cmd = "pcmanfm-qt"
+      place = "right"
+    {}:
+      label = "Music"
+      name = (id "menu" "music")
+      cmd = "ghostty -e ncmpcpp"
       place = "right"
     {}:
       label = "Maindo"
@@ -60,18 +75,18 @@ state "root":
     {}:
       label = "Logout"
       name = (id "menu" "logout")
-      cmd = "loginctl terminate-session"
+      cmd = "logout"
       place = "bottom"
 
     {}:
       label = "Shutdown"
       name = (id "menu" "shutdown")
-      cmd = "systemctl shutdown now"
+      cmd = "shutdown"
       place = "bottom"
     {}:
       label = "Reboot"
       name = (id "menu" "reboot")
-      cmd = "restart"
+      cmd = "reboot"
       place = "bottom"
 
 events:
@@ -79,7 +94,7 @@ events:
     requestCloseDialog ""
   for command (iter commands):
     when (clicked command.name):
-      if (or (= command.cmd "toggle-perf-overlay") (= command.cmd "open-wallpaper-switcher")):
+      if (or (= command.cmd "toggle-perf-overlay") (= command.cmd "open-wallpaper-switcher") (= command.cmd "logout") (= command.cmd "shutdown") (= command.cmd "reboot")):
         requestCloseDialog command.cmd
       else:
         shellLaunch command.cmd
@@ -97,27 +112,27 @@ animation (id "menu" "panel") (not (dialogClosing?)):
     height = fill
     padding = StartMenuPadding
     gap = DialogSectionGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 0 0 0
     opacity = 1
     image (id "menu" "banner") "apps/layerShellBar/assets/nomicon.bmp":
       width = fixed StartMenuBannerWidth
       height = fixed StartMenuBannerHeight
-      alignSelf = AlignCenter
+      alignSelf = Center
     label (id "menu" "subtitle") "Launch application":
       width = fit
       height = fit
-      alignSelf = AlignCenter
+      alignSelf = Center
     row (id "menu" "apps"):
       width = fill
       height = fill
       gap = DialogSectionGap
-      alignItems = AlignStretch
+      alignItems = Stretch
       column (id "menu" "left"):
         width = fill
         height = fit
         gap = DialogGap
-        alignItems = AlignStretch
+        alignItems = Stretch
         for cmd (iter commands):
           when (= cmd.place "left"):
             button cmd.name cmd.label:
@@ -128,7 +143,7 @@ animation (id "menu" "panel") (not (dialogClosing?)):
         width = fill
         height = fit
         gap = DialogGap
-        alignItems = AlignStretch
+        alignItems = Stretch
         for cmd (iter commands):
           when (= cmd.place "right"):
             button cmd.name cmd.label:
@@ -139,8 +154,8 @@ animation (id "menu" "panel") (not (dialogClosing?)):
       width = fill
       height = fit
       gap = DialogGap
-      alignItems = AlignCenter
-      justifyContent = JustifyCenter
+      alignItems = Center
+      justifyContent = Center
       for cmd (iter commands):
         when (= cmd.place "middle"):
           button cmd.name cmd.label:
@@ -151,8 +166,8 @@ animation (id "menu" "panel") (not (dialogClosing?)):
       width = fill
       height = fit
       gap = DialogGap
-      alignItems = AlignCenter
-      justifyContent = JustifyCenter
+      alignItems = Center
+      justifyContent = Center
       for cmd (iter commands):
         when (= cmd.place "bottom"):
           button cmd.name cmd.label:

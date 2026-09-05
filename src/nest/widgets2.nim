@@ -19,11 +19,17 @@ type
     FitHeight
 
   Alignment* = enum
-    AlignAuto
-    AlignStart
-    AlignCenter
-    AlignEnd
-    AlignStretch
+    Auto
+    Start
+    Center
+    End
+    Stretch
+
+  Justification* = enum
+    Auto
+    Start
+    Center
+    End
 
   WidgetSizeKind* = enum
     WidgetFill
@@ -65,6 +71,7 @@ type
     id*: WidgetID
     x*, y*, w*, h*: Variable
     alignSelf*: Alignment
+    justifySelf*: Justification
     widthPolicy*, heightPolicy*: WidgetSizePolicy
     flags: set[WidgetFlag]
 
@@ -282,3 +289,9 @@ proc withAlignSelf*(widget: Widget, alignment: Alignment): Widget =
   ## `alignment`.
   result = widget
   result.alignSelf = alignment
+
+proc withJustifySelf*(widget: Widget, justification: Justification): Widget =
+  ## Return a copy of `widget` with its main-axis justification set to
+  ## `justification`.
+  result = widget
+  result.justifySelf = justification

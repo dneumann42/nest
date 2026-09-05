@@ -23,7 +23,7 @@ widget duckAppShell:
     height = fill
     gap = 0.0
     padding = 0.0
-    alignItems = AlignStretch
+    alignItems = Stretch
     duckMenuBar
     tabs tabBarID (bufferLabels buffers) tabSelection:
       width = fill

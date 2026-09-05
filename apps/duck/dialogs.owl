@@ -3,7 +3,7 @@ fun labeledInput rowID labelText inputID initialText:
     width = fill
     height = fit
     gap = 8
-    alignItems = AlignCenter
+    alignItems = Center
     label (id rowID "label") labelText:
       width = fixed 96
       height = fit
@@ -16,7 +16,7 @@ block-command actionRow rowID:
     width = fill
     height = fit
     gap = 8
-    justifyContent = JustifyEnd
+    justifyContent = End
     eval block
 
 fun findDialog:
@@ -25,7 +25,7 @@ fun findDialog:
     height = fit
     padding = 12
     gap = 10
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 30 30 30
     dialogHeader (id "duck" "find" "header"):
       width = fill
@@ -52,7 +52,7 @@ fun replaceDialog:
     height = fit
     padding = 12
     gap = 10
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 30 30 30
     dialogHeader (id "duck" "replace" "header"):
       width = fill
@@ -83,7 +83,7 @@ fun gotoDialog:
     height = fit
     padding = 12
     gap = 10
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 30 30 30
     dialogHeader (id "duck" "goto" "header"):
       width = fill
@@ -107,7 +107,7 @@ fun aboutDialog:
     height = fit
     padding = 0
     gap = 0
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 30 30 30
     dialogHeader (id "duck" "about" "header"):
       width = fill

@@ -77,7 +77,7 @@ proc update(model: var App, event: AppEvent) =
 widget confirmDialog(open: bool) emits ConfirmEvent:
   ui.modalDialog(ui.id("root"), open, cfg(width = fixed(320), height = fit(), padding = 12, gap = 10)):
     ui.label(ui.id("text"), "Delete the file?", width = fill())
-    ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8, justifyContent = JustifyEnd)):
+    ui.row(ui.id("actions"), cfg(width = fill(), height = fit(), gap = 8, justifyContent = End)):
       if ui.button(ui.id("cancel"), "Cancel"):
         emit Cancelled
       if ui.button(ui.id("ok"), "Delete"):
@@ -113,7 +113,7 @@ fun confirmDialog:
     height = fit
     padding = 12
     gap = 10
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = color 30 30 30
     dialogHeader (id "confirm" "header"):
       width = fill
@@ -129,7 +129,7 @@ fun confirmDialog:
       width = fill
       height = fit
       gap = 8
-      justifyContent = JustifyEnd
+      justifyContent = End
       button cancelID "Cancel":
         width = fixed 82
         height = fit
@@ -237,7 +237,7 @@ column (id "root"):
     width = fill
     height = fixed 24
     gap = 4
-    alignItems = AlignStretch
+    alignItems = Stretch
     menu "file" "File":
       menuItem "new" "New"
       menuItem "open" "Open..."
@@ -368,7 +368,7 @@ panel (id "root"):
     width = fill
     height = fit
     gap = 8
-    justifyContent = JustifyEnd
+    justifyContent = End
     button closeID "Cancel":
       width = fixed 82
       height = fit

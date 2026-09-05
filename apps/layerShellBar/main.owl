@@ -44,6 +44,9 @@ fun defaultConfig:
 fun wallpaperSwitcherCommand:
   "$HOME/.nimble/bin/nest run $HOME/.workspace/nest/apps/wallpaperSwitcher"
 
+fun systemUpdateCommand:
+  "ghostty --title='Pacman Update' -e bash -lc 'sudo pacman -Syu --noconfirm; status=$?; echo; echo Press-Enter-to-close; read -r; exit $status'"
+
 state "root":
   cfg = defaultConfig
 
@@ -52,7 +55,7 @@ import "components/activeWindow.owl"
 import "components/volume.owl"
 import "components/metrics.owl"
 import "components/notifications.owl"
-import "mediaWidget.owl"
+import "components/updates.owl"
 
 events:
   when (external "sigusr1"):
@@ -70,34 +73,44 @@ events:
   when (= lastAction "open-wallpaper-switcher"):
     shellLaunch (wallpaperSwitcherCommand)
     set lastAction ""
+  when (= lastAction "run-system-updates"):
+    shellLaunch (systemUpdateCommand)
+    set lastAction ""
   when (= lastAction "logout"):
-    closeDialog "logout"
+    shellLaunch "loginctl terminate-session"
+    set lastAction ""
+  when (= lastAction "shutdown"):
+    shellLaunch "systemctl poweroff"
+    set lastAction ""
+  when (= lastAction "reboot"):
+    shellLaunch "systemctl reboot"
+    set lastAction ""
 
 column (id "root"):
   width = fill
   height = fill
-  alignItems = AlignStretch
+  alignItems = Stretch
   
   panel (id "bar"):
     width = fill
     height = fixed BarHeight
     padding = BarPadding
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = theme-color "panel"
     opacity = BarOpacity
     
     overlay (id "content"):
       width = fill
       height = fill
-      alignItems = AlignCenter
+      alignItems = Center
     
       row (id "left"):
         width = fill
         height = fill
         gap = BarLeftGap
-        alignItems = AlignCenter
-        alignSelf = AlignStretch
-        justifyContent = JustifyStart
+        alignItems = Center
+        alignSelf = Stretch
+        justifyContent = Start
 
         startMenu (dict-get cfg "start-label")
         workspaces "bar"
@@ -107,13 +120,14 @@ column (id "root"):
         width = fill
         height = fill
         gap = BarRightGap
-        alignItems = AlignCenter
-        justifyContent = JustifyEnd
-        alignSelf = AlignStretch
+        alignItems = Center
+        justifyContent = End
+        alignSelf = Stretch
 
         volumeWidget "bar"
-        mediaWidget "bar-media"
         notificationWidget "bar"
+        updateWidget "bar"
+        protonDriveSyncWidget "bar"
         cpuMeter "bar"
         memoryMeter "bar"
         storageMeter "bar"
@@ -122,8 +136,8 @@ column (id "root"):
       row (id "clock-center"):
         width = fill
         height = fill
-        alignItems = AlignCenter
-        justifyContent = JustifyCenter
-        alignSelf = AlignStretch
+        alignItems = Center
+        justifyContent = Center
+        alignSelf = Stretch
 
         dateTime

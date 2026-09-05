@@ -48,8 +48,8 @@ panel rootID:
   height = fill
   gap = 12.0
   padding = 16.0
-  alignItems = AlignCenter
-  justifyContent = JustifyCenter
+  alignItems = Center
+  justifyContent = Center
   label titleID "Counter":
     width = fit
     height = fit

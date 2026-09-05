@@ -11,13 +11,13 @@ widget radioGroup key items selected:
     width = fill
     height = fit
     gap = 4
-    alignItems = AlignStretch
+    alignItems = Stretch
     for value (iter values):
       row (id keyText "radio-row" value):
         width = fill
         height = fit
         gap = 6
-        alignItems = AlignCenter
+        alignItems = Center
         label (id keyText "radio-mark" value) (pick (= value current) "●" "○"):
           width = fixed 20
           height = fit

@@ -81,14 +81,14 @@ card (id "wallpaper" "panel"):
   height = fill
   padding = 8
   gap = 12
-  alignItems = AlignStretch
+  alignItems = Stretch
   background = theme-color "panel"
   opacity = 0.9
   dialogHeader (id "wallpaper" "header"):
     width = fill
     height = fixed 34
     padding = 8
-    alignItems = AlignCenter
+    alignItems = Center
     label (id "wallpaper" "title") "Wallpaper Switcher":
       width = fill
       height = fit
@@ -99,7 +99,7 @@ card (id "wallpaper" "panel"):
     width = fill
     height = fill
     gap = 12
-    alignItems = AlignStretch
+    alignItems = Stretch
     label (id "wallpaper" "duration-label") "Switch interval":
       width = fill
       height = fit
@@ -119,7 +119,7 @@ card (id "wallpaper" "panel"):
     width = fill
     height = fit
     padding = 8
-    alignItems = AlignCenter
+    alignItems = Center
     label (id "wallpaper" "status") status:
       width = fill
       height = fit

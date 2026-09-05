@@ -174,6 +174,9 @@ proc nestLayerShellConfigure(
 ): cint {.importc: "nest_wayland_layer_shell_configure".}
 
 proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
+proc nestLayerShellTakeConfiguredSize(
+  configuredWidth, configuredHeight: ptr uint32,
+): cint {.importc: "nest_wayland_layer_shell_take_configured_size".}
 proc nestLayerShellSetMargin(top, right, bottom,
     left: int32) {.importc: "nest_wayland_layer_shell_set_margin".}
 
@@ -235,6 +238,16 @@ var
   traceLastReportTicks: int
 
 const ResizeProbeMs = 16
+const DefaultResizeProbeGraceMs = 1000
+  ## How long after the last event an ordinary window keeps polling its own
+  ## size instead of blocking for the next event.
+  ##
+  ## SDL does report resizes as events, and they are translated below; the
+  ## poll is a safety net for compositors that coalesce or drop them during a
+  ## drag. Running it forever costs a wake-up every 16ms for the life of the
+  ## process, so it is kept only while the window is being interacted with.
+
+var lastWindowActivityTicks = 0
 
 proc currentSdlWindow*(): sdl3.Window =
   ## Return the SDL window this driver is rendering into, or nil before one
@@ -836,6 +849,25 @@ proc pollWindowResize(e: var input.Event): bool =
   setResizeEvent(e, logicalW, logicalH)
   true
 
+proc pollLayerShellResize(e: var input.Event): bool =
+  ## SDL does not emit a resize event for a custom Wayland surface role.
+  ## Read configure events retained by the layer-shell shim instead.
+  if not useLayerShell:
+    return false
+  var configuredW, configuredH: uint32
+  if nestLayerShellTakeConfiguredSize(addr configuredW, addr configuredH) == 0:
+    return false
+  let
+    width = configuredW.int
+    height = configuredH.int
+  if width <= 0 or height <= 0:
+    return false
+  discard setWindowSize(win, width.cint, height.cint)
+  if width == windowWidth and height == windowHeight:
+    return false
+  setResizeEvent(e, width, height)
+  true
+
 proc sdlRefresh() =
   if resizeTraceEnabled():
     inc traceRefreshes
@@ -1384,18 +1416,48 @@ proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
 proc sdlPollEvent(e: var input.Event, flags: set[InputFlag]): bool =
   var sdlEvent: sdl3.Event
   if not pollEvent(sdlEvent):
-    return pollWindowResize(e)
+    return pollLayerShellResize(e) or pollWindowResize(e)
   translateEvent(sdlEvent, e)
+  lastWindowActivityTicks = sdl3.getTicks().int
   result = true
+
+proc resizeProbeGraceMs(): int =
+  ## How long the size poll stays armed after the last event.
+  ##
+  ## `NEST_RESIZE_PROBE_MS` overrides it; 0 turns the poll off entirely, which
+  ## is worth trying if a window still idles warm.
+  var cached {.global.} = -1
+  if cached < 0:
+    cached =
+      try:
+        let raw = getEnv("NEST_RESIZE_PROBE_MS")
+        if raw.len == 0: DefaultResizeProbeGraceMs else: max(parseInt(raw), 0)
+      except CatchableError:
+        DefaultResizeProbeGraceMs
+  cached
+
+proc windowProbeActive(): bool =
+  ## Whether the window is recently enough interacted with to keep polling.
+  let grace = resizeProbeGraceMs()
+  if grace <= 0:
+    return false
+  if lastWindowActivityTicks == 0:
+    return true
+  sdl3.getTicks().int - lastWindowActivityTicks < grace
+
+proc noteWindowActivity() {.inline.} =
+  lastWindowActivityTicks = sdl3.getTicks().int
 
 proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[
     InputFlag]): bool =
-  if pollWindowResize(e):
+  if pollLayerShellResize(e) or pollWindowResize(e):
+    noteWindowActivity()
     return true
   var sdlEvent: sdl3.Event
-  if not useLayerShell:
+  if not useLayerShell and windowProbeActive():
     if pollEvent(sdlEvent):
       translateEvent(sdlEvent, e)
+      noteWindowActivity()
       return true
     let sleepMs =
       if timeoutMs < 0:
@@ -1405,26 +1467,27 @@ proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[
     if sleepMs > 0:
       sdl3.delay(sleepMs.uint32)
     if pollWindowResize(e):
+      noteWindowActivity()
       return true
     if pollEvent(sdlEvent):
       translateEvent(sdlEvent, e)
+      noteWindowActivity()
       return true
     return false
-  let boundedTimeout =
-    if useLayerShell:
-      timeoutMs
-    elif timeoutMs < 0:
-      ResizeProbeMs
-    else:
-      min(timeoutMs, ResizeProbeMs)
+  # Nothing has happened for a while, so block properly rather than waking to
+  # ask the window how big it is sixty times a second.
   let ok =
-    if boundedTimeout < 0:
+    if timeoutMs < 0:
       waitEvent(sdlEvent)
     else:
-      waitEventTimeout(sdlEvent, boundedTimeout.int32)
+      waitEventTimeout(sdlEvent, timeoutMs.int32)
   if not ok:
-    return pollWindowResize(e)
+    if pollLayerShellResize(e) or pollWindowResize(e):
+      noteWindowActivity()
+      return true
+    return false
   translateEvent(sdlEvent, e)
+  noteWindowActivity()
   result = true
 
 proc sdlGetTicks(): int =

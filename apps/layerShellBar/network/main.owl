@@ -134,14 +134,14 @@ animation (id "network" "panel") (not (dialogClosing?)):
     height = fill
     padding = DialogPaddingWide
     gap = DialogSectionGap
-    alignItems = AlignStretch
+    alignItems = Stretch
     background = theme-color "panel"
     opacity = 1
     dialogHeader (id "network" "header"):
       width = fill
       height = fixed DialogHeaderHeightTall
       padding = DialogHeaderPadding
-      alignItems = AlignCenter
+      alignItems = Center
       label (id "network" "title") "Network":
         width = fill
         height = fit
@@ -229,7 +229,7 @@ animation (id "network" "panel") (not (dialogClosing?)):
           width = fill
           height = fit
           gap = DialogGap
-          alignItems = AlignCenter
+          alignItems = Center
           lineInput manualSsidID "":
             width = fill
             height = fixed NetworkInputHeight
@@ -301,7 +301,7 @@ animation (id "network" "panel") (not (dialogClosing?)):
                     width = fill
                     height = fixed NetworkRowHeight
                     gap = DialogGap
-                    alignItems = AlignCenter
+                    alignItems = Center
                     label (id "network" "ethernet" "label" ethernetDevice) (string ethernetDevice "  " ethernetState "  " ethernetName):
                       width = fill
                       height = fit

@@ -106,6 +106,8 @@ define:
   IconNetwork = ""
   IconVolume = ""
   IconNotifications = ""
+  IconUpdates = ""
+  IconProtonDrive = ""
   IconCalendar = ""
   IconWindow = ""
   IconWorkspace = ""

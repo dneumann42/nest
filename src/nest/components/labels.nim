@@ -34,7 +34,8 @@ proc new*(
   ##
   ## `fg` together with `hasColor` overrides the palette's text colour.
   ## `textScroll` clips text wider than the widget; marquee animation is
-  ## opt-in with NEST_TEXT_SCROLL_ANIMATION=1.
+  ## opt-in with NEST_TEXT_SCROLL_ANIMATION=1. `padding` contributes to the
+  ## intrinsic size and offsets the text from each edge.
   T(text: text, fontName: fontName, fg: fg, hasColor: hasColor,
       textScroll: textScroll, padding: padding)
 

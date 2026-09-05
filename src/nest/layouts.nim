@@ -1,5 +1,7 @@
 import std/[math, strformat]
 
+import bench
+
 import kiwiberry
 export kiwiberry
 import widgets2
@@ -26,11 +28,6 @@ type
   EdgeInsets* = object
     left*, top*, right*, bottom*: float64
 
-  Justification* = enum
-    JustifyStart
-    JustifyCenter
-    JustifyEnd
-
   LayoutBox* = Widget
   LayoutBoxID* = uint64
 
@@ -41,6 +38,17 @@ type
     solver*: SolverRef
     rootBox*: Widget
     boxes*: seq[Widget]
+    deferPolicies*: bool
+      ## Whether `box` should hold a widget's size policy back rather than
+      ## constrain the solver with it straight away.
+      ##
+      ## Adding a constraint costs more the larger the tableau already is, so
+      ## a caller that may turn out not to need this frame's constraints at
+      ## all -- `UI`, which reuses the previous frame's solver whenever the
+      ## tree is unchanged -- defers them until it knows.
+    pendingPolicies: seq[(Variable, SizePolicy)]
+    suggestedWidth, suggestedHeight: float64
+    hasSuggestedSize: bool
 
 proc `$`*(frame: Frame): string =
   ## Render a frame as text, for debugging and test failures.
@@ -106,6 +114,7 @@ proc widgetPolicy(policy: SizePolicy): WidgetSizePolicy =
 
 proc newLayout*(): Layout =
   ## Create an empty layout with a fresh constraint solver.
+  bench.count("layout.newSolver", 1)
   Layout(solver: newSolver())
 
 proc x*(box: Widget): Variable =
@@ -155,10 +164,12 @@ proc constrain*(ui: Layout, constraint: Constraint): Constraint {.discardable.} 
   ## A constraint the solver rejects as unsatisfiable or duplicate is
   ## dropped rather than raised, which keeps one bad constraint from taking
   ## down a frame.
-  try:
-    result = ui.solver.constraint(constraint)
-  except InternalSolverError, UnsatisfiableConstraintError, DuplicateConstraintError:
-    result = constraint
+  bench.count("layout.constraints", 1)
+  bench.detail("layout.constrain"):
+    try:
+      result = ui.solver.constraint(constraint)
+    except InternalSolverError, UnsatisfiableConstraintError, DuplicateConstraintError:
+      result = constraint
 
 proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
   case policy.kind
@@ -180,7 +191,7 @@ proc applyPolicy(ui: Layout, variable: Variable, policy: SizePolicy) =
       discard ui.constrain(variable <= policy.max)
     discard ui.constrain((variable == policy.value) | Strong)
 
-proc initBox(
+proc initBoxImpl(
     ui: Layout, id: WidgetID, name: string, width, height: SizePolicy
 ): Widget =
   result = Widget(
@@ -195,8 +206,19 @@ proc initBox(
   result.setStretch(width.kind notin {Fixed, Fit}, height.kind notin {Fixed, Fit})
   result.setFit(width.kind == Fit, height.kind == Fit)
   ui.boxes.add result
-  ui.applyPolicy(result.w, width)
-  ui.applyPolicy(result.h, height)
+  if ui.deferPolicies:
+    ui.pendingPolicies.add (result.w, width)
+    ui.pendingPolicies.add (result.h, height)
+  else:
+    ui.applyPolicy(result.w, width)
+    ui.applyPolicy(result.h, height)
+
+proc initBox(
+    ui: Layout, id: WidgetID, name: string, width, height: SizePolicy
+): Widget =
+  bench.count("layout.initBox", 1)
+  bench.detail("layout.initBox"):
+    result = ui.initBoxImpl(id, name, width, height)
 
 proc box*(ui: Layout, id: LayoutBoxID, width = fill(), height = fill()): Widget =
   ## Create a box with the numeric id `id` and register it with the layout.
@@ -205,6 +227,30 @@ proc box*(ui: Layout, id: LayoutBoxID, width = fill(), height = fill()): Widget 
 proc box*(ui: Layout, id: string, width = fill(), height = fill()): Widget =
   ## Create a box with a fresh widget id, labelled `id` for debugging.
   ui.initBox(nextWidgetID(), id, width, height)
+
+proc applyDeferredPolicies*(ui: Layout) =
+  ## Constrain the solver with every size policy held back by `deferPolicies`.
+  for (variable, policy) in ui.pendingPolicies:
+    ui.applyPolicy(variable, policy)
+  ui.pendingPolicies.setLen(0)
+
+proc dropDeferredPolicies*(ui: Layout) =
+  ## Throw away the held-back size policies without constraining anything.
+  ##
+  ## Used when the frame turned out to be identical to the last one, so the
+  ## solver that already holds these constraints is reused instead.
+  ui.pendingPolicies.setLen(0)
+
+proc syncSolvedFrames*(target, source: Layout) =
+  ## Copy `source`'s solved geometry onto `target`'s boxes, in order.
+  ##
+  ## The two layouts describe the same tree -- that is what let the solver be
+  ## reused -- but only `source` holds the solver variables the solution came
+  ## out in, and it is `target`'s boxes that this frame's components hold.
+  if target == source or target.isNil or source.isNil:
+    return
+  for i in 0 ..< min(target.boxes.len, source.boxes.len):
+    target.boxes[i].setFrame(source.boxes[i].frame)
 
 proc root*(ui: Layout, box: Widget) =
   ## Make `box` the layout's root, pinning it to the origin.
@@ -225,8 +271,19 @@ proc resize*(ui: Layout, width, height: float64) =
   if ui.rootBox.w.isNil or ui.rootBox.h.isNil:
     raise newException(ValueError, "layout root must be set before resize")
 
-  ui.solver.suggest(ui.rootBox.w, max(width, 0.0))
-  ui.solver.suggest(ui.rootBox.h, max(height, 0.0))
+  let
+    w = max(width, 0.0)
+    h = max(height, 0.0)
+  # Suggesting the size the solver is already holding is not free: it runs a
+  # dual optimisation that can fail on a tableau the primal solve was happy
+  # with. Since it cannot change the solution either, skip it.
+  if ui.hasSuggestedSize and ui.suggestedWidth == w and ui.suggestedHeight == h:
+    return
+  ui.suggestedWidth = w
+  ui.suggestedHeight = h
+  ui.hasSuggestedSize = true
+  ui.solver.suggest(ui.rootBox.w, w)
+  ui.solver.suggest(ui.rootBox.h, h)
 
 proc solve*(ui: Layout): bool {.discardable.} =
   ## Solve the layout and report whether it succeeded.
@@ -270,7 +327,22 @@ proc pin*(ui: Layout, child, parent: Widget, inset = 0.0) =
   discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
 
 proc effectiveAlignment(child: Widget, parentAlignment: Alignment): Alignment =
-  if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
+  if child.alignSelf == Auto: parentAlignment else: child.alignSelf
+
+proc effectiveJustification(
+    child: Widget, parentJustification: Justification
+): Justification =
+  if child.justifySelf == Auto: parentJustification else: child.justifySelf
+
+proc effectiveContentJustification(
+    children: openArray[Widget], parentJustification: Justification
+): Justification =
+  ## A linear layout positions its children as one contiguous run. A lone
+  ## child can unambiguously override where that run sits on the main axis.
+  if children.len == 1:
+    children[0].effectiveJustification(parentJustification)
+  else:
+    parentJustification
 
 proc overlay*(
     ui: Layout,
@@ -281,8 +353,8 @@ proc overlay*(
     paddingTop = NaN,
     paddingRight = NaN,
     paddingBottom = NaN,
-    alignItems = AlignStretch,
-    justifyContent = JustifyCenter,
+    alignItems: Alignment = Stretch,
+    justifyContent: Justification = Center,
 ) =
   ## Stack `children` on top of each other inside `parent`.
   ##
@@ -294,19 +366,19 @@ proc overlay*(
       paddingBottom)
   for child in children:
     case child.effectiveAlignment(alignItems)
-    of AlignAuto, AlignStretch:
+    of Alignment.Auto, Stretch:
       discard ui.constrain(child.left == parent.left + pad.left)
       if child.stretchWidth:
         discard ui.constrain(child.right == parent.right - pad.right)
-    of AlignStart:
+    of Start:
       discard ui.constrain(child.left == parent.left + pad.left)
       discard ui.constrain(child.right <= parent.right - pad.right)
-    of AlignCenter:
+    of Center:
       discard ui.constrain(child.left >= parent.left + pad.left)
       discard ui.constrain(child.right <= parent.right - pad.right)
       discard ui.constrain(child.centerX == parent.left + pad.left +
           (parent.width - pad.left - pad.right) / 2.0)
-    of AlignEnd:
+    of End:
       discard ui.constrain(child.left >= parent.left + pad.left)
       discard ui.constrain(child.right == parent.right - pad.right)
 
@@ -314,16 +386,16 @@ proc overlay*(
       discard ui.constrain(child.top == parent.top + pad.top)
       discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
     else:
-      case justifyContent
-      of JustifyStart:
+      case child.effectiveJustification(justifyContent)
+      of Justification.Auto, Start:
         discard ui.constrain(child.top == parent.top + pad.top)
         discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
-      of JustifyCenter:
+      of Center:
         discard ui.constrain(child.top >= parent.top + pad.top)
         discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
         discard ui.constrain(child.centerY == parent.top + pad.top +
             (parent.height - pad.top - pad.bottom) / 2.0)
-      of JustifyEnd:
+      of End:
         discard ui.constrain(child.top >= parent.top + pad.top)
         discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
 
@@ -336,22 +408,22 @@ proc alignRowChild(
 ) =
   let pad = padding
   case alignment
-  of AlignAuto:
-    ui.alignRowChild(parent, child, AlignStretch, padding, allowOverflowY)
-  of AlignStart:
+  of Alignment.Auto:
+    ui.alignRowChild(parent, child, Stretch, padding, allowOverflowY)
+  of Start:
     discard ui.constrain(child.top == parent.top + pad.top)
     if not allowOverflowY:
       discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
-  of AlignCenter:
+  of Center:
     discard ui.constrain(child.top >= parent.top + pad.top)
     if not allowOverflowY:
       discard ui.constrain(child.bottom <= parent.bottom - pad.bottom)
     discard ui.constrain(child.centerY == parent.top + pad.top +
         (parent.height - pad.top - pad.bottom) / 2.0)
-  of AlignEnd:
+  of End:
     discard ui.constrain(child.top >= parent.top + pad.top)
     discard ui.constrain(child.bottom == parent.bottom - pad.bottom)
-  of AlignStretch:
+  of Stretch:
     discard ui.constrain(child.top == parent.top + pad.top)
     if child.stretchHeight:
       if allowOverflowY:
@@ -369,22 +441,22 @@ proc alignColumnChild(
 ) =
   let pad = padding
   case alignment
-  of AlignAuto:
-    ui.alignColumnChild(parent, child, AlignStretch, padding, allowOverflowX)
-  of AlignStart:
+  of Alignment.Auto:
+    ui.alignColumnChild(parent, child, Stretch, padding, allowOverflowX)
+  of Start:
     discard ui.constrain(child.left == parent.left + pad.left)
     if not allowOverflowX:
       discard ui.constrain(child.right <= parent.right - pad.right)
-  of AlignCenter:
+  of Center:
     discard ui.constrain(child.left >= parent.left + pad.left)
     if not allowOverflowX:
       discard ui.constrain(child.right <= parent.right - pad.right)
     discard ui.constrain(child.centerX == parent.left + pad.left +
         (parent.width - pad.left - pad.right) / 2.0)
-  of AlignEnd:
+  of End:
     discard ui.constrain(child.left >= parent.left + pad.left)
     discard ui.constrain(child.right == parent.right - pad.right)
-  of AlignStretch:
+  of Stretch:
     discard ui.constrain(child.left == parent.left + pad.left)
     if child.stretchWidth:
       if allowOverflowX:
@@ -404,8 +476,8 @@ proc row*(
     paddingTop = NaN,
     paddingRight = NaN,
     paddingBottom = NaN,
-    alignItems = AlignStretch,
-    justifyContent = JustifyStart,
+    alignItems: Alignment = Stretch,
+    justifyContent: Justification = Start,
     scrollX = false,
     scrollY = false,
 ) =
@@ -465,19 +537,19 @@ proc row*(
             FillRemainingStrength
       )
 
-  case justifyContent
-  of JustifyStart:
+  case children.effectiveContentJustification(justifyContent)
+  of Justification.Auto, Start:
     discard ui.constrain(children[0].left == parent.left + pad.left)
     if not scrollX:
       discard ui.constrain(
         (children[^1].right == parent.right - pad.right) |
             FillRemainingStrength
       )
-  of JustifyCenter:
+  of Center:
     discard
       ui.constrain((children[0].left + children[^1].right) / 2.0 ==
           parent.left + pad.left + (parent.width - pad.left - pad.right) / 2.0)
-  of JustifyEnd:
+  of End:
     discard ui.constrain(children[^1].right == parent.right - pad.right)
 
 proc column*(
@@ -490,8 +562,8 @@ proc column*(
     paddingTop = NaN,
     paddingRight = NaN,
     paddingBottom = NaN,
-    alignItems = AlignStretch,
-    justifyContent = JustifyStart,
+    alignItems: Alignment = Stretch,
+    justifyContent: Justification = Start,
     scrollX = false,
     scrollY = false,
 ) =
@@ -551,19 +623,19 @@ proc column*(
             FillRemainingStrength
       )
 
-  case justifyContent
-  of JustifyStart:
+  case children.effectiveContentJustification(justifyContent)
+  of Justification.Auto, Start:
     discard ui.constrain(children[0].top == parent.top + pad.top)
     if not scrollY:
       discard ui.constrain(
         (children[^1].bottom == parent.bottom - pad.bottom) |
             FillRemainingStrength
       )
-  of JustifyCenter:
+  of Center:
     discard
       ui.constrain((children[0].top + children[^1].bottom) / 2.0 ==
           parent.top + pad.top + (parent.height - pad.top - pad.bottom) / 2.0)
-  of JustifyEnd:
+  of End:
     discard ui.constrain(children[^1].bottom == parent.bottom - pad.bottom)
 
 proc alignLeft*(ui: Layout, a, b: Widget, offset = 0.0) =

@@ -60,8 +60,8 @@ proc runTooltipPopover*(text, anchorJson, theme: string, parentPid = 0) =
           paddingTop = 4,
           paddingRight = 4,
           paddingBottom = 4,
-          alignItems = AlignCenter,
-          justifyContent = JustifyCenter,
+          alignItems = Center,
+          justifyContent = Center,
         ).withBackground(color(0, 0, 0)),
       ):
         appUi.label(
@@ -100,7 +100,7 @@ proc runChoicePopover*(data, resultPath, anchorJson, theme: string, parentPid = 
     appUi.layout:
       appUi.column(
         appUi.id("choices"),
-        cfg(width = fill(), height = fill(), gap = 0, alignItems = AlignStretch),
+        cfg(width = fill(), height = fill(), gap = 0, alignItems = Stretch),
       ):
         for index, option in options:
           let optionID = appUi.id("option", index)

@@ -15,6 +15,7 @@ struct nest_layer_shell_state {
   uint32_t closed;
   uint32_t width;
   uint32_t height;
+  uint32_t size_pending;
 };
 
 static struct nest_layer_shell_state global_state;
@@ -49,6 +50,7 @@ static void layer_surface_configure(
   state->configured = 1;
   state->width = width;
   state->height = height;
+  state->size_pending = 1;
   zwlr_layer_surface_v1_ack_configure(surface, serial);
 }
 
@@ -129,9 +131,28 @@ int nest_wayland_layer_shell_configure(
   if (configured_height != NULL) {
     *configured_height = state->height;
   }
-
+  /* The first configure has already been returned to the caller above. */
+  state->size_pending = 0;
+  
   wl_registry_destroy(registry);
   return state->configured ? 0 : -5;
+}
+
+int nest_wayland_layer_shell_take_configured_size(uint32_t *width,
+                                                  uint32_t *height) {
+  struct nest_layer_shell_state *state = &global_state;
+
+  if (!state->size_pending) {
+    return 0;
+  }
+  state->size_pending = 0;
+  if (width != NULL) {
+    *width = state->width;
+  }
+  if (height != NULL) {
+    *height = state->height;
+  }
+  return 1;
 }
 
 void nest_wayland_layer_shell_destroy(void) {

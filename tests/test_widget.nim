@@ -191,13 +191,13 @@ suite "runApp":
         running = false
     check frames == 2
 
-  test "timed redraws rerun the root view without input":
+  test "timed full redraws rerun the root view without input":
     timedViewLayoutFrames = 0
     var frames = 0
     runApp(AppConfig.init(width = 120, height = 80), Model(), update,
         timedRedrawView):
       inc frames
-      ui.requestRedrawAfter(1)
+      ui.requestFullRedrawAfter(1)
       if frames >= 3:
         running = false
     check frames == 3

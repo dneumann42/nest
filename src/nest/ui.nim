@@ -1,5 +1,6 @@
 import std/[json, math, macros, os, osproc, sets, strutils, tables]
 
+import bench
 import layouts, animations, components, coords, palette, resources, widgets2
 export layouts, components
 export animations
@@ -8,11 +9,38 @@ import nest/screen
 const
   TooltipDelayMs = 250
   TooltipCursorInset = 4
+  ScrollCullMargin = 64.0
+    ## How far outside a scroll container's viewport a widget still counts as
+    ## visible.
+    ##
+    ## Culling is by the widget's own frame, and a widget can paint a little
+    ## outside it — a shadow, a focus ring, a border that overhangs. The
+    ## margin is generous enough that none of that can be clipped away by the
+    ## cull, and small enough that a long list still drops almost all of its
+    ## rows.
 
 var redrawTraceCounts = initTable[string, int]()
 
+proc envFlagOnce(name: string, cached: var int, default = false): bool =
+  ## Read a boolean environment flag once and remember it.
+  ##
+  ## The trace flags are read from paths that run several times per frame, and
+  ## `getEnv` allocates, so a per-call lookup showed up in frame profiles.
+  if cached < 0:
+    let raw = getEnv(name).normalize
+    cached =
+      if raw.len == 0:
+        (if default: 1 else: 0)
+      elif raw in ["0", "false", "no", "off"]:
+        0
+      else:
+        1
+  cached == 1
+
+var redrawTraceFlag = -1
+
 proc redrawTraceEnabled(): bool =
-  getEnv("NEST_REDRAW_TRACE").normalize in ["1", "true", "yes", "on"]
+  envFlagOnce("NEST_REDRAW_TRACE", redrawTraceFlag)
 
 proc traceRedrawRequest(ms, ticks: int,
     loc: tuple[filename: string, line: int, column: int]) =
@@ -59,11 +87,27 @@ type
   ScrollState = object
     scrollX, scrollY: float64
     targetX, targetY: float64
+    appliedX, appliedY: float64
+      ## How far the contents are currently shifted from where the solver put
+      ## them. The easing advances on retained frames too, where the widgets
+      ## already carry the last frame's shift, so what has to be applied is
+      ## the difference rather than the whole offset.
     maxX, maxY: float64
     contentWidth, contentHeight: float64
+    viewportWidth, viewportHeight: float64
     dragging: ScrollAxis
     dragStartMouse: float64
     dragStartScroll: float64
+
+  TickState = object
+    ## A widget's own redraw cadence.
+    ##
+    ## Not every widget needs the display's frame rate. A clock wants one
+    ## repaint a second, a throughput readout maybe five, a spinner all of
+    ## them; asking for what it actually needs is what lets the loop sleep
+    ## between them.
+    intervalMs: int
+    nextTicks: int
 
   AnimationState = object
     target: bool
@@ -79,6 +123,7 @@ type
     alignItems*: Alignment
     justifyContent*: Justification
     alignSelf*: Alignment
+    justifySelf*: Justification
     scrollX*, scrollY*: bool
     scrollWheel*: bool
     dismissOnClickaway*: bool
@@ -130,11 +175,25 @@ type
     retainedFloatingWidgets: seq[Widget]
     retainedScrollContainers: HashSet[WidgetID]
     retainedScrollWheelContainers: HashSet[WidgetID]
+    retainedLayout: Layout
+    retainedSolverLayout: Layout
+    layoutWidth, layoutHeight: float64
+    layoutSignature: seq[uint64]
+    retainedSignature: seq[uint64]
+    layoutReuseEnabled: bool
+    scrollCullingEnabled: bool
+    reusedLayoutThisFrame: bool
+    retainedIntrinsicByID: TableRef[WidgetID, IntrinsicSize]
+    retainedPendingByParent: Table[WidgetID, PendingLayout]
+    retainedDirectParents: HashSet[WidgetID]
+    retainedFloatingBelowAnchors: Table[WidgetID, WidgetID]
+    retainedCenteredFloatingWidgets: HashSet[WidgetID]
     retainedFrameValid: bool
     retainedRealtimeWidgets: Table[WidgetID, ComponentWidget]
     forceNextFullRedraw: bool
     intrinsicByID: TableRef[WidgetID, IntrinsicSize]
     pendingLayouts: seq[PendingLayout]
+    pendingJustifySelf: Table[WidgetID, Justification]
     layoutChildren: Table[WidgetID, seq[Widget]]
     scrollStates: Table[WidgetID, ScrollState]
     animations: Table[WidgetID, AnimationState]
@@ -146,6 +205,9 @@ type
     liveWidgetIDs: HashSet[WidgetID]
     previousWidgetIDs: HashSet[WidgetID]
     liveRealtimeWidgetIDs: HashSet[WidgetID]
+    tickStates: Table[WidgetID, TickState]
+    liveTickIDs: HashSet[WidgetID]
+    keepUpdatingIDs: HashSet[WidgetID]
     pointerBlockFrames: seq[Frame]
     pointerInteractiveFrames: seq[Frame]
     renderKeys: Table[WidgetID, string]
@@ -169,8 +231,13 @@ type
     resizeDragLastX, resizeDragLastY: int
     scheduledRedrawTicks: int
     hasScheduledRedraw: bool
+    scheduledFullRedrawTicks: int
+    hasScheduledFullRedraw: bool
+    scheduledMaintenanceTicks: int
+    hasScheduledMaintenance: bool
     inputPending: bool
     fullRenderInputPending: bool
+    fullRedrawDueThisFrame: bool
     windowFocused: bool
     windowMouseInside: bool
     windowAutoDismissArmed: bool
@@ -233,9 +300,10 @@ proc cfg*(
     paddingTop = NaN,
     paddingRight = NaN,
     paddingBottom = NaN,
-    alignItems = AlignStretch,
-    justifyContent = JustifyStart,
-    alignSelf = AlignAuto,
+    alignItems: Alignment = Stretch,
+    justifyContent: Justification = Start,
+    alignSelf: Alignment = Auto,
+    justifySelf: Justification = Auto,
     scrollX = false,
     scrollY = false,
     scrollWheel = true,
@@ -251,7 +319,7 @@ proc cfg*(
     buttonPadding = -1.0,
     buttonBorderStyle = ButtonBorderLine,
     buttonChromeStyle = ButtonChromeRaised,
-    buttonTextAlign = JustifyCenter,
+    buttonTextAlign: Justification = Center,
     syntax = "",
     style = ComponentStyle(),
     cornerStyle = FlatCorners,
@@ -272,8 +340,8 @@ proc cfg*(
   ## `width` and `height` are size policies, `gap` separates children, and
   ## `padding` insets the content on every edge; `paddingLeft` and its
   ## siblings override single edges and default to unset. `alignItems` and
-  ## `justifyContent` place the children, and `alignSelf` places the box
-  ## itself in its parent. `scrollX`, `scrollY`, `scrollbars`, and `scrollWheel`
+  ## `justifyContent` place the children, while `alignSelf` and `justifySelf`
+  ## place the box itself in its parent. `scrollX`, `scrollY`, `scrollbars`, and `scrollWheel`
   ## control scrolling, `textScroll`, `lineNumbers`, `gutterMarkers`,
   ## `activeLine` and `syntax` configure text widgets, `fontName` and
   ## `fontSize` pick the font, `buttonPadding` overrides the padding inside
@@ -313,6 +381,7 @@ proc cfg*(
     alignItems: alignItems,
     justifyContent: justifyContent,
     alignSelf: alignSelf,
+    justifySelf: justifySelf,
     scrollX: scrollX,
     scrollY: scrollY,
     scrollWheel: scrollWheel,
@@ -447,12 +516,38 @@ proc withShadow*(
   result.style.shadowBlur = blur
   result.style.shadowSpread = spread
 
+var scrollCullFlagInit = -1
+
+proc scrollCullAllowed(): bool =
+  ## Whether scroll containers skip widgets outside their viewport.
+  ##
+  ## `NEST_SCROLL_CULL=0` turns it off for the process, which is how to tell
+  ## a culling bug apart from a drawing one.
+  envFlagOnce("NEST_SCROLL_CULL", scrollCullFlagInit, default = true)
+
+proc layoutReuseAllowed(): bool =
+  ## Whether a frame may reuse the previous frame's constraint solver.
+  ##
+  ## `NEST_LAYOUT_REUSE=0` turns it off, which is the way to tell a layout
+  ## bug apart from a reuse bug without rebuilding.
+  var cached {.global.} = -1
+  if cached < 0:
+    cached =
+      if getEnv("NEST_LAYOUT_REUSE").normalize in ["0", "false", "no", "off"]:
+        0
+      else:
+        1
+  cached == 1
+
 proc init*(T: typedesc[UI]): T =
   ## Create an empty UI: a fresh layout whose root fills the window, the
   ## default palette and an empty resource cache.
   var ui = newLayout()
+  ui.deferPolicies = true
   result = T(
     layout: ui,
+    layoutReuseEnabled: layoutReuseAllowed(),
+    scrollCullingEnabled: scrollCullAllowed(),
     root: ui.box(nextWidgetID(), width = fill(), height = fill()),
     context: UIContext(
       update: UpdateContext(),
@@ -534,6 +629,23 @@ proc scrollOffset*(self: UI, id: WidgetID): tuple[x, y: float64] {.raises: [].} 
   let state = self.scrollStates.getOrDefault(id)
   (state.scrollX, state.scrollY)
 
+proc scrollExtent*(self: UI, id: WidgetID): tuple[maxX, maxY: float64] {.raises: [].} =
+  ## Return how far a scroll container can be scrolled on each axis.
+  ##
+  ## Zero on an axis means the content fits and that axis does not scroll.
+  let state = self.scrollStates.getOrDefault(id)
+  (state.maxX, state.maxY)
+
+iterator scrollContainers*(self: UI): tuple[id: WidgetID, frame: Frame] =
+  ## Every scroll container in the last solved frame, with where it ended up.
+  ##
+  ## Reported for diagnostics and for tests that need to find a list without
+  ## knowing the id the interface happened to give it.
+  for id in self.retainedScrollContainers:
+    let found = self.widgetFrame(id)
+    if found.ok:
+      yield (id, found.frame)
+
 proc pointerInputBlocked*(self: UI, x, y: int): bool {.raises: [].} =
   ## Test whether the point `x`, `y` lands on a surface that swallows pointer
   ## input, such as an open menu or a floating card.
@@ -566,12 +678,12 @@ proc requestRedrawAfter*(self: var UI, ms: int,
   ##
   ## The soonest outstanding request wins, so an animation can keep asking
   ## for the next frame without postponing a sooner one.
-  let now =
-    if self.context.draw.ticks > 0:
-      self.context.draw.ticks
-    else:
-      input.getTicks()
-  let ticks = now + max(ms, 0)
+  ##
+  ## Deadlines are on the backend clock, never on the frame clock. The frame
+  ## clock is deliberately frozen for the duration of a frame so that
+  ## everything drawn in it agrees on the time; a deadline measured against a
+  ## clock that does not advance is a deadline that never arrives.
+  let ticks = input.getTicks() + max(ms, 0)
   if not self.hasScheduledRedraw or ticks < self.scheduledRedrawTicks:
     self.scheduledRedrawTicks = ticks
     self.hasScheduledRedraw = true
@@ -580,7 +692,14 @@ proc requestRedrawAfter*(self: var UI, ms: int,
 proc requestFullRedrawAfter*(self: var UI, ms: int,
     loc: tuple[filename: string, line: int, column: int] = instantiationInfo()) =
   ## Ask for another full application frame in at most `ms` milliseconds.
-  self.forceNextFullRedraw = true
+  ## Unlike `requestRedrawAfter`, this keeps the timer on the retained-frame
+  ## path until it is actually due.
+  ##
+  ## On the backend clock, like every other deadline. See `requestRedrawAfter`.
+  let ticks = input.getTicks() + max(ms, 0)
+  if not self.hasScheduledFullRedraw or ticks < self.scheduledFullRedrawTicks:
+    self.scheduledFullRedrawTicks = ticks
+    self.hasScheduledFullRedraw = true
   self.requestRedrawAfter(ms, loc)
 
 proc requestRedrawAfterSafe(self: var UI, ms: int,
@@ -590,14 +709,25 @@ proc requestRedrawAfterSafe(self: var UI, ms: int,
   except Exception:
     discard
 
+proc requestFullRedrawAfterSafe(self: var UI, ms: int,
+    loc: tuple[filename: string, line: int, column: int] = instantiationInfo()) {.raises: [].} =
+  try:
+    self.requestFullRedrawAfter(ms, loc)
+  except Exception:
+    discard
+
+proc liveTicks(): int {.raises: [].} =
+  ## The backend clock, which is what the loop's own deadlines are on.
+  try:
+    input.getTicks()
+  except Exception:
+    0
+
 proc nowTicks(self: UI): int {.raises: [].} =
   if self.context.draw.ticks > 0:
     self.context.draw.ticks
   else:
-    try:
-      input.getTicks()
-    except Exception:
-      0
+    liveTicks()
 
 proc currentAnimationValue(state: AnimationState, now: int): AnimationValue =
   let duration = max(state.spec.durationMs, 1)
@@ -670,11 +800,19 @@ proc advanceAnimations(self: var UI) {.raises: [].} =
       self.requestRedrawAfterSafe(16)
 
 proc redrawDelayMs*(self: UI): int =
-  ## Return the milliseconds until the scheduled redraw, or -1 when none is
+  ## Return the milliseconds until the next scheduled wake, or -1 when none is
   ## scheduled.
-  if not self.hasScheduledRedraw:
-    return -1
-  max(self.scheduledRedrawTicks - input.getTicks(), 0)
+  ##
+  ## Covers both a scheduled redraw and a scheduled maintenance wake: the loop
+  ## has to be up for either, and only then works out which it was.
+  let now = input.getTicks()
+  result = -1
+  if self.hasScheduledRedraw:
+    result = max(self.scheduledRedrawTicks - now, 0)
+  if self.hasScheduledMaintenance:
+    let wait = max(self.scheduledMaintenanceTicks - now, 0)
+    if result < 0 or wait < result:
+      result = wait
 
 proc clearRedrawRequest*(self: var UI) {.raises: [].} =
   ## Forget the scheduled redraw.
@@ -724,14 +862,20 @@ proc windowInactiveRemainingMs*(self: UI, graceMs: int): int {.raises: [].} =
     return -1
   max(self.windowInactiveSince + max(graceMs, 0) - self.nowTicks(), 0)
 
+var waylandDisplayFlag = -1
+
 proc externalPopoverAvailable(): bool {.raises: [].} =
   when defined(linux):
-    screen.externalPopoversEnabled and getEnv("WAYLAND_DISPLAY").len > 0
+    if waylandDisplayFlag < 0:
+      waylandDisplayFlag = if getEnv("WAYLAND_DISPLAY").len > 0: 1 else: 0
+    screen.externalPopoversEnabled and waylandDisplayFlag == 1
   else:
     false
 
+var tooltipTraceFlag = -1
+
 proc tooltipTraceEnabled(): bool {.raises: [].} =
-  getEnv("NEST_TOOLTIP_TRACE").normalize in ["1", "true", "yes", "on"]
+  envFlagOnce("NEST_TOOLTIP_TRACE", tooltipTraceFlag)
 
 proc traceTooltip(message: string) {.raises: [].} =
   if tooltipTraceEnabled():
@@ -914,7 +1058,7 @@ proc scrollByY*(self: var UI, id: WidgetID, delta: float64) {.raises: [].} =
   state.targetY = (state.targetY + delta).clamp(0.0, state.maxY)
   self.scrollStates[id] = state
   self.markDirty(id)
-  self.requestRedrawAfterSafe(16)
+  self.requestFullRedrawAfterSafe(16)
 
 proc scrollIntoView*(
     self: var UI, containerID, childID: WidgetID, padding = 0.0
@@ -943,7 +1087,7 @@ proc scrollIntoView*(
     return
   self.scrollStates[containerID] = state
   self.markDirty(containerID)
-  self.requestRedrawAfterSafe(16)
+  self.requestFullRedrawAfterSafe(16)
 
 proc markRealtime*(self: var UI, id: WidgetID) {.raises: [].} =
   ## Mark a widget as animating, so it is redrawn every frame for as long as
@@ -951,9 +1095,104 @@ proc markRealtime*(self: var UI, id: WidgetID) {.raises: [].} =
   if id != InvalidWidgetID:
     self.liveRealtimeWidgetIDs.incl id
 
+proc tickEvery*(self: var UI, id: WidgetID, ms: int) {.raises: [].} =
+  ## Ask for `id` to be repainted every `ms` milliseconds.
+  ##
+  ## This is the slow pass: the widget is repainted from the retained frame
+  ## on its own cadence, without the application being re-run and without
+  ## anything else on screen being touched. Between ticks the loop is free to
+  ## sleep, so a bar with a clock in it costs one repaint a second rather
+  ## than a poll every frame.
+  ##
+  ## Call it every frame the widget is declared, as with `animate`: the
+  ## request is keyed by `id` and forgotten once the widget leaves the tree.
+  ## Ignores `InvalidWidgetID`, and a non-positive `ms` means every frame,
+  ## which is `markRealtime`.
+  if id == InvalidWidgetID:
+    return
+  if ms <= 0:
+    self.markRealtime(id)
+    return
+  self.liveTickIDs.incl id
+  var state = self.tickStates.getOrDefault(id)
+  if state.intervalMs != ms:
+    state.intervalMs = ms
+    state.nextTicks = self.nowTicks() + ms
+  self.tickStates[id] = state
+
+proc tickRate*(self: var UI, id: WidgetID, fps: float64) {.raises: [].} =
+  ## Ask for `id` to be repainted `fps` times a second. See `tickEvery`.
+  if fps <= 0:
+    return
+  self.tickEvery(id, max(int(1000.0 / fps), 1))
+
+proc nextTickWaitMs*(self: UI, now: int): int {.raises: [].} =
+  ## Return the milliseconds until the soonest widget tick is due, or -1 when
+  ## no widget has asked for one.
+  result = -1
+  for state in self.tickStates.values:
+    let wait = max(state.nextTicks - now, 0)
+    if result < 0 or wait < result:
+      result = wait
+
+proc markDueTicks*(self: var UI, now: int): bool {.raises: [].} =
+  ## Mark every widget whose tick is due as needing a repaint, and report
+  ## whether any was.
+  ##
+  ## Each widget that fires is moved on to its next deadline, so a slow
+  ## widget does not accumulate a backlog after the application has been
+  ## asleep or busy.
+  for id, state in self.tickStates.mpairs:
+    if state.nextTicks <= now:
+      state.nextTicks = now + max(state.intervalMs, 1)
+      self.markDirty(id)
+      result = true
+
+proc hasTickingWidgets*(self: UI): bool {.raises: [].} =
+  ## Test whether any widget has asked for a repaint cadence of its own.
+  self.tickStates.len > 0
+
+proc requestMaintenanceAfter*(self: var UI, ms: int) {.raises: [].} =
+  ## Ask to be woken in at most `ms` milliseconds to do background work.
+  ##
+  ## Unlike `requestRedrawAfter` this does not mean anything wants painting:
+  ## it wakes the application body so it can poll a process or check a file,
+  ## and the frame is held unless that work actually changes something. The
+  ## soonest outstanding request wins.
+  ##
+  ## Deadlines are kept on the same clock `redrawDelayMs` reads, not the
+  ## frame's draw ticks: the loop compares the two, and a frame clock that
+  ## has not been advanced yet would make a wake look due twice.
+  let ticks = liveTicks() + max(ms, 0)
+  if not self.hasScheduledMaintenance or ticks < self.scheduledMaintenanceTicks:
+    self.scheduledMaintenanceTicks = ticks
+    self.hasScheduledMaintenance = true
+
+proc maintenanceDue*(self: UI): bool {.raises: [].} =
+  ## Test whether a scheduled maintenance wake has come due.
+  self.hasScheduledMaintenance and self.scheduledMaintenanceTicks <= liveTicks()
+
+proc clearMaintenanceRequest*(self: var UI) {.raises: [].} =
+  ## Forget the scheduled maintenance wake.
+  self.hasScheduledMaintenance = false
+
+proc maintenanceDelayMs*(self: UI): int {.raises: [].} =
+  ## Return the milliseconds until the scheduled maintenance wake, or -1 when
+  ## none is scheduled.
+  if not self.hasScheduledMaintenance:
+    return -1
+  max(self.scheduledMaintenanceTicks - liveTicks(), 0)
+
 proc hasRealtimeWidgets*(self: UI): bool {.raises: [].} =
   ## Test whether the retained frame holds any animating widget.
   self.retainedRealtimeWidgets.len > 0
+
+proc clearRedrewFrame*(self: var UI) {.raises: [].} =
+  ## Forget whether the last frame drew anything.
+  ##
+  ## A frame that holds the previous one draws nothing, and the loop presents
+  ## only when `redrewFrame` says something was drawn.
+  self.frameRedrawn = false
 
 proc redrewFrame*(self: UI): bool {.raises: [].} =
   ## Test whether the last frame actually drew anything, which decides
@@ -979,11 +1218,49 @@ proc hasPendingFullRenderInput*(self: UI): bool {.raises: [].} =
 proc needsFullRender*(self: UI): bool {.raises: [].} =
   ## Test whether anything has been marked dirty since the last draw.
   self.forceNextFullRedraw or self.context.draw.dirtyAll or
-      self.context.draw.dirtyWidgets.len > 0
+      self.context.draw.dirtyWidgets.len > 0 or
+      (self.hasScheduledFullRedraw and
+        self.scheduledFullRedrawTicks <= liveTicks())
+
+proc fullRedrawDue*(self: UI): bool {.raises: [].} =
+  ## Test whether this frame was asked for as a full one.
+  ##
+  ## True when something set `requestFullRedrawAfter` and its deadline has
+  ## passed, which is how a widget says it needs the application re-run
+  ## rather than repainted. The loop's fast passes stand aside for it.
+  self.fullRedrawDueThisFrame
 
 proc hasRetainedFrame*(self: UI): bool {.raises: [].} =
   ## Test whether a retained frame is available to redraw from.
   self.retainedFrameValid
+
+proc setScrollCulling*(self: var UI, enabled: bool) {.raises: [].} =
+  ## Allow or forbid skipping widgets outside a scroll container's viewport.
+  ##
+  ## On by default. Turning it off makes a frame draw and hit test every row
+  ## of every list, which is only useful for telling a culling bug apart from
+  ## a drawing one.
+  self.scrollCullingEnabled = enabled
+
+proc setLayoutReuse*(self: var UI, enabled: bool) {.raises: [].} =
+  ## Allow or forbid reusing the previous frame's constraint solver.
+  ##
+  ## On by default. Tests turn it off to check a frame against the layout a
+  ## full rebuild produces, which is the property the reuse has to preserve.
+  self.layoutReuseEnabled = enabled
+  if not enabled:
+    self.retainedSignature.setLen(0)
+    self.retainedSolverLayout = nil
+
+proc reusedLayout*(self: UI): bool {.raises: [].} =
+  ## Test whether the last frame reused the previous frame's solver.
+  self.reusedLayoutThisFrame
+
+proc widgetCount*(self: UI): int {.raises: [].} =
+  ## Return how many boxes the last solved layout held.
+  ##
+  ## Reported by benchmarks so a frame cost can be read per widget.
+  if self.retainedLayout.isNil: 0 else: self.retainedLayout.boxes.len
 
 proc setDrawTicks*(self: var UI, ticks: int) =
   ## Set the tick count the frame is drawn at, which animations measure
@@ -1117,7 +1394,7 @@ proc renderKey(kind: string, config: BoxConfig): string =
     $config.buttonPadding.bottom
   kind & "|" & $config.width & "|" & $config.height & "|" & $config.gap & "|" &
     paddingKey & "|" & $config.alignItems & "|" & $config.justifyContent & "|" &
-    $config.alignSelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
+    $config.alignSelf & "|" & $config.justifySelf & "|" & $config.scrollX & "|" & $config.scrollY & "|" &
     $config.scrollWheel & "|" & $config.dismissOnClickaway & "|" &
     $config.textScroll & "|" & $config.lineNumbers & "|" & $config.scrollbars &
     "|" & $config.readOnly & "|" & config.fontName & "|" & $config.fontSize &
@@ -1137,7 +1414,22 @@ proc renderKey(kind: string, width, height: SizePolicy,
 proc beginInputFrame*(self: var UI) =
   ## Start collecting a frame's input, clearing what the last frame left
   ## behind.
+  ##
+  ## This also clears the record of whether anything was drawn. A frame that
+  ## decides to hold the previous one draws nothing, and must not be reported
+  ## as having drawn: the loop reads that to decide whether to present.
+  self.frameRedrawn = false
+  # Remember that a full redraw came due before the flag that says so is
+  # consumed: the loop's fast passes have to know that this frame is one the
+  # application body owns.
+  self.fullRedrawDueThisFrame = self.forceNextFullRedraw or (
+    self.hasScheduledFullRedraw and
+    self.scheduledFullRedrawTicks <= liveTicks()
+  )
   self.forceNextFullRedraw = false
+  if self.hasScheduledFullRedraw and
+      self.scheduledFullRedrawTicks <= liveTicks():
+    self.hasScheduledFullRedraw = false
   self.context.update.keyInputs.setLen(0)
   self.context.update.textInputs.setLen(0)
   self.context.update.mouseWheelX = 0
@@ -1505,6 +1797,19 @@ macro widget*(signature, body: untyped): untyped =
   )
   if returnType.kind != nnkEmpty and eventType.kind == nnkEmpty:
     result.addPragma ident"discardable"
+
+proc outsideViewport(frame, viewport: Frame): bool {.inline.} =
+  ## Whether `frame` lies far enough outside `viewport` to be skipped.
+  ##
+  ## This is what makes a scroll container cost what is on screen rather than
+  ## what is in it: a list of five thousand rows shows twenty of them, and
+  ## the other four thousand nine hundred and eighty are clipped away by the
+  ## backend after everything has already been measured, hit tested and
+  ## turned into draw commands.
+  frame.y > viewport.y + viewport.height + ScrollCullMargin or
+    frame.y + frame.height < viewport.y - ScrollCullMargin or
+    frame.x > viewport.x + viewport.width + ScrollCullMargin or
+    frame.x + frame.width < viewport.x - ScrollCullMargin
 
 proc pointerContains(frame: Frame, x, y: int): bool =
   x.toFloat >= frame.x and x.toFloat < frame.x + frame.width and
@@ -1895,6 +2200,7 @@ proc reset*(self: var UI) =
     else:
       self.root.id
   self.layout = newLayout()
+  self.layout.deferPolicies = true
   self.root = self.layout.box(rootID, width = fill(), height = fill())
   self.parent = self.root
   self.frames.setLen(0)
@@ -1906,11 +2212,11 @@ proc reset*(self: var UI) =
   self.centeredFloatingWidgets.clear()
   self.componentByID.clear()
   self.liveAnimationIDs.clear()
-  if self.intrinsicByID.isNil:
-    self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
-  else:
-    self.intrinsicByID.clear()
+  # A fresh table rather than a clear: the retained frame holds the previous
+  # one, and a re-solve needs the sizes its `fit` widgets were solved with.
+  self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
   self.pendingLayouts.setLen(0)
+  self.pendingJustifySelf.clear()
   self.layoutChildren.clear()
   self.scrollContainers.clear()
   self.scrollWheelContainers.clear()
@@ -1936,11 +2242,9 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.floatingBelowAnchors.clear()
   self.centeredFloatingWidgets.clear()
   self.componentByID.clear()
-  if self.intrinsicByID.isNil:
-    self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
-  else:
-    self.intrinsicByID.clear()
+  self.intrinsicByID = newTable[WidgetID, IntrinsicSize]()
   self.pendingLayouts.setLen(0)
+  self.pendingJustifySelf.clear()
   self.layoutChildren.clear()
   self.scrollContainers.clear()
   self.scrollWheelContainers.clear()
@@ -1949,8 +2253,11 @@ proc beginLayout*(self: var UI, windowWidth, windowHeight: int) =
   self.liveAnimationIDs.clear()
   self.liveWidgetIDs.incl self.root.id
   self.liveRealtimeWidgetIDs.clear()
+  self.liveTickIDs.clear()
   self.idScopes.setLen(0)
-  self.layout.resize(windowWidth.toFloat, windowHeight.toFloat)
+  self.layoutWidth = max(windowWidth.toFloat, 0.0)
+  self.layoutHeight = max(windowHeight.toFloat, 0.0)
+  self.layout.resize(self.layoutWidth, self.layoutHeight)
 
 proc clamp(value, lo, hi: float64): float64 =
   min(max(value, lo), hi)
@@ -2034,19 +2341,32 @@ proc verticalThumb(parent: Widget, state: ScrollState): Frame =
 proc contains(frame: Frame, x, y: int): bool =
   frame.pointerContains(x, y)
 
-proc shiftDescendants(
-    self: UI, parent: Widget, dx, dy: float64, visited: var HashSet[WidgetID]
-) =
-  if not self.layoutChildren.hasKey(parent.id):
+proc shiftDescendantsOf(
+    self: UI, parentID: WidgetID, dx, dy: float64, visited: var HashSet[WidgetID]
+) {.raises: [].} =
+  if not self.layoutChildren.hasKey(parentID):
     return
-  for child in self.layoutChildren[parent.id]:
+  for child in self.layoutChildren.getOrDefault(parentID):
     if child.id in visited:
       continue
     visited.incl child.id
-    child.shiftWidget(dx, dy)
-    self.shiftDescendants(child, dx, dy, visited)
+    try:
+      child.shiftWidget(dx, dy)
+    except CatchableError:
+      # A solver value the backend rejects; the widget keeps where it was.
+      discard
+    self.shiftDescendantsOf(child.id, dx, dy, visited)
 
-proc updateScrollState(self: var UI, parent: Widget) =
+proc shiftDescendants(
+    self: UI, parent: Widget, dx, dy: float64, visited: var HashSet[WidgetID]
+) =
+  self.shiftDescendantsOf(parent.id, dx, dy, visited)
+
+proc measureScrollContent(self: var UI, parent: Widget) =
+  ## Work out how far a container's contents reach past its viewport.
+  ##
+  ## Only meaningful straight after a solve, while the children still sit
+  ## where the solver put them and no scroll offset has been applied yet.
   if not self.layoutChildren.hasKey(parent.id):
     return
   var
@@ -2063,10 +2383,9 @@ proc updateScrollState(self: var UI, parent: Widget) =
     maxBottom = max(maxBottom, f.y + f.height)
 
   var state = self.scrollStates.getOrDefault(parent.id)
-  let
-    previousScrollX = state.scrollX
-    previousScrollY = state.scrollY
   let parentFrame = parent.frame
+  state.viewportWidth = parentFrame.width
+  state.viewportHeight = parentFrame.height
   if minLeft == Inf:
     state.contentWidth = parentFrame.width
     state.contentHeight = parentFrame.height
@@ -2076,9 +2395,22 @@ proc updateScrollState(self: var UI, parent: Widget) =
       max(parentFrame.height, maxBottom - min(parentFrame.y, minTop))
   state.maxX = max(state.contentWidth - parentFrame.width, 0.0)
   state.maxY = max(state.contentHeight - parentFrame.height, 0.0)
+  self.scrollStates[parent.id] = state
+
+proc easeScroll(self: var UI, id: WidgetID): tuple[dx, dy: float64] {.raises: [].} =
+  ## Move a container one frame closer to its target.
+  ##
+  ## Returns how far the contents have to shift from where they currently
+  ## sit, which is the whole offset on a freshly solved frame and only the
+  ## difference on a retained one.
+  if id notin self.scrollStates:
+    return (0.0, 0.0)
+  var state = self.scrollStates.getOrDefault(id)
   let
-    overscrollX = overscrollLimit(parentFrame.width)
-    overscrollY = overscrollLimit(parentFrame.height)
+    previousScrollX = state.scrollX
+    previousScrollY = state.scrollY
+    overscrollX = overscrollLimit(state.viewportWidth)
+    overscrollY = overscrollLimit(state.viewportHeight)
   state.targetX = state.targetX.clamp(-overscrollX, state.maxX + overscrollX)
   state.targetY = state.targetY.clamp(-overscrollY, state.maxY + overscrollY)
   if state.dragging != ScrollX:
@@ -2097,28 +2429,84 @@ proc updateScrollState(self: var UI, parent: Widget) =
     state.scrollY = state.targetY
   if abs(state.scrollX - previousScrollX) > 0.01 or
       abs(state.scrollY - previousScrollY) > 0.01:
-    self.markDirty(parent.id)
-    self.requestRedrawAfterSafe(16)
+    # Still moving, so ask for the next frame -- and only while it is moving.
+    # The snap above puts the offset exactly on the target once it is close
+    # enough, so the frame after a scroll comes to rest asks for nothing and
+    # the loop goes back to sleep. A full frame, because an application that
+    # builds its rows from the scroll offset needs to be re-run to widen the
+    # window it built; `advanceScroll` keeps the motion going on whatever
+    # cheaper frames happen in between.
+    self.markDirty(id)
+    self.requestFullRedrawAfterSafe(16)
   if state.maxX <= 0 and state.dragging == ScrollX:
     state.dragging = NoScroll
   if state.maxY <= 0 and state.dragging == ScrollY:
     state.dragging = NoScroll
-  self.scrollStates[parent.id] = state
+  result = (-(state.scrollX - state.appliedX), -(state.scrollY - state.appliedY))
+  state.appliedX = state.scrollX
+  state.appliedY = state.scrollY
+  self.scrollStates[id] = state
 
 proc applyScrollOffsets(self: var UI) =
   for parent in self.layout.boxes:
     if parent.id in self.scrollContainers:
-      self.updateScrollState(parent)
-      let state = self.scrollStates[parent.id]
+      self.measureScrollContent(parent)
+      # The solver has just put every child back where it belongs, so nothing
+      # is shifted yet and the whole offset has to be applied.
+      var state = self.scrollStates.getOrDefault(parent.id)
+      state.appliedX = 0.0
+      state.appliedY = 0.0
+      self.scrollStates[parent.id] = state
+      let (dx, dy) = self.easeScroll(parent.id)
       var visited: HashSet[WidgetID]
       visited.incl parent.id
-      self.shiftDescendants(parent, -state.scrollX, -state.scrollY, visited)
+      self.shiftDescendants(parent, dx, dy, visited)
+
+proc hasSettlingScroll*(self: UI): bool {.raises: [].} =
+  ## Test whether any scroll container is still easing toward its target.
+  ##
+  ## A settling scroll is an animation, and like any animation the frame it
+  ## is drawn in is out of date the moment it is drawn.
+  for id in self.retainedScrollContainers:
+    let state = self.scrollStates.getOrDefault(id)
+    if abs(state.scrollX - state.targetX) > 0.01 or
+        abs(state.scrollY - state.targetY) > 0.01:
+      return true
+
+proc advanceScroll*(self: var UI) {.raises: [].} =
+  ## Move every settling scroll container on by one frame, against the frame
+  ## already on screen.
+  ##
+  ## This is what stops a scroll depending on which kind of frame the loop
+  ## decides to run. The easing used to happen only while a frame was laid
+  ## out, so any of the cheaper paths -- a repaint of the retained frame,
+  ## pointer motion answered from it, a resize pump -- would consume the frame
+  ## the scroll had asked for without moving it, and the list would sit still
+  ## until unrelated input forced a rebuild.
+  for id in self.retainedScrollContainers:
+    let (dx, dy) = self.easeScroll(id)
+    if dx == 0.0 and dy == 0.0:
+      continue
+    var visited: HashSet[WidgetID]
+    visited.incl id
+    self.shiftDescendantsOf(id, dx, dy, visited)
 
 proc clampPolicy(value: float64, policy: WidgetSizePolicy): float64 =
   min(max(value, policy.min), policy.max)
 
 proc directAlignment(child: Widget, parentAlignment: Alignment): Alignment =
-  if child.alignSelf == AlignAuto: parentAlignment else: child.alignSelf
+  if child.alignSelf == Auto: parentAlignment else: child.alignSelf
+
+proc directJustification(
+    child: Widget, parentJustification: Justification
+): Justification =
+  if child.justifySelf == Auto: parentJustification else: child.justifySelf
+
+proc directContentJustification(pending: PendingLayout): Justification =
+  if pending.children.len == 1:
+    pending.children[0].directJustification(pending.justifyContent)
+  else:
+    pending.justifyContent
 
 proc directLeafWidth(self: UI, widget: Widget): float64 =
   let intrinsic = self.intrinsicByID.getOrDefault(widget.id)
@@ -2252,13 +2640,13 @@ proc assignDirectStack(
         0.0
     let contentHeight = fixedHeight + fillHeight * fillCount.toFloat
     var y =
-      case pending.justifyContent
-      of JustifyCenter:
+      case pending.directContentJustification()
+      of Center:
         parentFrame.y + pending.padding.top + (availableHeight -
             contentHeight) / 2.0
-      of JustifyEnd:
+      of End:
         parentFrame.y + parentFrame.height - pending.padding.bottom - contentHeight
-      of JustifyStart:
+      of Justification.Auto, Start:
         parentFrame.y + pending.padding.top
     for child in pending.children:
       let childHeight =
@@ -2272,7 +2660,7 @@ proc assignDirectStack(
           self.preferredHeight(child, pendingByParent)
       var childWidth =
         if child.widthPolicy.kind == WidgetFill or (
-          child.directAlignment(pending.alignItems) == AlignStretch and
+          child.directAlignment(pending.alignItems) == Stretch and
           child.stretchWidth
         ):
           availableWidth.clampPolicy(child.widthPolicy)
@@ -2282,9 +2670,9 @@ proc assignDirectStack(
       let alignment = child.directAlignment(pending.alignItems)
       let x =
         case alignment
-        of AlignCenter:
+        of Center:
           parentFrame.x + pending.padding.left + (availableWidth - childWidth) / 2.0
-        of AlignEnd:
+        of End:
           parentFrame.x + parentFrame.width - pending.padding.right - childWidth
         else:
           parentFrame.x + pending.padding.left
@@ -2312,12 +2700,12 @@ proc assignDirectStack(
         0.0
     let contentWidth = fixedWidth + fillWidth * fillCount.toFloat
     var x =
-      case pending.justifyContent
-      of JustifyCenter:
+      case pending.directContentJustification()
+      of Center:
         parentFrame.x + pending.padding.left + (availableWidth - contentWidth) / 2.0
-      of JustifyEnd:
+      of End:
         parentFrame.x + parentFrame.width - pending.padding.right - contentWidth
-      of JustifyStart:
+      of Justification.Auto, Start:
         parentFrame.x + pending.padding.left
     for child in pending.children:
       let childWidth =
@@ -2331,7 +2719,7 @@ proc assignDirectStack(
           self.preferredWidth(child, pendingByParent)
       var childHeight =
         if child.heightPolicy.kind == WidgetFill or (
-          child.directAlignment(pending.alignItems) == AlignStretch and
+          child.directAlignment(pending.alignItems) == Stretch and
           child.stretchHeight
         ):
           availableHeight.clampPolicy(child.heightPolicy)
@@ -2341,10 +2729,10 @@ proc assignDirectStack(
       let alignment = child.directAlignment(pending.alignItems)
       let y =
         case alignment
-        of AlignCenter:
+        of Center:
           parentFrame.y + pending.padding.top + (availableHeight -
               childHeight) / 2.0
-        of AlignEnd:
+        of End:
           parentFrame.y + parentFrame.height - pending.padding.bottom - childHeight
         else:
           parentFrame.y + pending.padding.top
@@ -2361,7 +2749,7 @@ proc assignDirectStack(
     for child in pending.children:
       var childWidth =
         if child.widthPolicy.kind == WidgetFill or (
-          child.directAlignment(pending.alignItems) == AlignStretch and
+          child.directAlignment(pending.alignItems) == Stretch and
           child.stretchWidth
         ):
           availableWidth.clampPolicy(child.widthPolicy)
@@ -2377,24 +2765,164 @@ proc assignDirectStack(
       let alignment = child.directAlignment(pending.alignItems)
       let x =
         case alignment
-        of AlignCenter:
+        of Center:
           parentFrame.x + pending.padding.left + (availableWidth - childWidth) / 2.0
-        of AlignEnd:
+        of End:
           parentFrame.x + parentFrame.width - pending.padding.right - childWidth
         else:
           parentFrame.x + pending.padding.left
       let y =
-        case pending.justifyContent
-        of JustifyCenter:
+        case child.directJustification(pending.justifyContent)
+        of Justification.Auto, Start:
+          parentFrame.y + pending.padding.top
+        of Center:
           parentFrame.y + pending.padding.top + (availableHeight -
               childHeight) / 2.0
-        of JustifyEnd:
+        of End:
           parentFrame.y + parentFrame.height - pending.padding.bottom - childHeight
-        of JustifyStart:
-          parentFrame.y + pending.padding.top
       child.setFrame(Frame(x: x, y: y, width: childWidth, height: childHeight))
       if pendingByParent.hasKey(child.id):
         self.assignDirectStack(pendingByParent[child.id], pendingByParent)
+
+proc constrainIntrinsicSizes(self: UI) =
+  ## Constrain every `fit` widget to the size `applyIntrinsicSizes` measured.
+  for (component, widget) in self.components:
+    if not widget.fitWidth and not widget.fitHeight:
+      continue
+    let size = self.intrinsicByID.getOrDefault(widget.id)
+    if widget.fitWidth and size.hasWidth:
+      discard self.layout.constrain(widget.width == size.width)
+    if widget.fitHeight and size.hasHeight:
+      discard self.layout.constrain(widget.height == size.height)
+
+proc bits(value: float64): uint64 {.inline.} =
+  ## The exact bit pattern of `value`, so signatures compare floats without
+  ## the equality rules that would call two different NaNs the same.
+  cast[uint64](value)
+
+proc appendPolicy(signature: var seq[uint64], policy: WidgetSizePolicy) =
+  signature.add uint64(ord(policy.kind))
+  signature.add policy.value.bits
+  signature.add policy.min.bits
+  signature.add policy.max.bits
+
+proc buildLayoutSignature(
+    self: var UI, directParents: HashSet[WidgetID]
+) =
+  ## Describe everything about this frame that decides its constraint system.
+  ##
+  ## Two frames with the same signature produce exactly the same constraints,
+  ## so the second can reuse the solver the first left behind instead of
+  ## rebuilding a tableau that costs more per constraint the bigger it gets.
+  ## The signature is compared element by element rather than hashed: a hash
+  ## collision here would silently lay the window out wrong.
+  self.layoutSignature.setLen(0)
+  self.layoutSignature.add uint64(self.layout.boxes.len)
+  for box in self.layout.boxes:
+    self.layoutSignature.add box.id
+    self.layoutSignature.appendPolicy(box.widthPolicy)
+    self.layoutSignature.appendPolicy(box.heightPolicy)
+    self.layoutSignature.add uint64(ord(box.alignSelf))
+    self.layoutSignature.add uint64(ord(box.justifySelf))
+    # `fit` widgets are constrained to what they measured, so a label whose
+    # text changed needs a rebuild even though its policy did not.
+    let intrinsic = self.intrinsicByID.getOrDefault(box.id)
+    if box.fitWidth or box.fitHeight:
+      self.layoutSignature.add uint64(ord(intrinsic.hasWidth)) or
+        (uint64(ord(intrinsic.hasHeight)) shl 1)
+      self.layoutSignature.add intrinsic.width.bits
+      self.layoutSignature.add intrinsic.height.bits
+
+  self.layoutSignature.add uint64(self.pendingLayouts.len)
+  for pending in self.pendingLayouts:
+    self.layoutSignature.add uint64(ord(pending.kind))
+    self.layoutSignature.add pending.parent.id
+    self.layoutSignature.add uint64(ord(pending.parent.id in directParents))
+    self.layoutSignature.add pending.gap.bits
+    self.layoutSignature.add pending.padding.left.bits
+    self.layoutSignature.add pending.padding.top.bits
+    self.layoutSignature.add pending.padding.right.bits
+    self.layoutSignature.add pending.padding.bottom.bits
+    self.layoutSignature.add uint64(ord(pending.alignItems))
+    self.layoutSignature.add uint64(ord(pending.justifyContent))
+    self.layoutSignature.add uint64(ord(pending.scrollX)) or
+      (uint64(ord(pending.scrollY)) shl 1)
+    self.layoutSignature.add uint64(pending.children.len)
+    for child in pending.children:
+      self.layoutSignature.add child.id
+
+proc canReuseSolver(self: UI): bool =
+  result = self.layoutReuseEnabled and not self.retainedSolverLayout.isNil and
+    self.retainedSignature.len > 0 and
+    self.retainedSolverLayout.boxes.len == self.layout.boxes.len and
+    self.layoutSignature == self.retainedSignature
+
+
+proc placeSolvedFrames(
+    self: var UI,
+    pendingByParent: Table[WidgetID, PendingLayout],
+    directParents: HashSet[WidgetID],
+) =
+  ## Position everything the solver does not position itself.
+  ##
+  ## Floating cards, centred dialogs and scroll containers are placed by
+  ## hand from the solved root frame, their contents are stacked, scroll
+  ## offsets are applied, and the frame and pointer-hit caches are rebuilt.
+  ## Split out of `endLayout` so a resize can re-solve the retained layout
+  ## and redo just this part.
+  for parentID in directParents:
+    if pendingByParent.hasKey(parentID):
+      if self.floatingBelowAnchors.hasKey(parentID):
+        let
+          parent = pendingByParent[parentID].parent
+          anchorID = self.floatingBelowAnchors[parentID]
+          anchor = self.widgetFrame(anchorID)
+          rootFrame = self.root.frame
+          width = self.preferredWidth(parent, pendingByParent)
+          height = self.preferredHeight(parent, pendingByParent)
+        var x =
+          if anchor.ok:
+            anchor.frame.x
+          else:
+            rootFrame.x
+        var y =
+          if anchor.ok:
+            anchor.frame.y + anchor.frame.height
+          else:
+            rootFrame.y
+        x = min(max(x, rootFrame.x), rootFrame.x + max(rootFrame.width -
+            width, 0.0))
+        y = min(max(y, rootFrame.y), rootFrame.y + max(rootFrame.height -
+            height, 0.0))
+        parent.setFrame(Frame(x: x, y: y, width: width, height: height))
+        self.assignDirectStack(pendingByParent[parentID], pendingByParent)
+      elif parentID in self.centeredFloatingWidgets:
+        let
+          parent = pendingByParent[parentID].parent
+          rootFrame = self.root.frame
+          width = min(self.preferredWidth(parent, pendingByParent),
+              rootFrame.width)
+          height = min(self.preferredHeight(parent, pendingByParent),
+              rootFrame.height)
+          x = rootFrame.x + max((rootFrame.width - width) / 2.0, 0.0)
+          y = rootFrame.y + max((rootFrame.height - height) / 2.0, 0.0)
+        parent.setFrame(Frame(x: x, y: y, width: width, height: height))
+        self.assignDirectStack(pendingByParent[parentID], pendingByParent)
+      elif parentID in self.scrollContainers:
+        self.assignDirectStack(pendingByParent[parentID], pendingByParent)
+  self.applyScrollOffsets()
+  self.frameByID.clear()
+  for box in self.layout.boxes:
+    self.frameByID[box.id] = box.frame
+  self.pointerBlockFrames.setLen(0)
+  self.pointerInteractiveFrames.setLen(0)
+  for (component, widget) in self.components:
+    if component of Interactive:
+      self.pointerInteractiveFrames.add widget.frame
+    if component of Interactive or component.style.hasBackground:
+      self.pointerBlockFrames.add widget.frame
+    if widget.id in self.liveRealtimeWidgetIDs:
+      self.retainedRealtimeWidgets[widget.id] = (component, widget)
 
 proc endLayout*(self: var UI): bool {.discardable.} =
   ## Finish the frame's layout, solve it, and report whether it worked.
@@ -2411,8 +2939,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       children: children,
       gap: 0.0,
       padding: insets(0.0),
-      alignItems: AlignStretch,
-      justifyContent: JustifyStart,
+      alignItems: Stretch,
+      justifyContent: Start,
       scrollX: false,
       scrollY: false,
       scrollWheel: true,
@@ -2452,6 +2980,38 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         pending.parent.id.hasScrollAncestor():
       directParents.incl pending.parent.id
 
+  # A frame whose tree, policies and measured content match the last one
+  # produces exactly the same constraints, so the solver that already holds
+  # them can simply be re-solved at this frame's size. Building a tableau
+  # costs more per constraint the larger it already is, which is what makes
+  # this worth checking: on an unchanged tree it turns the most expensive
+  # part of a frame into a dual optimisation.
+  self.buildLayoutSignature(directParents)
+  self.reusedLayoutThisFrame = false
+  if self.canReuseSolver():
+    bench.zone("ui.solve"):
+      try:
+        self.retainedSolverLayout.resize(self.layoutWidth, self.layoutHeight)
+        self.reusedLayoutThisFrame = self.retainedSolverLayout.solve()
+      except CatchableError:
+        self.reusedLayoutThisFrame = false
+    if self.reusedLayoutThisFrame:
+      self.layout.dropDeferredPolicies()
+      self.layout.syncSolvedFrames(self.retainedSolverLayout)
+      bench.classifyFrame(fkReused)
+      bench.count("layout.reused", 1)
+    else:
+      # The reused system would not re-solve. Fall back to building this
+      # frame's own, and forget the old one so the next frame does not pay
+      # for the same failed attempt.
+      self.retainedSignature.setLen(0)
+      self.retainedSolverLayout = nil
+  result = self.reusedLayoutThisFrame
+  if not self.reusedLayoutThisFrame:
+    bench.count("layout.rebuilt", 1)
+    self.layout.applyDeferredPolicies()
+    self.constrainIntrinsicSizes()
+
   for i in countdown(self.pendingLayouts.high, 0):
     let pending = self.pendingLayouts[i]
     self.layoutChildren[pending.parent.id] = pending.children
@@ -2459,6 +3019,8 @@ proc endLayout*(self: var UI): bool {.discardable.} =
       self.scrollContainers.incl pending.parent.id
       if pending.scrollWheel:
         self.scrollWheelContainers.incl pending.parent.id
+    if self.reusedLayoutThisFrame:
+      continue
     if pending.parent.id in directParents:
       continue
     case pending.kind
@@ -2502,7 +3064,11 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         justifyContent = pending.justifyContent,
       )
 
-  result = self.layout.solve()
+  bench.count("layout.boxes", self.layout.boxes.len)
+  bench.count("layout.pending", self.pendingLayouts.len)
+  if not self.reusedLayoutThisFrame:
+    bench.zone("ui.solve"):
+      result = self.layout.solve()
   if result:
     for box in self.layout.boxes:
       self.liveWidgetIDs.incl box.id
@@ -2533,68 +3099,32 @@ proc endLayout*(self: var UI): bool {.discardable.} =
         staleAnimationKeys.add id
     for id in staleAnimationKeys:
       self.animations.del id
-    for parentID in directParents:
-      if pendingByParent.hasKey(parentID):
-        if self.floatingBelowAnchors.hasKey(parentID):
-          let
-            parent = pendingByParent[parentID].parent
-            anchorID = self.floatingBelowAnchors[parentID]
-            anchor = self.widgetFrame(anchorID)
-            rootFrame = self.root.frame
-            width = self.preferredWidth(parent, pendingByParent)
-            height = self.preferredHeight(parent, pendingByParent)
-          var x =
-            if anchor.ok:
-              anchor.frame.x
-            else:
-              rootFrame.x
-          var y =
-            if anchor.ok:
-              anchor.frame.y + anchor.frame.height
-            else:
-              rootFrame.y
-          x = min(max(x, rootFrame.x), rootFrame.x + max(rootFrame.width -
-              width, 0.0))
-          y = min(max(y, rootFrame.y), rootFrame.y + max(rootFrame.height -
-              height, 0.0))
-          parent.setFrame(Frame(x: x, y: y, width: width, height: height))
-          self.assignDirectStack(pendingByParent[parentID], pendingByParent)
-        elif parentID in self.centeredFloatingWidgets:
-          let
-            parent = pendingByParent[parentID].parent
-            rootFrame = self.root.frame
-            width = min(self.preferredWidth(parent, pendingByParent),
-                rootFrame.width)
-            height = min(self.preferredHeight(parent, pendingByParent),
-                rootFrame.height)
-            x = rootFrame.x + max((rootFrame.width - width) / 2.0, 0.0)
-            y = rootFrame.y + max((rootFrame.height - height) / 2.0, 0.0)
-          parent.setFrame(Frame(x: x, y: y, width: width, height: height))
-          self.assignDirectStack(pendingByParent[parentID], pendingByParent)
-        elif parentID in self.scrollContainers:
-          self.assignDirectStack(pendingByParent[parentID], pendingByParent)
-    self.applyScrollOffsets()
-    self.frameByID.clear()
-    for box in self.layout.boxes:
-      self.frameByID[box.id] = box.frame
-    self.pointerBlockFrames.setLen(0)
-    self.pointerInteractiveFrames.setLen(0)
-    for (component, widget) in self.components:
-      if component of Interactive:
-        self.pointerInteractiveFrames.add widget.frame
-      if component of Interactive or component.style.hasBackground:
-        self.pointerBlockFrames.add widget.frame
-      if widget.id in self.liveRealtimeWidgetIDs:
-        self.retainedRealtimeWidgets[widget.id] = (component, widget)
-    self.retainedRoot = self.root
-    self.retainedComponents = self.components
-    self.retainedComponentByID = self.componentByID
-    self.retainedLayoutChildren = self.layoutChildren
-    self.retainedFloatingWidgets = self.floatingWidgets
-    self.retainedModalWidgets = self.modalWidgets
-    self.retainedScrollContainers = self.scrollContainers
-    self.retainedScrollWheelContainers = self.scrollWheelContainers
-    self.retainedFrameValid = true
+    var staleTickKeys: seq[WidgetID]
+    for id in self.tickStates.keys:
+      if id notin self.liveTickIDs:
+        staleTickKeys.add id
+    for id in staleTickKeys:
+      self.tickStates.del id
+    self.placeSolvedFrames(pendingByParent, directParents)
+    bench.zone("ui.retain"):
+      self.retainedRoot = self.root
+      self.retainedComponents = self.components
+      self.retainedComponentByID = self.componentByID
+      self.retainedLayoutChildren = self.layoutChildren
+      self.retainedFloatingWidgets = self.floatingWidgets
+      self.retainedModalWidgets = self.modalWidgets
+      self.retainedScrollContainers = self.scrollContainers
+      self.retainedScrollWheelContainers = self.scrollWheelContainers
+      self.retainedLayout = self.layout
+      if not self.reusedLayoutThisFrame:
+        self.retainedSolverLayout = self.layout
+        self.retainedSignature = self.layoutSignature
+      self.retainedIntrinsicByID = self.intrinsicByID
+      self.retainedPendingByParent = pendingByParent
+      self.retainedDirectParents = directParents
+      self.retainedFloatingBelowAnchors = self.floatingBelowAnchors
+      self.retainedCenteredFloatingWidgets = self.centeredFloatingWidgets
+      self.retainedFrameValid = true
 
 proc addChild(self: var UI, child: Widget) =
   if self.frames.len == 0:
@@ -2692,20 +3222,18 @@ proc attach*(self: var UI, widget: Widget,
   self.componentByID[widget.id] = component
 
 proc applyIntrinsicSizes*(self: UI, resources: Resources) =
-  ## Measure every component whose widget fits its content and constrain the
-  ## widget to that size.
+  ## Measure every component whose widget fits its content, and record the
+  ## size it wants.
   ##
   ## Call this after the frame's widgets are declared and before solving, so
-  ## `fit` policies have something to resolve to.
+  ## `fit` policies have something to resolve to. The measurements become
+  ## constraints in `endLayout`, which is also where it is decided whether
+  ## this frame needs new constraints at all.
   for (component, widget) in self.components:
     if not widget.fitWidth and not widget.fitHeight:
       continue
-    let size = component.measure(resources)
-    self.intrinsicByID[widget.id] = size
-    if widget.fitWidth and size.hasWidth:
-      discard self.layout.constrain(widget.width == size.width)
-    if widget.fitHeight and size.hasHeight:
-      discard self.layout.constrain(widget.height == size.height)
+    self.intrinsicByID[widget.id] = component.measure(resources)
+
 
 template events*(self: var UI, body: untyped) =
   ## Run `body` only while events are being dispatched.
@@ -2792,17 +3320,22 @@ template layout*(
   var savedIdScopes {.gensym.}: seq[string]
   for scope in ui.idScopes:
     savedIdScopes.add(scope)
-  ui.beginEvents(drawContext)
-  blk
+  bench.classifyFrame(fkFull)
+  bench.zone("ui.eventPass"):
+    ui.beginEvents(drawContext)
+    blk
 
   ui.phase = LayoutPhase
   var layoutOk {.gensym.} = false
   try:
-    ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
-    ui.idScopes = savedIdScopes
-    blk
-    ui.applyIntrinsicSizes(drawContext.resources)
-    layoutOk = ui.endLayout()
+    bench.zone("ui.buildPass"):
+      ui.beginLayout(drawContext.windowWidth, drawContext.windowHeight)
+      ui.idScopes = savedIdScopes
+      blk
+    bench.zone("ui.intrinsic"):
+      ui.applyIntrinsicSizes(drawContext.resources)
+    bench.zone("ui.endLayout"):
+      layoutOk = ui.endLayout()
   except InternalSolverError, UnsatisfiableConstraintError:
     layoutOk = false
 
@@ -2831,14 +3364,16 @@ template layout*(
     )
     switchState(updateContext, drawContext)
     ui.evaluateTooltipHover()
-    ui.frameRedrawn = ui.draw(drawContext)
+    bench.zone("ui.draw"):
+      ui.frameRedrawn = ui.draw(drawContext)
     if drawContext.hasRedrawRequest:
       ui.requestRedrawAfterSafe(drawContext.redrawDelayMs)
       drawContext.dirtyAll = true
   else:
     updateContext.hotWidgets.clear()
     updateContext.activeWidgets.clear()
-  ui.reset()
+  bench.zone("ui.reset"):
+    ui.reset()
   ui.idScopes = savedIdScopes
 
 template layout*(ui: var UI, blk: untyped): auto =
@@ -2865,17 +3400,22 @@ template layout*(ui: var UI, blk: untyped): auto =
   var savedIdScopes {.gensym.}: seq[string]
   for scope in ui.idScopes:
     savedIdScopes.add(scope)
-  ui.beginEvents(ui.context.draw)
-  blk
+  bench.classifyFrame(fkFull)
+  bench.zone("ui.eventPass"):
+    ui.beginEvents(ui.context.draw)
+    blk
 
   ui.phase = LayoutPhase
   var layoutOk {.gensym.} = false
   try:
-    ui.beginLayout(ui.context.draw.windowWidth, ui.context.draw.windowHeight)
-    ui.idScopes = savedIdScopes
-    blk
-    ui.applyIntrinsicSizes(ui.context.draw.resources)
-    layoutOk = ui.endLayout()
+    bench.zone("ui.buildPass"):
+      ui.beginLayout(ui.context.draw.windowWidth, ui.context.draw.windowHeight)
+      ui.idScopes = savedIdScopes
+      blk
+    bench.zone("ui.intrinsic"):
+      ui.applyIntrinsicSizes(ui.context.draw.resources)
+    bench.zone("ui.endLayout"):
+      layoutOk = ui.endLayout()
   except InternalSolverError, UnsatisfiableConstraintError:
     layoutOk = false
 
@@ -2907,14 +3447,16 @@ template layout*(ui: var UI, blk: untyped): auto =
     )
     switchState(ui.context.update, ui.context.draw)
     ui.evaluateTooltipHover()
-    ui.frameRedrawn = ui.draw(ui.context.draw)
+    bench.zone("ui.draw"):
+      ui.frameRedrawn = ui.draw(ui.context.draw)
     if ui.context.draw.hasRedrawRequest:
       ui.requestRedrawAfterSafe(ui.context.draw.redrawDelayMs)
       ui.markAllDirty()
   else:
     ui.context.update.hotWidgets.clear()
     ui.context.update.activeWidgets.clear()
-  ui.reset()
+  bench.zone("ui.reset"):
+    ui.reset()
   ui.idScopes = savedIdScopes
 
 proc updateScrollbarDrag(self: var UI, parent: Widget,
@@ -3036,7 +3578,19 @@ proc updateWidgetTree(
     clipped = false,
     shieldOwner = InvalidWidgetID,
     blocked = false,
+    viewport = Frame(),
 ) =
+  # A row scrolled out of the viewport cannot be hovered, pressed or clicked,
+  # so hit testing it is work with no possible outcome. The exceptions are
+  # widgets an interaction already reached -- the focused one, whatever is
+  # being pressed or dragged -- which have to keep hearing about input even
+  # while they are off screen.
+  if clipped and self.scrollCullingEnabled and
+      widget.frame.outsideViewport(viewport) and
+      widget.id notin self.keepUpdatingIDs:
+    bench.countDetail("update.culled", 1)
+    return
+
   let widgetBlocked = blocked and widget.id != shieldOwner
   if widgetBlocked:
     withoutPointer(context):
@@ -3052,12 +3606,15 @@ proc updateWidgetTree(
     (not clipped) or widget.frame.contains(context.mouseX, context.mouseY) or
     context.focused(widget.id)
   let childClipped = clipped or widget.id in self.scrollContainers
+  let childViewport =
+    if widget.id in self.scrollContainers: widget.frame else: viewport
 
   if not insideClip and childClipped:
     return
   for child in self.layoutChildren.getOrDefault(widget.id):
     self.updateWidgetTree(
-      child, components, context, childClipped, shieldOwner, widgetBlocked
+      child, components, context, childClipped, shieldOwner, widgetBlocked,
+      childViewport,
     )
 
 proc update*(self: var UI, context: var UpdateContext) =
@@ -3068,15 +3625,29 @@ proc update*(self: var UI, context: var UpdateContext) =
   ## the pointer is over a floating card, a menu popover or an open dropdown
   ## list, every widget outside it is updated as though the pointer were
   ## nowhere near, so a click cannot land on two surfaces at once.
-  let shieldOwner = self.pointerSurfaceWidget
-  let blocked = shieldOwner != InvalidWidgetID
-  self.updateWidgetTree(
-    self.root, self.componentByID, context, false, shieldOwner, blocked
-  )
-  for widget in self.floatingWidgets:
+  bench.zone("ui.update"):
+    let shieldOwner = self.pointerSurfaceWidget
+    let blocked = shieldOwner != InvalidWidgetID
+    # Whatever an interaction is already attached to keeps being updated
+    # wherever it has scrolled to.
+    self.keepUpdatingIDs.clear()
+    if self.context.draw.focusedWidget != InvalidWidgetID:
+      self.keepUpdatingIDs.incl self.context.draw.focusedWidget
+    if context.focusedWidget != InvalidWidgetID:
+      self.keepUpdatingIDs.incl context.focusedWidget
+    if context.sliderDragging != InvalidWidgetID:
+      self.keepUpdatingIDs.incl context.sliderDragging
+    if context.middleDragging != InvalidWidgetID:
+      self.keepUpdatingIDs.incl context.middleDragging
+    for id in self.context.draw.activeWidgets:
+      self.keepUpdatingIDs.incl id
     self.updateWidgetTree(
-      widget, self.componentByID, context, false, shieldOwner, blocked
+      self.root, self.componentByID, context, false, shieldOwner, blocked
     )
+    for widget in self.floatingWidgets:
+      self.updateWidgetTree(
+        widget, self.componentByID, context, false, shieldOwner, blocked
+      )
 
 proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
   ## Draw the widget tree into `context` and report whether anything was
@@ -3134,6 +3705,10 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
 
   proc drawWidgetTree(widget: Widget, inheritedDirty = false, replaying = false)
 
+  # The clip in force, as a frame, so culling does not convert on every widget.
+  var clipViewport = Frame()
+  let cullScroll = self.scrollCullingEnabled
+
   proc animationActive(id: WidgetID): bool =
     if id notin self.animations:
       return false
@@ -3173,23 +3748,38 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
     if not replaying and widget.id.animationActive():
       drawAnimatedSubtree(widget, inheritedDirty)
       return
+    # Inside a scroll container the backend clips everything to the viewport
+    # anyway, so a row scrolled out of sight costs a component draw and a
+    # handful of draw commands to produce nothing. Drop it here instead.
+    # An animating widget is exempt above: its transform can move it back in.
+    if drawContext.hasClip and cullScroll and
+        widget.frame.outsideViewport(clipViewport):
+      bench.countDetail("draw.culled", 1)
+      return
     let dirty =
       drawContext.dirtyAll or inheritedDirty or widget.id in
           drawContext.dirtyWidgets
     if dirty and self.componentByID.hasKey(widget.id) and
         not self.retainedRealtimeWidgets.hasKey(widget.id):
-      self.componentByID[widget.id].draw(widget, drawContext)
+      bench.countDetail("draw.components", 1)
+      bench.detail("ui.draw.component"):
+        self.componentByID[widget.id].draw(widget, drawContext)
 
     if widget.id in self.scrollContainers:
       let f = widget.frame
       let
         previousHasClip = drawContext.hasClip
         previousClip = drawContext.clipRect
+        previousViewport = clipViewport
         clip = drawContext.clippedRect(
           rect(f.x.toInt, f.y.toInt, f.width.toInt, f.height.toInt)
         )
       drawContext.hasClip = true
       drawContext.clipRect = clip
+      clipViewport = Frame(
+        x: clip.x.toFloat, y: clip.y.toFloat,
+        width: clip.w.toFloat, height: clip.h.toFloat,
+      )
       saveState()
       setClipRect(clip)
       for child in self.layoutChildren.getOrDefault(widget.id):
@@ -3197,18 +3787,24 @@ proc draw*(self: UI, context: var DrawContext): bool {.discardable.} =
       restoreState()
       drawContext.hasClip = previousHasClip
       drawContext.clipRect = previousClip
+      clipViewport = previousViewport
       if dirty:
         drawScrollbars(widget)
     else:
       for child in self.layoutChildren.getOrDefault(widget.id):
         drawWidgetTree(child, dirty, replaying)
 
-  drawWidgetTree(self.root)
-  for widget in self.floatingWidgets:
-    drawWidgetTree(widget, true)
-  for (component, widget) in self.components:
-    if not self.retainedRealtimeWidgets.hasKey(widget.id):
-      component.drawOverlay(widget, drawContext)
+  bench.zone("ui.draw.tree"):
+    drawWidgetTree(self.root)
+    for widget in self.floatingWidgets:
+      drawWidgetTree(widget, true)
+  bench.zone("ui.draw.overlays"):
+    for (component, widget) in self.components:
+      if not self.retainedRealtimeWidgets.hasKey(widget.id):
+        component.drawOverlay(widget, drawContext)
+
+  if drawContext.drawCommands != nil:
+    bench.count("draw.commands", drawContext.drawCommands[].len)
   context.hasRedrawRequest = drawContext.hasRedrawRequest
   context.redrawDelayMs = drawContext.redrawDelayMs
   context.dirtyWidgets.clear()
@@ -3220,8 +3816,10 @@ proc drawRealtime*(self: var UI): bool {.discardable.} =
   ## whether anything was drawn.
   ##
   ## Returns false when the retained frame holds no animating widget.
+  self.frameRedrawn = false
   if self.retainedRealtimeWidgets.len == 0:
     return false
+  bench.classifyFrame(fkRealtime)
 
   var
     updateContext = self.context.update
@@ -3238,10 +3836,11 @@ proc drawRealtime*(self: var UI): bool {.discardable.} =
     screen.drawCommands = previousDrawCommands
     screen.commandMeasureImage = previousCommandMeasureImage
 
-  for (component, widget) in self.retainedRealtimeWidgets.values:
-    component.update(widget, updateContext)
-    component.draw(widget, drawContext)
-    component.drawOverlay(widget, drawContext)
+  bench.zone("ui.drawRealtime"):
+    for (component, widget) in self.retainedRealtimeWidgets.values:
+      component.update(widget, updateContext)
+      component.draw(widget, drawContext)
+      component.drawOverlay(widget, drawContext)
 
   self.context.update = updateContext
   self.context.draw.hasRedrawRequest = drawContext.hasRedrawRequest
@@ -3253,8 +3852,10 @@ proc drawRealtime*(self: var UI): bool {.discardable.} =
 
 proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
   ## Repaint the last solved frame without re-evaluating Owl or solving layout.
+  self.frameRedrawn = false
   if not self.retainedFrameValid:
     return false
+  bench.classifyFrame(fkRetainedDraw)
   let
     root = self.root
     components = self.components
@@ -3271,6 +3872,7 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
   self.scrollContainers = self.retainedScrollContainers
   self.scrollWheelContainers = self.retainedScrollWheelContainers
   self.advanceAnimations()
+  self.advanceScroll()
   self.context.draw.dirtyAll = true
   self.evaluateTooltipHover()
   result = self.draw(self.context.draw)
@@ -3288,8 +3890,10 @@ proc drawRetainedFrame*(self: var UI): bool {.discardable.} =
 
 proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
   ## Update hit testing and repaint the last solved frame without re-evaluating Owl.
+  self.frameRedrawn = false
   if not self.retainedFrameValid:
     return false
+  bench.classifyFrame(fkRetainedUpdate)
   let
     root = self.root
     components = self.components
@@ -3306,6 +3910,7 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
   self.scrollContainers = self.retainedScrollContainers
   self.scrollWheelContainers = self.retainedScrollWheelContainers
   self.advanceAnimations()
+  self.advanceScroll()
 
   let
     beforeHot = self.context.draw.hotWidgets
@@ -3341,6 +3946,108 @@ proc updateRetainedFrame*(self: var UI): bool {.discardable.} =
   self.floatingWidgets = floatingWidgets
   self.scrollContainers = scrollContainers
   self.scrollWheelContainers = scrollWheelContainers
+
+proc canResolveRetained*(self: UI): bool {.raises: [].} =
+  ## Test whether the retained frame can be re-solved at a new window size.
+  ##
+  ## A re-solve reuses the constraint system the last full frame left behind,
+  ## so it is only available once such a frame exists and nothing has asked
+  ## for the widget tree to be rebuilt.
+  self.retainedFrameValid and not self.retainedLayout.isNil and
+    not self.retainedSolverLayout.isNil and
+    not self.hasPendingWidgetEvents() and
+    not self.context.update.mouseLeftDown and
+    not self.context.update.mouseMiddleDown
+
+proc resolveRetainedFrame*(
+    self: var UI, windowWidth, windowHeight: int
+): bool {.discardable.} =
+  ## Re-solve the retained layout at a new window size and repaint it.
+  ##
+  ## This is the resize path. A window resize changes only the size suggested
+  ## for the root box, so the constraint system the last full frame built is
+  ## still valid and re-solving it is a dual optimisation rather than the
+  ## thousands of constraint insertions a rebuild costs. Owl is not
+  ## re-evaluated and no widget is re-declared, which is also what makes it
+  ## safe: nothing about the tree can change under a re-solve.
+  ##
+  ## Returns false when there is no retained frame to re-solve, or when the
+  ## constraints turned out to be unsatisfiable at the new size, in which
+  ## case the caller should fall back to a full frame.
+  self.frameRedrawn = false
+  if not self.canResolveRetained():
+    return false
+  bench.classifyFrame(fkResolve)
+
+  let
+    root = self.root
+    layout = self.layout
+    components = self.components
+    componentByID = self.componentByID
+    layoutChildren = self.layoutChildren
+    floatingWidgets = self.floatingWidgets
+    scrollContainers = self.scrollContainers
+    scrollWheelContainers = self.scrollWheelContainers
+    floatingBelowAnchors = self.floatingBelowAnchors
+    centeredFloatingWidgets = self.centeredFloatingWidgets
+    intrinsicByID = self.intrinsicByID
+  self.root = self.retainedRoot
+  self.layout = self.retainedLayout
+  self.intrinsicByID = self.retainedIntrinsicByID
+  self.components = self.retainedComponents
+  self.componentByID = self.retainedComponentByID
+  self.layoutChildren = self.retainedLayoutChildren
+  self.floatingWidgets = self.retainedFloatingWidgets
+  self.scrollContainers = self.retainedScrollContainers
+  self.scrollWheelContainers = self.retainedScrollWheelContainers
+  self.floatingBelowAnchors = self.retainedFloatingBelowAnchors
+  self.centeredFloatingWidgets = self.retainedCenteredFloatingWidgets
+
+  bench.zone("ui.resolve"):
+    # The constraints live in the layout of the last frame that built them,
+    # which is not always the last frame: a frame whose tree was unchanged
+    # reuses that solver and keeps its own boxes. So solve there and copy the
+    # solution across, exactly as `endLayout` does.
+    try:
+      self.retainedSolverLayout.resize(windowWidth.toFloat, windowHeight.toFloat)
+      result = self.retainedSolverLayout.solve()
+    except CatchableError:
+      result = false
+    if result:
+      self.layout.syncSolvedFrames(self.retainedSolverLayout)
+      self.placeSolvedFrames(
+        self.retainedPendingByParent, self.retainedDirectParents
+      )
+    else:
+      # The system would not re-solve at this size. Drop it so the full frame
+      # the caller falls back to builds a fresh one.
+      self.retainedSignature.setLen(0)
+      self.retainedSolverLayout = nil
+
+  if result:
+    self.context.draw.windowWidth = windowWidth
+    self.context.draw.windowHeight = windowHeight
+    self.context.update.windowWidth = windowWidth
+    self.context.update.windowHeight = windowHeight
+    self.advanceAnimations()
+    self.context.draw.dirtyAll = true
+    bench.zone("ui.draw"):
+      self.frameRedrawn = self.draw(self.context.draw)
+    if self.context.draw.hasRedrawRequest:
+      self.requestRedrawAfterSafe(self.context.draw.redrawDelayMs)
+    result = self.frameRedrawn
+
+  self.root = root
+  self.layout = layout
+  self.components = components
+  self.componentByID = componentByID
+  self.layoutChildren = layoutChildren
+  self.floatingWidgets = floatingWidgets
+  self.scrollContainers = scrollContainers
+  self.scrollWheelContainers = scrollWheelContainers
+  self.floatingBelowAnchors = floatingBelowAnchors
+  self.centeredFloatingWidgets = centeredFloatingWidgets
+  self.intrinsicByID = intrinsicByID
 
 proc row*(self: var UI, config: BoxConfig) {.layoutOnly.} =
   ## Arrange the current parent's children in a row.
@@ -3409,7 +4116,7 @@ template row*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("row", config))
       self.pushLayout(layoutParent)
@@ -3429,6 +4136,91 @@ template row*(self: var UI, config: BoxConfig, body: untyped) =
       discard
       self.row(config)
 
+type VisibleRows* = object ## The stretch of a long list that is worth building.
+  first*: int ## Index of the first row to declare.
+  count*: int ## How many rows to declare, starting at `first`.
+  leading*: float64 ## Pixels of list above `first`.
+  trailing*: float64 ## Pixels of list below the last declared row.
+
+proc visibleRows*(
+    self: UI, containerID: WidgetID, rowCount: int, rowHeight: float64,
+    overscan = 4
+): VisibleRows {.raises: [].} =
+  ## Return the rows of a `rowCount`-row list of `rowHeight`-pixel rows that
+  ## are worth declaring in the scroll container `containerID`.
+  ##
+  ## Culling a row at draw time still costs everything spent getting it there:
+  ## the widget, its solver variables, its component, and whatever the
+  ## application ran to produce it — which for a list built by an interpreted
+  ## language is most of the frame. The only way not to pay for a row is not
+  ## to declare it, and that needs the viewport, which is known from where the
+  ## container was last frame. `overscan` rows either side absorb the frame of
+  ## lag, and `leading` and `trailing` are the empty space to leave in their
+  ## place so the container still scrolls over the whole list.
+  ##
+  ## Before the container has ever been laid out its height is unknown, so a
+  ## first screenful is guessed and corrected on the next frame.
+  if rowCount <= 0 or rowHeight <= 0:
+    return VisibleRows(first: 0, count: 0, leading: 0, trailing: 0)
+
+  let found = self.widgetFrame(containerID)
+  let viewportHeight =
+    if found.ok and found.frame.height > 0:
+      found.frame.height
+    else:
+      max(self.context.draw.windowHeight.toFloat, rowHeight)
+  let
+    offset = max(self.scrollOffset(containerID).y, 0.0)
+    firstVisible = int(offset / rowHeight)
+    visibleCount = int(viewportHeight / rowHeight) + 2
+  result.first = max(firstVisible - overscan, 0)
+  let last = min(firstVisible + visibleCount + overscan, rowCount - 1)
+  result.count = max(last - result.first + 1, 0)
+  result.leading = result.first.float64 * rowHeight
+  result.trailing = max(rowCount - result.first - result.count, 0).float64 *
+    rowHeight
+
+template virtualColumn*(
+    self: var UI,
+    id: WidgetID,
+    config: BoxConfig,
+    rowCount: int,
+    rowHeight: float64,
+    body: untyped,
+) =
+  ## Declare a scrolling column of `rowCount` rows of `rowHeight` pixels each,
+  ## running `body` only for the rows in view.
+  ##
+  ## `body` is run once per declared row with `index` injected, and the rows
+  ## that are not declared are replaced by two spacers, so the column is the
+  ## height it would have been and scrolls over the whole list. `config` is
+  ## the column's own configuration; `scrollY` is set for you.
+  ##
+  ## Every row must be `rowHeight` tall for the arithmetic to hold. A list of
+  ## rows that size themselves wants an ordinary `column`, which is culled at
+  ## draw and hit-test time but still declared in full.
+  ##
+  ## ```nim
+  ## ui.virtualColumn(ui.id("files"), cfg(width = fill(), height = fill()),
+  ##     paths.len, 26.0):
+  ##   discard ui.button(ui.id("file", paths[index]), paths[index],
+  ##       width = fill(), height = fixed(26))
+  ## ```
+  block:
+    var rows {.gensym.} = self.visibleRows(id, rowCount, rowHeight)
+    var columnConfig {.gensym.} = config
+    columnConfig.scrollY = true
+    self.column(id, columnConfig):
+      if rows.leading > 0:
+        self.spacer(self.scopedID(id, "virtualLeading"), width = fill(),
+            height = fixed(rows.leading))
+      for offset {.inject.} in 0 ..< rows.count:
+        let index {.inject.} = rows.first + offset
+        body
+      if rows.trailing > 0:
+        self.spacer(self.scopedID(id, "virtualTrailing"), width = fill(),
+            height = fixed(rows.trailing))
+
 template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
   ## Declare a column widget with the id `id`, laying the widgets declared in
   ## `body` out top to bottom as configured by `config`.
@@ -3439,7 +4231,7 @@ template column*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("column", config))
       self.pushLayout(layoutParent)
@@ -3470,7 +4262,7 @@ template overlay*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("overlay", config))
       self.pushLayout(layoutParent)
@@ -3502,7 +4294,7 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
       discard
     else:
       let layoutParent = self.box(id, width = w, height = h)
-      self.setRenderKey(id, renderKey("center", w, h, AlignAuto))
+      self.setRenderKey(id, renderKey("center", w, h, Auto))
       self.pushLayout(layoutParent)
       body
       discard
@@ -3514,8 +4306,8 @@ template center*(self: var UI, id: WidgetID, w = fill(), h = fill(),
       # An arrangement rather than bare constraints, so a centred box works
       # inside a scroll container too, where children are placed directly
       # instead of being solved.
-      self.overlay(cfg(width = w, height = h, alignItems = AlignCenter,
-          justifyContent = JustifyCenter))
+      self.overlay(cfg(width = w, height = h, alignItems = Center,
+          justifyContent = Center))
       discard self.popLayout()
 
 template center*(self: var UI, w = fill(), h = fill(), body: untyped) =
@@ -3534,7 +4326,7 @@ template panel*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("panel", config))
       let component = Panel.new()
@@ -3564,7 +4356,7 @@ template card*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("card", config))
       let component = Card.new()
@@ -3626,7 +4418,7 @@ template dialogHeader*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("dialogHeader", config))
       let component = DialogHeader.new()
@@ -3662,7 +4454,7 @@ template modalDialog*(
       else:
         let layoutParent {.gensym.} = self.box(
           id, width = config.width, height = config.height,
-          alignSelf = config.alignSelf
+          alignSelf = config.alignSelf, justifySelf = config.justifySelf
         )
         self.setRenderKey(id, renderKey("modalDialog", config))
         let component {.gensym.} = Card.new()
@@ -3709,7 +4501,7 @@ template resizableModalDialog*(
         self.modalDialog(dialogID, true, dialogConfig):
           body
           self.row(self.id(dialogID, "resize-row"), cfg(width = fill(), height = fit(),
-              gap = 0, justifyContent = JustifyEnd)):
+              gap = 0, justifyContent = End)):
             discard self.button(handleID, "◢", width = fixed(28),
                 height = fixed(24), buttonPadding = 0)
 
@@ -3724,7 +4516,7 @@ template menuBar*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("menuBar", config))
       let component = Panel.new()
@@ -3751,7 +4543,7 @@ template table*(self: var UI, id: WidgetID, config: BoxConfig, body: untyped) =
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("table", config))
       let component = TableView.new()
@@ -3780,7 +4572,7 @@ template tableHeader*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("tableHeader", config))
       let component = TableHeaderView.new()
@@ -3809,7 +4601,7 @@ template tableRow*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("tableRow", config))
       let component = TableRowView.new()
@@ -3838,7 +4630,7 @@ template tableCell*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("tableCell", config))
       let component = TableCellView.new()
@@ -3858,14 +4650,26 @@ template tableCell*(self: var UI, config: BoxConfig, body: untyped) =
 
 proc box*(
     self: var UI, id: WidgetID, width = fill(),
-    height = fill(), alignSelf = AlignAuto
+    height = fill(), alignSelf: Alignment = Auto,
+    justifySelf: Justification = Auto,
 ): Widget =
   ## Create a box widget with the id `id` and mark it live for this frame.
   ##
   ## The box is not added to the current parent; the widget helpers do that
   ## once they have attached a component to it.
   self.liveWidgetIDs.incl id
-  self.layout.box(id, width = width, height = height).withAlignSelf(alignSelf)
+  let resolvedJustifySelf = self.pendingJustifySelf.getOrDefault(id, justifySelf)
+  self.pendingJustifySelf.del id
+  result = self.layout.box(id, width = width, height = height)
+    .withAlignSelf(alignSelf)
+    .withJustifySelf(resolvedJustifySelf)
+  self.layout.boxes[^1] = result
+
+proc prepareConfig*(self: var UI, id: WidgetID, config: BoxConfig): BoxConfig =
+  ## Carry per-widget placement through helpers whose legacy signatures only
+  ## expose `alignSelf` directly.
+  self.pendingJustifySelf[id] = config.justifySelf
+  config
 
 proc container*(
     self: var UI,
@@ -3873,7 +4677,7 @@ proc container*(
     component: Container,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): Widget {.discardable, layoutOnly.} =
   ## Declare a container widget with the id `id` and `component` attached, and
   ## return it.
@@ -3890,7 +4694,7 @@ proc component*(
     component: Component,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
   ## Declare a widget with the id `id` and `component` attached, and return it.
@@ -3910,7 +4714,7 @@ proc component*(
 
 proc spacer*(
     self: var UI, id: WidgetID, width = fill(),
-    height = fill(), alignSelf = AlignAuto
+    height = fill(), alignSelf: Alignment = Auto
 ): Widget {.discardable, layoutOnly.} =
   ## Declare an empty box that only takes up space.
   result = self.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -3923,13 +4727,13 @@ proc button*(
     label: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     textScroll = false,
     fontName = "font",
     buttonPadding = insets(-1.0),
     buttonBorderStyle = ButtonBorderLine,
     buttonChromeStyle = ButtonChromeRaised,
-    buttonTextAlign = JustifyCenter,
+    buttonTextAlign: Justification = Center,
     buttonVariant = ButtonNormal,
     style = ComponentStyle(),
 ): bool {.discardable.} =
@@ -3973,13 +4777,13 @@ proc button*(
     label: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     textScroll = false,
     fontName = "font",
     buttonPadding: float64,
     buttonBorderStyle = ButtonBorderLine,
     buttonChromeStyle = ButtonChromeRaised,
-    buttonTextAlign = JustifyCenter,
+    buttonTextAlign: Justification = Center,
     buttonVariant = ButtonNormal,
     style = ComponentStyle(),
 ): bool {.discardable.} =
@@ -4006,7 +4810,7 @@ proc menu*(
     label: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Declare a menu bar entry with the id `id` labelled `label`.
   ##
@@ -4030,7 +4834,7 @@ template menuItem*(self: var UI, id: WidgetID, config: BoxConfig,
     else:
       let layoutParent = self.box(
         id, width = config.width, height = config.height,
-        alignSelf = config.alignSelf
+        alignSelf = config.alignSelf, justifySelf = config.justifySelf
       )
       self.setRenderKey(id, renderKey("menuItem", config))
       let component = MenuItem.new()
@@ -4044,7 +4848,7 @@ template menuItem*(self: var UI, id: WidgetID, config: BoxConfig,
 
 proc menuDivider*(
     ui: var UI, id: WidgetID, width = fill(),
-    height = fit(), alignSelf = AlignAuto
+    height = fit(), alignSelf: Alignment = Auto
 ) {.layoutOnly.} =
   ## Declare a divider between two groups of menu items.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -4058,7 +4862,7 @@ proc button*(
     label: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Declare a button whose id is built from the name `key`.
   ui.button(ui.id(key), label, width, height, alignSelf)
@@ -4070,7 +4874,7 @@ proc tabs*(
     selected: var int,
     width = fill(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     gap = 0.0,
     padding = insets(0.0),
     style = ComponentStyle(),
@@ -4109,7 +4913,7 @@ proc tabs*(
     let tabID = ui.id(id, "tab", i)
     let box = ui.box(tabID, width = fit(), height = tabHeight)
     ui.setRenderKey(tabID, renderKey("tab:" & label & ":" & $(i == selected),
-        fit(), tabHeight, AlignAuto))
+        fit(), tabHeight, Auto))
     ui.attach(box, Component(TabButton.new(label, i == selected, tabStyle)))
     ui.addChild(box)
   ui.row(cfg(
@@ -4130,26 +4934,64 @@ proc label*(
     width = fit(),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     textScroll = false,
     style = ComponentStyle(),
     padding = EdgeInsets(),
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
 ) {.layoutOnly.} =
   ## Declare a text label with the id `id`.
   ##
   ## `textScroll` lets text wider than the widget scroll rather than be
-  ## clipped.
+  ## clipped. `padding` insets every edge, while the per-edge arguments
+  ## override individual sides.
+  var resolvedPadding = padding
+  if paddingLeft == paddingLeft:
+    resolvedPadding.left = paddingLeft
+  if paddingTop == paddingTop:
+    resolvedPadding.top = paddingTop
+  if paddingRight == paddingRight:
+    resolvedPadding.right = paddingRight
+  if paddingBottom == paddingBottom:
+    resolvedPadding.bottom = paddingBottom
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
   ui.setRenderKey(
     id,
     renderKey(
       "label:" & text & ":" & fontName & ":" & $textScroll, width, height, alignSelf
-    ) & "|" & $padding & "|" & styleRenderKey(style),
+    ) & "|" & $resolvedPadding & "|" & styleRenderKey(style),
   )
-  let lbl = Label.new(text, fontName, textScroll = textScroll, padding = padding)
+  let lbl = Label.new(
+    text, fontName, textScroll = textScroll, padding = resolvedPadding
+  )
   lbl.style = style
   ui.attach(box, Component(lbl))
   ui.addChild(box)
+
+proc label*(
+    ui: var UI,
+    id: WidgetID,
+    text: string,
+    width = fit(),
+    height = fit(),
+    fontName = "font",
+    alignSelf: Alignment = Auto,
+    textScroll = false,
+    style = ComponentStyle(),
+    padding: float64,
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
+) {.layoutOnly.} =
+  ## Declare a label with uniform numeric padding and optional edge overrides.
+  ui.label(
+    id, text, width, height, fontName, alignSelf, textScroll, style,
+    insets(padding), paddingLeft, paddingTop, paddingRight, paddingBottom,
+  )
 
 proc checkbox*(
     ui: var UI,
@@ -4159,7 +5001,7 @@ proc checkbox*(
     width = fit(),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Declare a checkbox with the id `id` labelled `label`, drawn as `checked`.
   ##
@@ -4186,7 +5028,7 @@ proc coloredLabel*(
     width = fit(),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Declare a text label with the id `id` drawn in `color`.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -4209,7 +5051,7 @@ proc diagnosticLabel*(
     height = fit(),
     clickable = false,
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Declare a diagnostic label with the id `id` drawn in `color`.
   ##
@@ -4238,7 +5080,7 @@ proc image*(
     path: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Declare an image widget with the id `id` showing the image at `path`.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -4254,7 +5096,7 @@ proc image*(
     source: Rect,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Declare an image widget with the id `id` showing the `source` region of
   ## the image at `path`, as one sprite out of a sheet.
@@ -4270,7 +5112,7 @@ proc imageButton*(
     path: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Declare an image button with the id `id` showing the image at `path`.
@@ -4296,7 +5138,7 @@ proc imageButton*(
     source: Rect,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Declare an image button with the id `id` showing the `source` region of
@@ -4323,7 +5165,7 @@ proc mesh2d*(
     imagePath: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Declare a 2D mesh editor with the id `id` over `state`, drawn on top of
   ## the image at `imagePath`.
@@ -4349,7 +5191,7 @@ proc slider*(
     width = fill(min = 120),
     height = fit(),
     orientation = SliderHorizontal,
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): tuple[active: bool, value: float64] {.discardable.} =
   ## Declare a slider with the id `id` showing `value` within `minimum` to
   ## `maximum`.
@@ -4422,7 +5264,7 @@ proc colorSwatch*(
     value: Color,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Declare a colour swatch with the id `id` showing `value`.
   let box = ui.box(id, width = width, height = height, alignSelf = alignSelf)
@@ -4437,7 +5279,7 @@ proc colorInput*(
     value: var Color,
     width = fill(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Declare a colour input with the id `id` labelled `label`: a swatch and
   ## one slider per channel.
@@ -4468,7 +5310,7 @@ proc colorInput*(
     ui.row(
       ui.id(id, "summary"),
       cfg(width = fill(), height = fixed(34), gap = 8, padding = 0,
-          alignItems = AlignCenter),
+          alignItems = Center),
     ):
       ui.colorSwatch(ui.id(id, "swatch"), value, fixed(44), fixed(30))
       ui.label(ui.id(id, "label"), label, fill(), fit())
@@ -4478,7 +5320,7 @@ proc colorInput*(
       ui.row(
         ui.id(id, key, "row"),
         cfg(width = fill(), height = fixed(28), gap = 8, padding = 0,
-            alignItems = AlignCenter),
+            alignItems = Center),
       ):
         ui.label(ui.id(id, key, "label"), name, fixed(16), fit())
         discard ui.slider(ui.id(id, key), channelValue.float64, 0, 255, fill(),
@@ -4604,7 +5446,7 @@ proc combobox*(
     options: openArray[string],
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     closeOnSelect = true,
     dismissOnClickaway = true,
 ): tuple[changed: bool, index: int] {.discardable.} =
@@ -4717,7 +5559,7 @@ proc lineInput*(
     width = fill(min = 160),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) =
   ## Declare a single-line text input with the id `id` editing `state`.
   ##
@@ -4740,7 +5582,7 @@ proc textEditor*(
     width = fill(min = 240),
     height = fill(min = 160),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     lineNumbers = false,
     scrollbars = true,
     readOnly = false,
@@ -4787,7 +5629,7 @@ proc container*(
     component: Container,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): Widget {.discardable, layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   self.container(self.nextAutoID(), component, width, height, alignSelf)
@@ -4797,7 +5639,7 @@ proc component*(
     component: Component,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     renderKeyOverride = "",
 ): Widget {.discardable, layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -4807,7 +5649,7 @@ proc component*(
 
 proc spacer*(
     self: var UI, width = fill(),
-    height = fill(), alignSelf = AlignAuto
+    height = fill(), alignSelf: Alignment = Auto
 ): Widget {.discardable, layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   self.spacer(self.nextAutoID(), width, height, alignSelf)
@@ -4817,11 +5659,11 @@ proc button*(
     label: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     textScroll = false,
     buttonBorderStyle = ButtonBorderLine,
     buttonChromeStyle = ButtonChromeRaised,
-    buttonTextAlign = JustifyCenter,
+    buttonTextAlign: Justification = Center,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -4837,14 +5679,14 @@ proc menu*(
     label: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.menu(ui.nextAutoID(), label, width, height, alignSelf)
 
 proc menuDivider*(
     ui: var UI, width = fill(),
-    height = fit(), alignSelf = AlignAuto
+    height = fit(), alignSelf: Alignment = Auto
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.menuDivider(ui.nextAutoID(), width, height, alignSelf)
@@ -4855,7 +5697,7 @@ proc tabs*(
     selected: var int,
     width = fill(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     gap = 0.0,
     padding = insets(0.0),
     style = ComponentStyle(),
@@ -4873,11 +5715,41 @@ proc label*(
     width = fit(),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     textScroll = false,
+    style = ComponentStyle(),
+    padding = EdgeInsets(),
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
-  ui.label(ui.nextAutoID(), text, width, height, fontName, alignSelf, textScroll)
+  ui.label(
+    ui.nextAutoID(), text, width, height, fontName, alignSelf, textScroll,
+    style, padding, paddingLeft, paddingTop, paddingRight, paddingBottom,
+  )
+
+proc label*(
+    ui: var UI,
+    text: string,
+    width = fit(),
+    height = fit(),
+    fontName = "font",
+    alignSelf: Alignment = Auto,
+    textScroll = false,
+    style = ComponentStyle(),
+    padding: float64,
+    paddingLeft = NaN,
+    paddingTop = NaN,
+    paddingRight = NaN,
+    paddingBottom = NaN,
+) {.layoutOnly.} =
+  ## Same as the numeric-padding overload taking an explicit `id`.
+  ui.label(
+    ui.nextAutoID(), text, width, height, fontName, alignSelf, textScroll,
+    style, padding, paddingLeft, paddingTop, paddingRight, paddingBottom,
+  )
 
 proc checkbox*(
     ui: var UI,
@@ -4886,7 +5758,7 @@ proc checkbox*(
     width = fit(),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.checkbox(ui.nextAutoID(), label, checked, width, height, fontName, alignSelf)
@@ -4898,7 +5770,7 @@ proc coloredLabel*(
     width = fit(),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.coloredLabel(ui.nextAutoID(), text, color, width, height, fontName, alignSelf)
@@ -4911,7 +5783,7 @@ proc diagnosticLabel*(
     height = fit(),
     clickable = false,
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.diagnosticLabel(
@@ -4923,7 +5795,7 @@ proc image*(
     path: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.image(ui.nextAutoID(), path, width, height, alignSelf)
@@ -4934,7 +5806,7 @@ proc image*(
     source: Rect,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.image(ui.nextAutoID(), path, source, width, height, alignSelf)
@@ -4944,7 +5816,7 @@ proc imageButton*(
     path: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -4956,7 +5828,7 @@ proc imageButton*(
     source: Rect,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     style = ComponentStyle(),
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
@@ -4968,7 +5840,7 @@ proc mesh2d*(
     imagePath: string,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.mesh2d(ui.nextAutoID(), state, imagePath, width, height, alignSelf)
@@ -4979,7 +5851,7 @@ proc slider*(
     width = fill(min = 120),
     height = fit(),
     orientation = SliderHorizontal,
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): tuple[active: bool, value: float64] {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.slider(
@@ -4991,7 +5863,7 @@ proc colorSwatch*(
     value: Color,
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) {.layoutOnly.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.colorSwatch(ui.nextAutoID(), value, width, height, alignSelf)
@@ -5002,7 +5874,7 @@ proc colorInput*(
     value: var Color,
     width = fill(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): bool {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.colorInput(ui.nextAutoID(), label, value, width, height, alignSelf)
@@ -5013,7 +5885,7 @@ proc combobox*(
     options: openArray[string],
     width = fit(),
     height = fit(),
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ): tuple[changed: bool, index: int] {.discardable.} =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.combobox(ui.nextAutoID(), selected, options, width, height, alignSelf)
@@ -5024,7 +5896,7 @@ proc lineInput*(
     width = fill(min = 160),
     height = fit(),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
 ) =
   ## Same as the overload taking an explicit `id`, with a generated id.
   ui.lineInput(ui.nextAutoID(), state, width, height, fontName, alignSelf)
@@ -5035,7 +5907,7 @@ proc textEditor*(
     width = fill(min = 240),
     height = fill(min = 160),
     fontName = "font",
-    alignSelf = AlignAuto,
+    alignSelf: Alignment = Auto,
     lineNumbers = false,
     scrollbars = true,
     readOnly = false,
@@ -5048,3 +5920,13 @@ proc textEditor*(
     ui.nextAutoID(), state, width, height, fontName, alignSelf, lineNumbers,
     scrollbars, readOnly, syntax, gutterMarkers, activeLine
   )
+
+proc refreshUi*(gui: var UI) =
+  ## Explicit invalidation makes retained labels and conditional controls rerun.
+  gui.markAllDirty()
+  gui.requestRedrawAfter(0)
+
+proc actionWidget*[E: enum](gui: var UI, w: proc(gui: var UI, e: var E): void): E =
+  result = default(E)
+  w(gui, result)
+
