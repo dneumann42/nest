@@ -41,7 +41,7 @@ task profile, "Run the Nest benchmarks with per-phase instrumentation":
     "--nimcache:build/nimcache-profile tests/bench_scroll.nim"
 
 requires "nim >= 2.2.10"
-requires "https://github.com/dneumann42/owl"
+requires "https://github.com/dneumann42/owl#head"
 requires "chroma"
 requires "https://github.com/elcritch/kiwiberry"
 requires "https://github.com/nim-lang/sdl3#e5f87eb992f828419aad83075ea1c41147fbb088"
