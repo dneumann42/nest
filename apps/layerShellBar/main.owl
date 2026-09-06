@@ -56,6 +56,7 @@ import "components/volume.owl"
 import "components/metrics.owl"
 import "components/notifications.owl"
 import "components/updates.owl"
+import "components/tray.owl"
 
 events:
   when (external "sigusr1"):
@@ -124,6 +125,7 @@ column (id "root"):
         justifyContent = End
         alignSelf = Stretch
 
+        trayWidget "bar"
         volumeWidget "bar"
         notificationWidget "bar"
         updateWidget "bar"

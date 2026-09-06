@@ -1,0 +1,9 @@
+main = "main.owl"
+title = "Tray Menu"
+width = 320
+height = 520
+layerShell = "top-right"
+namespace = "nest-layer-shell-tray-menu"
+exclusiveZone = 0
+marginTop = 0
+marginRight = 0

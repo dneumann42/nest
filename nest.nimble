@@ -21,6 +21,7 @@ task test, "Run the Nest test suite":
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_frame_pacing.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_scroll_culling.nim"
   exec "env SDL_VIDEODRIVER=dummy nim c -r --path:src --nimcache:build/nimcache tests/test_scroll_settle.nim"
+  exec "dbus-run-session -- nim c -r --path:src --nimcache:build/nimcache tests/test_tray_dbus.nim"
 
 task bench, "Run Nest benchmarks":
   exec "env SDL_VIDEODRIVER=dummy nim c -r -d:release --path:src --nimcache:build/nimcache-bench tests/bench_network_dialog.nim"
@@ -44,6 +45,7 @@ requires "chroma"
 requires "https://github.com/elcritch/kiwiberry"
 requires "https://github.com/beef331/fungus.git"
 requires "https://github.com/nim-lang/sdl3#e5f87eb992f828419aad83075ea1c41147fbb088"
+requires "https://github.com/zielmicha/nim-dbus#9aedf3c455554ccef2c7741d2379f5af0ac85e55"
 
 task docs, "Generate the API documentation into docs/api":
   exec "nim doc --project --index:on --outdir:docs/api src/nest.nim"

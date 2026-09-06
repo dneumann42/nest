@@ -1,7 +1,7 @@
 import std/[os, strutils, tables, unittest]
 
 import owl
-import nest/[owldsl, input, perf, projectConfig, resources, ui]
+import nest/[owldsl, input, perf, projectConfig, resources, ui, tray]
 import nest/[coords, screen]
 
 proc widget(ui: UI, id: WidgetID): Widget =
@@ -309,6 +309,55 @@ label (id "value") value:
     check barSource.contains("togglePerfOverlay")
     check barSource.contains("when (= lastAction \"open-wallpaper-switcher\"):")
     check barSource.contains("shellLaunch (wallpaperSwitcherCommand)")
+
+  test "bar mounts the native status notifier tray":
+    let
+      barSource = readFile("apps/layerShellBar/main.owl")
+      traySource = readFile("apps/layerShellBar/components/tray.owl")
+
+    check barSource.contains("import \"components/tray.owl\"")
+    check barSource.contains("trayWidget \"bar\"")
+    check barSource.find("trayWidget \"bar\"") <
+      barSource.find("volumeWidget \"bar\"")
+    check traySource.contains("(trayItems)")
+    check traySource.contains("trayActivate (string")
+    check traySource.contains("traySecondaryActivate (string")
+    check traySource.contains("trayRequestMenu (string")
+    check traySource.contains("trayMenuActivate menuTarget")
+    check traySource.contains("when (clicked itemID):")
+    check traySource.contains("when (middleClicked itemID):")
+    check traySource.contains("when (rightClicked itemID):")
+    check traySource.contains("imageButton itemID")
+    check traySource.contains("tooltip itemID itemTitle")
+
+  test "tray component renders through the owl runtime":
+    try:
+      let runtime = NestOwlRuntime.init()
+      var ui = UI.init()
+      ui.initContext(600, 30)
+      ui.loadFont("font", "", 18)
+      ui.loadFont("editor", "", 18)
+
+      runtime.render(ui, parse(
+        "import \"components/tray.owl\"\ntrayWidget \"t\"\n",
+        "apps/layerShellBar/test.owl",
+      ))
+      check runtime.lastError == ""
+    finally:
+      tray.closeTrayHost()
+
+  test "tray D-Bus menu renders from parent-provided rows":
+    let runtime = NestOwlRuntime.init()
+    runtime.dialogData = "42\t\tLaunch Steam\n43\tseparator\t"
+    var ui = UI.init()
+    ui.initContext(320, 520)
+    ui.loadFont("font", "", 18)
+    ui.loadFont("editor", "", 18)
+    runtime.render(ui, parse(
+      readFile("apps/layerShellBar/trayMenu/main.owl"),
+      "apps/layerShellBar/trayMenu/main.owl",
+    ))
+    check runtime.lastError == ""
 
   test "layout config bindings render through Nest UI":
     let originalFontRelays = fontRelays

@@ -10,6 +10,7 @@ import nest/[
   projectConfig,
   runtime,
   singleInstance,
+  tray,
   ui,
 ]
 
@@ -143,5 +144,6 @@ proc runProject*(
     app.runtime.closeDialogProcesses()
     app.runtime.closeShellProcesses()
     app.runtime.closeWorkspaceSubscriptions()
+    tray.closeTrayHost()
     app.closeOwlErrorDialog()
     instanceLock.removeSingleInstanceLock()

@@ -3,7 +3,7 @@ import
       tables, times]
 
 import owl, palette, ui, dialogs
-import nest/[bench, input, perf, screen]
+import nest/[bench, input, perf, screen, tray]
 
 const
   MaintenancePollMs = 100
@@ -1902,6 +1902,78 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     if clicked:
       runtime.requireUi().markAllDirty()
     boolean(clicked)
+
+  runtime.evaluator.native "rightClicked":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 1:
+      raise newException(EvaluatorError, "rightClicked expects one widget ID")
+    let clicked = runtime.requireUi().inEventPhase() and
+      runtime.requireUi().rightClicked(runtime.asWidgetID(env.eval(arguments[0])))
+    if clicked:
+      runtime.requireUi().markAllDirty()
+    boolean(clicked)
+
+  runtime.evaluator.native "trayItems":
+    discard layout
+    discard bodyNodes
+    if arguments.len != 0:
+      raise newException(EvaluatorError, "trayItems expects no arguments")
+    tray.trayItems()
+
+  runtime.evaluator.native "trayActivate":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "trayActivate expects one item id")
+    tray.trayActivate(values[0].asString)
+    nothing()
+
+  runtime.evaluator.native "traySecondaryActivate":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "traySecondaryActivate expects one item id")
+    tray.traySecondaryActivate(values[0].asString)
+    nothing()
+
+  runtime.evaluator.native "trayContextMenu":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "trayContextMenu expects one item id")
+    tray.trayContextMenu(values[0].asString)
+    nothing()
+
+  runtime.evaluator.native "trayRequestMenu":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "trayRequestMenu expects one item id")
+    tray.trayRequestMenu(values[0].asString)
+    nothing()
+
+  runtime.evaluator.native "trayMenuData":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "trayMenuData expects one item id")
+    text(tray.trayMenuData(values[0].asString))
+
+  runtime.evaluator.native "trayMenuActivate":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(EvaluatorError,
+        "trayMenuActivate expects an item id and menu id")
+    tray.trayMenuActivate(values[0].asString, values[1].asString)
+    nothing()
 
   runtime.evaluator.native "focused":
     discard layout

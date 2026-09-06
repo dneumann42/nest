@@ -122,7 +122,10 @@ proc stubScreen() =
   windowRelays.setWindowTitle = proc(title: string) = discard
   windowRelays.moveWindowBy = proc(dx, dy: int) = discard
 
-var bodyRuns = 0
+var
+  bodyRuns = 0
+  rightClicks = 0
+  middleClicks = 0
 
 proc tree(ui: var UI) =
   inc bodyRuns
@@ -130,7 +133,12 @@ proc tree(ui: var UI) =
       padding = 6)):
     ui.row(ui.id("bar"), cfg(width = fill(), height = fit(), gap = 4)):
       for i in 0 ..< 6:
-        discard ui.button(ui.id("tool", $i), "tool")
+        let toolID = ui.id("tool", $i)
+        discard ui.button(toolID, "tool")
+        if ui.rightClicked(toolID):
+          inc rightClicks
+        if ui.middleClicked(toolID):
+          inc middleClicks
     ui.label(ui.id("body"), "content", width = fill(), height = fill())
 
 type Counts = object
@@ -152,6 +160,8 @@ proc runLoop(events: seq[Event], cfg: AppConfig): Counts =
       stubScreen()
       bodyRuns = 0
       presents = 0
+      rightClicks = 0
+      middleClicks = 0
     ui.layout:
       ui.tree()
     inc frames
@@ -226,6 +236,17 @@ suite "frame pacing":
     let before = runLoop(@[quitEvent()], baseConfig())
     let after = runLoop(events, baseConfig())
     check after.bodyRuns > before.bodyRuns
+
+  test "right and middle buttons retain their identity":
+    discard runLoop(@[
+      Event(kind: MouseDownEvent, button: RightButton, x: 24, y: 24),
+      Event(kind: MouseUpEvent, button: RightButton, x: 24, y: 24),
+      Event(kind: MouseDownEvent, button: MiddleButton, x: 24, y: 24),
+      Event(kind: MouseUpEvent, button: MiddleButton, x: 24, y: 24),
+      quitEvent(),
+    ], baseConfig())
+    check rightClicks == 1
+    check middleClicks == 1
 
   test "a key press always runs the application body":
     var events: seq[Event]

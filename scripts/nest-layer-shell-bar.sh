@@ -30,7 +30,10 @@ find_bar_pids() {
 
   if command -v pgrep >/dev/null 2>&1; then
     local match_pids
-    match_pids="$(pgrep -f '[.]/nest run apps/layerShellBar' 2>/dev/null || true)"
+    # Match the release executable, `nim r src/nest ...`, and Nim's cached
+    # `nest_HASH` child so a development launch cannot survive a restart and
+    # leave two bars competing for the tray watcher.
+    match_pids="$(pgrep -f '[n]est[^ ]* run apps/layerShellBar' 2>/dev/null || true)"
     if [[ -n "${match_pids:-}" ]]; then
       while IFS= read -r pid; do
         [[ -n "$pid" && "$pid" != "$$" ]] && pids+=("$pid")

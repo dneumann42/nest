@@ -1,0 +1,58 @@
+import "../variables.owl"
+
+state "tray-menu":
+  rows = list
+  rowIndex = 0
+
+set rows (textLines (dialogData))
+set rowIndex 0
+
+events:
+  when (keyPressed "escape"):
+    requestCloseDialog ""
+  for rowText (iter rows):
+    define:
+      firstTab = (textFind rowText "\t")
+      secondTab = (textFind rowText "\t" (+ firstTab 1))
+      menuID = (textSlice rowText 0 firstTab)
+      entryType = (textSlice rowText (+ firstTab 1) secondTab)
+    when (and (not (= entryType "separator")) (clicked (id "tray-menu" menuID))):
+      requestCloseDialog menuID
+
+animation (id "tray-menu" "panel") (not (dialogClosing?)):
+  duration = DialogAnimationDuration
+  curve = "backOut"
+  fromOpacity = 0
+  maxOpacity = 0.95
+  fromScale = DialogAnimationFromScale
+  offsetY = 6
+  card (id "tray-menu" "panel"):
+    width = fill
+    height = fill
+    padding = DialogPadding
+    gap = 0
+    alignItems = Stretch
+    background = color 0 0 0
+    opacity = 1
+    column (id "tray-menu" "items"):
+      width = fill
+      height = fill
+      gap = 0
+      alignItems = Stretch
+      for rowText (iter rows):
+        define:
+          firstTab = (textFind rowText "\t")
+          secondTab = (textFind rowText "\t" (+ firstTab 1))
+          menuID = (textSlice rowText 0 firstTab)
+          entryType = (textSlice rowText (+ firstTab 1) secondTab)
+          labelText = (textSlice rowText (+ secondTab 1) (length rowText))
+        if (= entryType "separator"):
+          menuDivider (id "tray-menu" "divider" rowIndex):
+            width = fill
+            height = fixed 9
+        else:
+          button (id "tray-menu" menuID) labelText:
+            width = fill
+            height = fit
+            textScroll = true
+        += rowIndex 1

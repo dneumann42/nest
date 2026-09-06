@@ -1,4 +1,4 @@
-import nest/[owldsl, dialogs, layerShellSdl3Driver]
+import nest/[owldsl, dialogs, layerShellSdl3Driver, tray]
 import nest/[backend, screen]
 import nest/perf
 
@@ -132,6 +132,9 @@ proc initWindow*(cfg: AppConfig): ScreenLayout =
     initBackend()
   screen.externalPopoversEnabled = cfg.layerShell
   owldsl.runtimeWake = layerShellSdl3Driver.wakeEventLoop
+  tray.trayNotifyChange = proc() {.gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      owldsl.runtimeWake()
   result = createWindow(cfg.width, cfg.height)
   owldsl.pickFileDialog = proc(callback: PathSelectedProc) {.closure, raises: [].} =
     try:

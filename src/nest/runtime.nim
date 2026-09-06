@@ -170,16 +170,33 @@ proc handleEvent(
     updateContext.mouseY = e.y
     drawContext.mouseX = e.x
     drawContext.mouseY = e.y
-    let last = updateContext.mouseLeftDown
-    updateContext.mouseLeftDown = true
-    updateContext.mouseLeftPressed = not last
+    case e.button
+    of LeftButton:
+      let last = updateContext.mouseLeftDown
+      updateContext.mouseLeftDown = true
+      updateContext.mouseLeftPressed = not last
+    of MiddleButton:
+      let last = updateContext.mouseMiddleDown
+      updateContext.mouseMiddleDown = true
+      updateContext.mouseMiddlePressed = not last
+    of RightButton:
+      updateContext.mouseRightPressed = true
   of MouseUpEvent:
     updateContext.mouseX = e.x
     updateContext.mouseY = e.y
     drawContext.mouseX = e.x
     drawContext.mouseY = e.y
-    updateContext.mouseLeftDown = false
-    updateContext.mouseLeftPressed = false
+    case e.button
+    of LeftButton:
+      updateContext.mouseLeftDown = false
+      updateContext.mouseLeftPressed = false
+    of MiddleButton:
+      updateContext.mouseMiddleDown = false
+      updateContext.mouseMiddlePressed = false
+      updateContext.middleDragging = InvalidWidgetID
+      drawContext.middleDragging = InvalidWidgetID
+    of RightButton:
+      updateContext.mouseRightPressed = false
   of WindowResizeEvent:
     updateContext.windowWidth = max(e.x, 0)
     updateContext.windowHeight = max(e.y, 0)
@@ -235,11 +252,17 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
     ui.windowMouseEnter()
   of MouseDownEvent:
     ui.mouseMove(e.x, e.y)
-    ui.mouseDown()
+    case e.button
+    of LeftButton: ui.mouseDown()
+    of MiddleButton: ui.mouseMiddleDown()
+    of RightButton: ui.mouseRightDown()
     ui.requestRedrawAfter(0)
   of MouseUpEvent:
     ui.mouseMove(e.x, e.y)
-    ui.mouseUp()
+    case e.button
+    of LeftButton: ui.mouseUp()
+    of MiddleButton: ui.mouseMiddleUp()
+    of RightButton: discard
     ui.requestRedrawAfter(0)
   of WindowResizeEvent:
     ui.resizeWindow(e.x, e.y)
@@ -377,6 +400,8 @@ template application*(cfg: AppConfig; blk: untyped) =
       bench.frame:
         blk
         updateContext.mouseLeftPressed = false
+        updateContext.mouseMiddlePressed = false
+        updateContext.mouseRightPressed = false
         bench.zone("present"):
           refresh()
       scheduleNextFrame(nextFrameTicks, frameRemainder, input.getTicks())
@@ -451,6 +476,8 @@ template application*(cfg: AppConfig; blk: untyped) =
       blk
       recordFullFrame(fullFrameStart, sawResizeEvent)
       updateContext.mouseLeftPressed = false
+      updateContext.mouseMiddlePressed = false
+      updateContext.mouseRightPressed = false
       bench.zone("present"):
         refresh()
   reportResizeTrace("shutdown", true)
