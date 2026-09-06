@@ -29,7 +29,7 @@ proc addPkg(name: string) =
     return
   switch("path", if dirExists(newest & "/src"): newest & "/src" else: newest)
 
-for pkg in ["chroma", "sdl3", "micros", "fungus", "kiwiberry"]:
+for pkg in ["chroma", "sdl3", "micros", "kiwiberry"]:
   addPkg(pkg)
 
 --d:sdl3

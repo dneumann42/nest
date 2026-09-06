@@ -269,9 +269,11 @@ runtime would come back and poll their shell processes and re-stat their
 sources. That is ten full repaints and ten presents a second, forever, for an
 application with nothing running behind it. Maintenance is now a wake of its own
 (~requestMaintenanceAfter~) which runs the application body but draws nothing
-unless the body found something worth drawing, it is only scheduled when there
-is something live to poll, and hot-reload source watching runs on its own slower
-timer (~NEST_SOURCE_WATCH_MS~, 500ms, 0 to turn off).
+unless the body found something worth drawing, and it is only scheduled when
+there is something live to poll. On Linux Owl's shared file watcher uses
+inotify and wakes Nest's blocked event loop as soon as a source changes. The
+slower timer remains the portable fallback (~NEST_SOURCE_WATCH_MS~, 500ms, 0 to
+turn hot reload off).
 
 *A pump that outlived its resize.* While a surface is being resized the
 compositor wants pixels more often than resize events arrive, so Nest pumps

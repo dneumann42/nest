@@ -59,6 +59,7 @@ type
   ShellCache = object
     output: string
     ticks: int
+    command: string
 
   StateBinding = object
     env: Environment
@@ -106,6 +107,7 @@ type
     dialogData*: string
     dialogCloseValue*: string
     dialogCloseRequested*: bool
+    dialogPinned*: bool
     requestQuit*: bool
     moduleStack: seq[string]
     currentUi: ptr UI
@@ -128,6 +130,7 @@ type
     lastMaintenanceTicks: int
     lastSourceWatchTicks: int
     renderedDialogCloseState: bool
+    sourceNotificationsEnabled: bool
 
   MenuEntryKind = enum
     MenuEntryItem
@@ -1329,7 +1332,11 @@ proc pollShellProcesses*(runtime: NestOwlRuntime, ui: var UI) =
           ""
       if runtime.shellCache.getOrDefault(key).output != output:
         ui.markAllDirty()
-      runtime.shellCache[key] = ShellCache(output: output, ticks: currentTicks())
+      runtime.shellCache[key] = ShellCache(
+        output: output,
+        ticks: currentTicks(),
+        command: runtime.shellCache.getOrDefault(key).command,
+      )
       try:
         shell.process.close
       except OSError:
@@ -1401,6 +1408,56 @@ proc asyncShellOutput(
       discard
     except IOError:
       discard
+
+  if key in runtime.shellProcesses:
+    try:
+      runtime.requestRedrawAfter(50)
+    except Exception:
+      discard
+
+  runtime.shellCache.getOrDefault(key).output
+
+proc oneShotShellOutput(
+    runtime: NestOwlRuntime, key, command: string
+): string {.raises: [].} =
+  ## Start `command` once for `key` and return its latest cached output.
+  ##
+  ## Unlike `asyncShellOutput`, this never re-runs the command on a timer. It
+  ## starts a process for `key` only when the requested `command` has not been
+  ## started for that key before, and otherwise returns the cached output. This
+  ## keeps a long-running command's output fresh frame to frame without
+  ## restarting it, and does not restart a command that already finished.
+  ## Passing a new `command` (or a fresh `key`) starts a new process.
+  let runningShell = runtime.shellProcesses.getOrDefault(key)
+  let cache = runtime.shellCache.getOrDefault(key)
+  let newRequest = runningShell == nil and cache.command != command
+  let replaceRunning = runningShell != nil and runningShell.command != command
+  if newRequest or replaceRunning:
+    let shell = runningShell
+    if shell != nil:
+      try:
+        if shell.process.running:
+          shell.process.terminate
+        shell.process.close
+      except OSError:
+        discard
+      except IOError:
+        discard
+      runtime.shellProcesses.del key
+    try:
+      runtime.shellProcesses[key] = ShellProcess(
+        process: startProcess(
+          "sh", args = @["-c", command], options = {poUsePath, poStdErrToStdOut}
+        ),
+        command: command,
+      )
+    except OSError:
+      discard
+    except IOError:
+      discard
+    runtime.shellCache[key] = ShellCache(
+      output: "", ticks: currentTicks(), command: command
+    )
 
   if key in runtime.shellProcesses:
     try:
@@ -1793,8 +1850,8 @@ proc loadSyntaxFile*(
   var resolved = path
   try:
     resolved = runtime.resolveModulePath(path)
-    result = owl.parse(readFile(resolved), resolved)
     runtime.rememberFile(resolved)
+    result = owl.parse(readFile(resolved), resolved)
   except IOError as error:
     raise newException(EvaluatorError, resolved & ": " & error.msg)
   except OSError as error:
@@ -2457,6 +2514,16 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
       else:
         0
     text(runtime.asyncShellOutput(values[0].asString, values[1].asString, intervalMs))
+
+  runtime.evaluator.native "shellOnce":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 2:
+      raise newException(
+        EvaluatorError, "shellOnce expects key and command"
+      )
+    text(runtime.oneShotShellOutput(values[0].asString, values[1].asString))
 
   runtime.evaluator.native "shellLaunch":
     discard layout
@@ -3244,6 +3311,23 @@ proc registerNestCommands(runtime: NestOwlRuntime) =
     )
     text(runtime.dialogCloseValue)
 
+  runtime.evaluator.native "setDialogPinned":
+    discard layout
+    discard bodyNodes
+    let values = env.evalArgs(arguments)
+    if values.len != 1:
+      raise newException(EvaluatorError, "setDialogPinned expects one boolean")
+    runtime.dialogPinned = values[0].isTruthy
+    boolean(runtime.dialogPinned)
+
+  runtime.evaluator.native "dialogPinned?":
+    discard env
+    discard layout
+    discard bodyNodes
+    if arguments.len != 0:
+      raise newException(EvaluatorError, "dialogPinned? expects no arguments")
+    boolean(runtime.dialogPinned)
+
   runtime.evaluator.native "dialogClosing?":
     discard layout
     discard bodyNodes
@@ -3945,17 +4029,21 @@ proc reload*(app: NestOwlApp): bool {.discardable.} =
     app.runtime.closeDialogProcesses()
     app.runtime.closeShellProcesses()
     app.runtime.closeWorkspaceSubscriptions()
+    app.runtime.loadedFiles.close()
   app.runtime = NestOwlRuntime.init()
   app.runtime.loadedFiles.clear()
   try:
     app.program = app.runtime.loadSyntaxFile(app.rootPath)
     app.lastError = ""
-    true
+    result = true
   except EvaluatorError as error:
     app.program = nil
     app.lastError = report(error)
     app.lastErrorDetails = error.errorDetails()
-    false
+    result = false
+  if app.sourceNotificationsEnabled:
+    app.sourceNotificationsEnabled =
+      app.runtime.loadedFiles.notifyChanges(wakeRuntimeUi)
 
 proc init*(T: typedesc[NestOwlApp], rootPath: string): T =
   ## Create an app rooted at the owl file `rootPath` and load its program.
@@ -4089,6 +4177,24 @@ proc sourceWatchMs(): int =
         DefaultSourceWatchMs
   cached
 
+proc enableHotReloadNotifications*(app: NestOwlApp): bool =
+  ## Wake Nest's event loop as soon as Owl reports a source change. On systems
+  ## without native notifications the existing timed polling remains active.
+  if app.isNil or sourceWatchMs() == 0:
+    return false
+  app.sourceNotificationsEnabled =
+    app.runtime.loadedFiles.notifyChanges(wakeRuntimeUi)
+  app.sourceNotificationsEnabled
+
+proc close*(app: NestOwlApp) =
+  ## Stop the app's background work and release its source watcher.
+  if app.isNil or app.runtime.isNil:
+    return
+  app.runtime.loadedFiles.close()
+  app.runtime.closeDialogProcesses()
+  app.runtime.closeShellProcesses()
+  app.runtime.closeWorkspaceSubscriptions()
+
 proc scheduleNextWake(app: NestOwlApp, ui: var UI, now: int) =
   ## Ask to be woken only for work that actually exists.
   ##
@@ -4101,7 +4207,7 @@ proc scheduleNextWake(app: NestOwlApp, ui: var UI, now: int) =
   if app.runtime.hasLiveWork():
     ui.requestMaintenanceAfter(MaintenancePollMs)
   let watchMs = sourceWatchMs()
-  if watchMs > 0:
+  if watchMs > 0 and not app.sourceNotificationsEnabled:
     let elapsed = now - app.lastSourceWatchTicks
     ui.requestMaintenanceAfter(max(watchMs - elapsed, 0))
   let tickWait = ui.nextTickWaitMs(now)
@@ -4128,13 +4234,14 @@ proc render*(app: NestOwlApp, ui: var UI) =
       app.runtime.pollDialogProcesses()
   var sourcesChanged = false
   let watchMs = sourceWatchMs()
-  if watchMs > 0 and
-      (app.lastSourceWatchTicks == 0 or now - app.lastSourceWatchTicks >= watchMs):
+  if watchMs > 0 and (app.sourceNotificationsEnabled or
+      app.lastSourceWatchTicks == 0 or now - app.lastSourceWatchTicks >= watchMs):
     app.lastSourceWatchTicks = now
     bench.zone("owl.depsCheck"):
       sourcesChanged = app.runtime.dependenciesChanged()
   if app.program.isNil or sourcesChanged:
     discard app.reload()
+    ui.markAllDirty()
     ui.requestRedrawAfter(0)
   if app.program.isNil:
     return

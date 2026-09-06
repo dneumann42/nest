@@ -4,6 +4,14 @@ import owl
 import nest/[owldsl, input, perf, projectConfig, resources, ui, tray]
 import nest/[coords, screen]
 
+when defined(linux):
+  import std/atomics
+
+  var owlReloadWakeCount: Atomic[int]
+
+  proc noteOwlReloadWake() {.gcsafe, raises: [].} =
+    discard owlReloadWakeCount.fetchAdd(1, moRelaxed)
+
 proc widget(ui: UI, id: WidgetID): Widget =
   for box in ui.layout.boxes:
     if box.id == id:
@@ -194,6 +202,83 @@ label (id "value") value:
     if fileExists(outputPath):
       removeFile(outputPath)
 
+  test "shellOnce runs a one-shot command and keeps its finished output":
+    let runtime = NestOwlRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+    ui.loadFont("font", "", 18)
+    let outputPath = getTempDir() / "nest-shell-once-test"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
+    let source =
+      "state \"root\":\n" &
+      "  result = \"\"\n" &
+      "set result (shellOnce \"once-test\" \"printf ran >> " & outputPath &
+      "; sleep 0.1; printf done\")\n" &
+      "label (id \"result\") result:\n" &
+      "  width = fit\n" &
+      "  height = fit\n"
+    for _ in 0 ..< 20:
+      runtime.render(ui, source)
+      if runtime.get("result").text == "done":
+        break
+      os.sleep(20)
+
+    check runtime.get("result").text == "done"
+    os.sleep(150)
+    check fileExists(outputPath)
+    check readFile(outputPath) == "ran"
+
+    for _ in 0 ..< 5:
+      runtime.render(ui, source)
+      os.sleep(20)
+
+    os.sleep(150)
+    check runtime.get("result").text == "done"
+    check readFile(outputPath) == "ran"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
+  test "shellOnce starts again for a new command on the same key":
+    let runtime = NestOwlRuntime.init()
+    var ui = UI.init()
+    ui.initContext(300, 120)
+    ui.loadFont("font", "", 18)
+    let outputPath = getTempDir() / "nest-shell-once-replace-test"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
+    let first =
+      "set value (shellOnce \"once-replace\" \"sleep 0.1; printf first >> " &
+      outputPath & "\")\n" &
+      "label (id \"value\") value:\n" &
+      "  width = fit\n" &
+      "  height = fit\n"
+    let second =
+      "set value (shellOnce \"once-replace\" \"printf second >> " &
+      outputPath & "\")\n" &
+      "label (id \"value\") value:\n" &
+      "  width = fit\n" &
+      "  height = fit\n"
+    for _ in 0 ..< 10:
+      runtime.render(ui, first)
+      if fileExists(outputPath):
+        break
+      os.sleep(20)
+    check fileExists(outputPath)
+    os.sleep(150)
+
+    for _ in 0 ..< 10:
+      runtime.render(ui, second)
+      os.sleep(20)
+    os.sleep(150)
+
+    check fileExists(outputPath)
+    check readFile(outputPath) == "firstsecond"
+    if fileExists(outputPath):
+      removeFile(outputPath)
+
   test "shell launch survives runtime shell cleanup":
     let runtime = NestOwlRuntime.init()
     let outputPath = getTempDir() / "nest-shell-launch-test"
@@ -302,13 +387,36 @@ label (id "value") value:
     check menuSource.contains("cmd = \"toggle-perf-overlay\"")
     check menuSource.contains("label = \"Wallpaper\"")
     check menuSource.contains("cmd = \"open-wallpaper-switcher\"")
-    check menuSource.contains(
-      "if (or (= command.cmd \"toggle-perf-overlay\") (= command.cmd \"open-wallpaper-switcher\")):"
-    )
+    check menuSource.contains("= command.cmd \"toggle-perf-overlay\"")
+    check menuSource.contains("= command.cmd \"open-wallpaper-switcher\"")
     check barSource.contains("when (= lastAction \"toggle-perf-overlay\"):")
     check barSource.contains("togglePerfOverlay")
     check barSource.contains("when (= lastAction \"open-wallpaper-switcher\"):")
     check barSource.contains("shellLaunch (wallpaperSwitcherCommand)")
+
+  test "start popover exposes the OpenCode prompt field":
+    let menuSource = readFile("apps/layerShellBar/startPopover/main.owl")
+
+    check menuSource.contains("lineInput opencodeInputID \"\"")
+    check menuSource.contains("submitted opencodeInputID")
+    check menuSource.contains("setDialogPinned true")
+    check menuSource.contains("button opencodeSubmitID \"Send\"")
+    check menuSource.contains("shellOnce (id \"opencode\" \"query\"")
+    check menuSource.contains("opencode run -m opencode/big-pickle")
+
+  test "start popover renders the OpenCode prompt field":
+    let app = NestOwlApp.init("apps/layerShellBar/startPopover/main.owl")
+    defer: app.close()
+    var ui = UI.init()
+    ui.initContext(640, 640)
+    ui.loadFont("font", "", 18)
+
+    app.runtime.renderLayoutOnly(ui, app.program, 640, 640)
+
+    check app.runtime.lastError == ""
+    check ui.widget(ui.id("opencode", "input")).frame.width > 0
+    check ui.widget(ui.id("opencode", "submit")).frame.width > 0
+    check ui.widget(ui.id("opencode", "response")).frame.height > 0
 
   test "bar mounts the native status notifier tray":
     let
@@ -666,6 +774,55 @@ editor (id "editor")
     app.render(ui)
 
     check ui.redrawDelayMs() >= 0
+
+  when defined(linux):
+    test "source notifications wake and reload an idle app":
+      let
+        path = getTempDir() / "nest-source-notification-test.owl"
+        previousWake = runtimeWake
+      writeFile(path, "state \"root\":\n  value = 1\n")
+      defer: removeFile(path)
+      defer: runtimeWake = previousWake
+      let app = NestOwlApp.init(path)
+      defer: app.close()
+      runtimeWake = noteOwlReloadWake
+      owlReloadWakeCount.store(0, moRelaxed)
+      require app.enableHotReloadNotifications()
+
+      writeFile(path, "state \"root\":\n  value = 2\n")
+      for attempt in 0 ..< 100:
+        if owlReloadWakeCount.load(moRelaxed) > 0:
+          break
+        os.sleep(10)
+
+      check owlReloadWakeCount.load(moRelaxed) > 0
+      var ui = UI.init()
+      ui.initContext(200, 100)
+      ui.loadFont("font", "", 18)
+      app.render(ui)
+      check app.lastError == ""
+      check app.runtime.get("value").number == 2
+
+      owlReloadWakeCount.store(0, moRelaxed)
+      writeFile(path, "label \"")
+      for attempt in 0 ..< 100:
+        if owlReloadWakeCount.load(moRelaxed) > 0:
+          break
+        os.sleep(10)
+      app.render(ui)
+      check app.lastError.len > 0
+
+      owlReloadWakeCount.store(0, moRelaxed)
+      writeFile(path, "state \"root\":\n  value = 3\n")
+      for attempt in 0 ..< 100:
+        if owlReloadWakeCount.load(moRelaxed) > 0:
+          break
+        os.sleep(10)
+      check owlReloadWakeCount.load(moRelaxed) > 0
+      app.render(ui)
+      check app.lastError == ""
+      check not app.program.isNil
+      check app.runtime.get("value").number == 3
 
   test "app mouse hover updates retained frame without rerunning owl":
     let
@@ -1167,6 +1324,11 @@ actions
     check runtime.dialogCloseRequested
     check runtime.dialogCloseValue == "files"
     check runtime.evaluator.exec(parse("dialogClosing?\n")).isTruthy
+
+    check not runtime.evaluator.exec(parse("dialogPinned?\n")).isTruthy
+    check runtime.evaluator.exec(parse("setDialogPinned true\n")).isTruthy
+    check runtime.dialogPinned
+    check runtime.evaluator.exec(parse("dialogPinned?\n")).isTruthy
 
   test "dialog result commands track completed child values":
     var runtime = NestOwlRuntime.init()

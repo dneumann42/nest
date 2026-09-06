@@ -97,6 +97,7 @@ proc runProject*(
   try:
     application cfg, ui:
       enableExternalSignalWake()
+      discard app.enableHotReloadNotifications()
       app.runtime.queuePendingExternalSignals()
       if dialogMode and consumePendingTerminate():
         app.runtime.requestDialogClose("")
@@ -118,7 +119,8 @@ proc runProject*(
       if app.runtime.requestQuit:
         running = false
       var requestedCloseThisFrame = false
-      if dialogMode and dialogOptions.dismissOnInactive:
+      if dialogMode and dialogOptions.dismissOnInactive and
+          not app.runtime.dialogPinned:
         if ui.windowInactiveFor(dialogOptions.inactiveGraceMs):
           app.runtime.requestDialogClose("")
           ui.markAllDirty()
@@ -141,9 +143,7 @@ proc runProject*(
         running = false
   finally:
     result = app.runtime.dialogCloseValue
-    app.runtime.closeDialogProcesses()
-    app.runtime.closeShellProcesses()
-    app.runtime.closeWorkspaceSubscriptions()
+    app.close()
     tray.closeTrayHost()
     app.closeOwlErrorDialog()
     instanceLock.removeSingleInstanceLock()

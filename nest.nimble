@@ -44,7 +44,6 @@ requires "nim >= 2.2.10"
 requires "https://github.com/dneumann42/owl"
 requires "chroma"
 requires "https://github.com/elcritch/kiwiberry"
-requires "https://github.com/beef331/fungus.git"
 requires "https://github.com/nim-lang/sdl3#e5f87eb992f828419aad83075ea1c41147fbb088"
 requires "https://github.com/zielmicha/nim-dbus#9aedf3c455554ccef2c7741d2379f5af0ac85e55"
 

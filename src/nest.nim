@@ -1,9 +1,6 @@
 import nest/[appConfig, dialogs, errorDialogs, resizePacing, runtime, ui]
 export appConfig, dialogs, errorDialogs, resizePacing, runtime, ui
 
-import fungus
-export fungus
-
 import nest/[input, screen]
 export input, screen
 
@@ -13,9 +10,6 @@ export dockTop, dockBottom, dockLeft, dockRight
 
 import owl
 export owl
-
-import variants
-export variants
 
 when isMainModule:
   import nest/cli

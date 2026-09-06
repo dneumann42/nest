@@ -2153,7 +2153,12 @@ Dialogs, menus and pickers are in [[file:dialogs.org][dialogs.org]].
 
 ** Hot Reload And Errors
 
-~main.owl~ and every file reached from it by ~import~ are watched. When one changes on disk, the next frame reloads the program — and because a reload builds a fresh runtime, ~state~ goes back to its declared defaults, so the interface reappears in its initial state rather than the state it was in.
+~main.owl~ and every file reached from it by ~import~ are watched. On Linux the
+shared Owl watcher uses inotify to wake an idle Nest process immediately; when
+native notifications are unavailable it falls back to periodic file stamps.
+The next frame reloads the program — and because a reload builds a fresh
+runtime, ~state~ goes back to its declared defaults, so the interface reappears
+in its initial state rather than the state it was in.
 
 An error does not end the process. The runtime keeps the last frame that rendered, records the message with the owl stack that reached it, and opens the error dialog in a separate process; clicking a frame in that dialog opens the file at the line. Fixing the file closes the dialog, because the reloader has already noticed the change.
 

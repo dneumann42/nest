@@ -1,6 +1,6 @@
 main = "main.owl"
 title = "Start"
-width = 640
+width = 1024
 height = 640
 layerShell = "top-left"
 namespace = "nest-layer-shell-start-popover"

@@ -15,7 +15,7 @@ state "root":
     {}:
       label = "Wallpaper"
       name = (id "menu" "wallpaper")
-      cmd = "wallpaper switch"
+      cmd = "open-wallpaper-switcher"
       place = "left"
     {}:
       label = "Monitor On/Off"
@@ -23,7 +23,7 @@ state "root":
       cmd = "foot /home/dneumann/.config/sway/scripts/monitors.sh pick"
       place = "left"
     {}:
-      label = "Recording Resolution"
+      label = "Monitor Mode"
       name = (id "menu" "recording-resolution")
       cmd = "/home/dneumann/.alatar/bin/toggle-main-monitor-resolution"
       place = "left"
@@ -89,9 +89,30 @@ state "root":
       cmd = "reboot"
       place = "bottom"
 
+  opencodeInputID = (id "opencode" "input")
+  opencodeSubmitID = (id "opencode" "submit")
+  opencodePrompt = ""
+  opencodeResponse = ""
+  opencodeQueryKey = 0
+  opencodeInputFocused = false
+
+fun opencodeQueryCommand message:
+  string "NO_COLOR=1 opencode run -m opencode/big-pickle -- " (shellQuote message) " 2>/dev/null"
+
 events:
   when (keyPressed "escape"):
     requestCloseDialog ""
+  when (not opencodeInputFocused):
+    set opencodeInputFocused true
+    focus opencodeInputID
+  when (or (clicked opencodeSubmitID) (submitted opencodeInputID)):
+    define:
+      query = (editorText opencodeInputID)
+    when (not (= query "")):
+      setDialogPinned true
+      set opencodePrompt query
+      += opencodeQueryKey 1
+      set opencodeResponse ""
   for command (iter commands):
     when (clicked command.name):
       if (or (= command.cmd "toggle-perf-overlay") (= command.cmd "open-wallpaper-switcher") (= command.cmd "logout") (= command.cmd "shutdown") (= command.cmd "reboot")):
@@ -99,6 +120,9 @@ events:
       else:
         shellLaunch command.cmd
         requestCloseDialog command.name
+
+when (not (= opencodePrompt "")):
+  set opencodeResponse (shellOnce (id "opencode" "query" opencodeQueryKey) (opencodeQueryCommand opencodePrompt))
 
 animation (id "menu" "panel") (not (dialogClosing?)):
   duration = DialogAnimationDuration
@@ -115,6 +139,7 @@ animation (id "menu" "panel") (not (dialogClosing?)):
     alignItems = Stretch
     background = color 0 0 0
     opacity = 1
+    padding = 64
     image (id "menu" "banner") "apps/layerShellBar/assets/nomicon.bmp":
       width = fixed StartMenuBannerWidth
       height = fixed StartMenuBannerHeight
@@ -150,6 +175,34 @@ animation (id "menu" "panel") (not (dialogClosing?)):
               width = fill
               height = fit
             tooltip cmd.name cmd.label
+      column (id "opencode" "column"):
+        width = fill
+        height = fill
+        gap = DialogSectionGap
+        alignItems = Stretch
+        label (id "opencode" "title") "OpenCode":
+          width = fill
+          height = fit
+        row (id "opencode" "input-row"):
+          width = fill
+          height = fit
+          gap = DialogGap
+          alignItems = Center
+          lineInput opencodeInputID "":
+            width = fill
+            height = fixed NetworkInputHeight
+          button opencodeSubmitID "Send":
+            width = fit
+            height = fit
+          tooltip opencodeSubmitID "Ask OpenCode"
+        column (id "opencode" "response-scroll"):
+          width = fill
+          height = fill
+          scrollY = true
+          label (id "opencode" "response") (pick (= opencodeResponse "") (pick (= opencodePrompt "") "Type a message and press Send" "Thinking...") opencodeResponse):
+            width = fill
+            height = fixed 240
+            textScroll = true
     column (id "menu" "middle"):
       width = fill
       height = fit
