@@ -99,6 +99,7 @@ proc overlayDialog*(
     title = "Nest Dialog",
     namespace = "nest-dialog",
     draggable = false,
+    pointerPassthrough = false,
 ): T =
   ## Configure a floating overlay dialog of `width` by `height` pixels.
   ##
@@ -111,6 +112,7 @@ proc overlayDialog*(
       anchors: {},
       exclusiveZone: -1,
       keyboard: KeyboardOnDemand,
+      pointerPassthrough: pointerPassthrough,
     )
   if draggable:
     # An anchored surface can be repositioned by changing its margins.

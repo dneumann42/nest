@@ -14,25 +14,28 @@ proc handleSigUsr1(signal: cint) {.noconv.} =
   discard signal
   pendingSigUsr1 = 1
   if eventLoopWakeReady != 0:
-    layerShellSdl3Driver.wakeEventLoop()
+    layerShellSdl3Driver.wakeEventLoopFromSignal()
 
 proc handleSigTerm(signal: cint) {.noconv.} =
   discard signal
   pendingSigTerm = 1
   if eventLoopWakeReady != 0:
-    layerShellSdl3Driver.wakeEventLoop()
+    layerShellSdl3Driver.wakeEventLoopFromSignal()
 
 proc installExternalSignalHandlers*(gracefulTerminate = false) =
   ## Install the process signal handlers Nest reacts to.
   discard posix.signal(SIGUSR1, handleSigUsr1)
+  discard posix.siginterrupt(SIGUSR1, 1)
   if gracefulTerminate:
     discard posix.signal(SIGTERM, handleSigTerm)
+    discard posix.siginterrupt(SIGTERM, 1)
 
 proc enableExternalSignalWake*() =
   ## Allow the signal handler to wake a blocked event loop.
   ##
   ## Call this once the window and event loop are up, so a signal arriving
   ## before then cannot try to wake a loop that does not exist yet.
+  layerShellSdl3Driver.enableSignalSafeEventLoopWake()
   eventLoopWakeReady = 1
 
 proc consumePendingSigUsr1(): bool =

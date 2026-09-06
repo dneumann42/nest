@@ -7,6 +7,7 @@ import nest/fallbackfonts
 {.compile: "wayland/wlr-layer-shell-unstable-v1-protocol.c".}
 {.compile: "wayland/xdg-shell-protocol.c".}
 {.compile: "wayland/layer_shell_shim.c".}
+{.compile: "wayland/signal_wake_shim.c".}
 {.passL: "-lwayland-client".}
 
 proc imgLoad(
@@ -53,6 +54,7 @@ type
     exclusiveZone*: int32
     marginTop*, marginRight*, marginBottom*, marginLeft*: int32
     keyboard*: LayerShellKeyboardMode
+    pointerPassthrough*: bool
 
   FontSlot = object
     ttfFont: sdl3_ttf.Font
@@ -168,10 +170,18 @@ proc nestLayerShellConfigure(
   display, surface: pointer,
   width, height, layer, anchor: uint32,
   exclusiveZone, marginTop, marginRight, marginBottom, marginLeft: int32,
-  keyboard: uint32,
+  keyboard, pointerPassthrough: uint32,
   namespace: cstring,
   configuredWidth, configuredHeight: ptr uint32,
 ): cint {.importc: "nest_wayland_layer_shell_configure".}
+
+proc nestSignalWakeStart(): cint {.importc: "nest_signal_wake_start".}
+proc nestSignalWakeNotify() {.importc: "nest_signal_wake_notify".}
+proc nestSignalWakeTakePending(): cint {.
+  importc: "nest_signal_wake_take_pending".}
+proc nestWaylandWaitForEventOrWake(display: pointer, timeoutMs: cint): cint {.
+  importc: "nest_wayland_wait_for_event_or_wake".}
+proc nestSignalWakeStop() {.importc: "nest_signal_wake_stop".}
 
 proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
 proc nestLayerShellTakeConfiguredSize(
@@ -232,6 +242,7 @@ var
   clipStack: seq[ClipState]
   currentClip: ClipState
   useLayerShell: bool
+  waylandDisplay: pointer
   wakeEventQueued: Atomic[bool]
   traceRefreshes: int
   traceTargetGrows: int
@@ -343,6 +354,7 @@ proc resetSdlState() =
       nestLayerShellDestroy()
     destroyWindow(win)
     win = nil
+  waylandDisplay = nil
 
 proc ensureDrawColor(color: screen.Color) =
   if drawColorValid and drawColor == color:
@@ -532,6 +544,9 @@ proc scanForFont(needles, avoid: openArray[string]): string =
         best = path
         bestScore = score
   scannedFonts[key] = best
+  if best.len > 0:
+    # Child dialog processes inherit this and skip the recursive font scan.
+    putEnv("NEST_NERD_FONT", best)
   best
 
 proc hasRequiredGlyphs(path: string, glyphs: openArray[uint32]): bool =
@@ -750,6 +765,7 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
   let display =
     getPointerProperty(windowProps, cstring(
         PROP_WINDOW_WAYLAND_DISPLAY_POINTER), nil)
+  waylandDisplay = display
   let surface =
     getPointerProperty(windowProps, cstring(
         PROP_WINDOW_WAYLAND_SURFACE_POINTER), nil)
@@ -767,6 +783,7 @@ proc createLayerShellWindow(layout: var ScreenLayout) =
     layerShellConfig.marginBottom,
     layerShellConfig.marginLeft,
     layerShellConfig.keyboard.uint32,
+    layerShellConfig.pointerPassthrough.uint32,
     cstring(layerShellConfig.namespace),
     addr configuredWidth,
     addr configuredHeight,
@@ -1322,6 +1339,8 @@ proc translateEvent(sdlEvent: sdl3.Event, e: var input.Event) =
   let evType = uint32(sdlEvent.common.`type`)
   if evType == uint32(EVENT_USER):
     wakeEventQueued.store(false, moRelease)
+    discard nestSignalWakeTakePending()
+    e.kind = WakeEvent
   elif evType == uint32(EVENT_QUIT):
     e.kind = QuitEvent
   elif evType == uint32(EVENT_WINDOW_RESIZED) or
@@ -1450,10 +1469,29 @@ proc noteWindowActivity() {.inline.} =
 
 proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[
     InputFlag]): bool =
+  if nestSignalWakeTakePending() != 0:
+    e = input.Event(kind: WakeEvent)
+    return true
   if pollLayerShellResize(e) or pollWindowResize(e):
     noteWindowActivity()
     return true
   var sdlEvent: sdl3.Event
+  if useLayerShell:
+    if pollEvent(sdlEvent):
+      translateEvent(sdlEvent, e)
+      noteWindowActivity()
+      return true
+    let waited = nestWaylandWaitForEventOrWake(
+      waylandDisplay, timeoutMs.cint)
+    if waited == 1:
+      discard nestSignalWakeTakePending()
+      e = input.Event(kind: WakeEvent)
+      return true
+    if waited == 0 and pollEvent(sdlEvent):
+      translateEvent(sdlEvent, e)
+      noteWindowActivity()
+      return true
+    return false
   if not useLayerShell and windowProbeActive():
     if pollEvent(sdlEvent):
       translateEvent(sdlEvent, e)
@@ -1482,6 +1520,9 @@ proc sdlWaitEvent(e: var input.Event, timeoutMs: int, flags: set[
     else:
       waitEventTimeout(sdlEvent, timeoutMs.int32)
   if not ok:
+    if nestSignalWakeTakePending() != 0:
+      e = input.Event(kind: WakeEvent)
+      return true
     if pollLayerShellResize(e) or pollWindowResize(e):
       noteWindowActivity()
       return true
@@ -1499,8 +1540,11 @@ proc sdlDelay(ms: int) =
 proc wakeEventLoop*() {.gcsafe, raises: [].} =
   ## Wake an event loop that is blocked waiting for input.
   ##
-  ## Safe to call from a signal handler or another thread: at most one wake
-  ## event is queued at a time.
+  ## Safe to call from another thread: at most one wake event is queued at a
+  ## time. POSIX signal handlers must use `wakeEventLoopFromSignal` instead.
+  if useLayerShell:
+    nestSignalWakeNotify()
+    return
   if wakeEventQueued.exchange(true, moAcquireRelease):
     return
   var event: sdl3.Event
@@ -1508,7 +1552,19 @@ proc wakeEventLoop*() {.gcsafe, raises: [].} =
   if not pushEvent(event):
     wakeEventQueued.store(false, moRelease)
 
+proc enableSignalSafeEventLoopWake*() {.raises: [].} =
+  ## Start the pipe-backed bridge used by POSIX signal handlers.
+  ##
+  ## A signal handler cannot safely call SDL directly. The bridge gives the
+  ## layer-shell loop a pipe to poll beside its Wayland display descriptor.
+  discard nestSignalWakeStart()
+
+proc wakeEventLoopFromSignal*() {.noconv, raises: [].} =
+  ## Wake the event loop from POSIX signal context.
+  nestSignalWakeNotify()
+
 proc sdlQuitRequest() =
+  nestSignalWakeStop()
   if win != nil:
     discard stopTextInput(win)
   resetSdlState()

@@ -39,7 +39,7 @@ define:
   DialogStrongOpacity = 0.85
   DialogMutedOpacity = 0.35
   DialogPanelOpacity = 0.9
-  DialogAnimationDuration = 150
+  DialogAnimationDuration = 600
   DialogAnimationFromScale = 0.0
   DialogDismissGraceMs = 350
 

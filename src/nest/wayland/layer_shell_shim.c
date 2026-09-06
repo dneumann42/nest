@@ -9,6 +9,7 @@
 struct nest_layer_shell_state {
   struct wl_display *display;
   struct wl_surface *surface;
+  struct wl_compositor *compositor;
   struct zwlr_layer_shell_v1 *layer_shell;
   struct zwlr_layer_surface_v1 *layer_surface;
   uint32_t configured;
@@ -28,6 +29,10 @@ static void registry_global(void *data, struct wl_registry *registry,
     uint32_t bind_version = version < 5 ? version : 5;
     state->layer_shell = wl_registry_bind(
         registry, name, &zwlr_layer_shell_v1_interface, bind_version);
+  } else if (strcmp(interface, wl_compositor_interface.name) == 0) {
+    uint32_t bind_version = version < 4 ? version : 4;
+    state->compositor =
+        wl_registry_bind(registry, name, &wl_compositor_interface, bind_version);
   }
 }
 
@@ -70,7 +75,8 @@ int nest_wayland_layer_shell_configure(
     void *display_ptr, void *surface_ptr, uint32_t width, uint32_t height,
     uint32_t layer, uint32_t anchor, int32_t exclusive_zone, int32_t margin_top,
     int32_t margin_right, int32_t margin_bottom, int32_t margin_left,
-    uint32_t keyboard_interactivity, const char *layer_namespace,
+    uint32_t keyboard_interactivity, uint32_t pointer_passthrough,
+    const char *layer_namespace,
     uint32_t *configured_width, uint32_t *configured_height) {
   struct wl_display *display = display_ptr;
   struct wl_surface *surface = surface_ptr;
@@ -94,6 +100,10 @@ int nest_wayland_layer_shell_configure(
   wl_display_roundtrip(display);
 
   if (state->layer_shell == NULL) {
+    if (state->compositor != NULL) {
+      wl_compositor_destroy(state->compositor);
+      state->compositor = NULL;
+    }
     wl_registry_destroy(registry);
     return -3;
   }
@@ -102,6 +112,10 @@ int nest_wayland_layer_shell_configure(
       state->layer_shell, surface, NULL, layer, layer_namespace);
   if (state->layer_surface == NULL) {
     zwlr_layer_shell_v1_destroy(state->layer_shell);
+    if (state->compositor != NULL) {
+      wl_compositor_destroy(state->compositor);
+      state->compositor = NULL;
+    }
     wl_registry_destroy(registry);
     return -4;
   }
@@ -116,6 +130,15 @@ int nest_wayland_layer_shell_configure(
                                    margin_right, margin_bottom, margin_left);
   zwlr_layer_surface_v1_set_keyboard_interactivity(
       state->layer_surface, keyboard_interactivity);
+
+  if (pointer_passthrough && state->compositor != NULL) {
+    struct wl_region *empty_region =
+        wl_compositor_create_region(state->compositor);
+    if (empty_region != NULL) {
+      wl_surface_set_input_region(surface, empty_region);
+      wl_region_destroy(empty_region);
+    }
+  }
 
   wl_surface_commit(surface);
 
@@ -165,6 +188,10 @@ void nest_wayland_layer_shell_destroy(void) {
   if (state->layer_shell != NULL) {
     zwlr_layer_shell_v1_destroy(state->layer_shell);
     state->layer_shell = NULL;
+  }
+  if (state->compositor != NULL) {
+    wl_compositor_destroy(state->compositor);
+    state->compositor = NULL;
   }
   if (state->display != NULL) {
     wl_display_flush(state->display);

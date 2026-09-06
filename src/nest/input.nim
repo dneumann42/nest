@@ -75,6 +75,7 @@ type
 
   EventKind* = enum
     NoEvent
+    WakeEvent
     KeyDownEvent
     KeyUpEvent
     TextInputEvent

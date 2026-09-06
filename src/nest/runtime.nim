@@ -239,6 +239,7 @@ proc countEvent(kind: EventKind) =
   of WindowFocusGainedEvent, WindowFocusLostEvent,
       WindowMouseEnterEvent, WindowMouseLeaveEvent:
     bench.count("event.window", 1)
+  of WakeEvent: bench.count("event.wake", 1)
   of NoEvent: bench.count("event.none", 1)
   else: bench.count("event.other", 1)
 
@@ -247,6 +248,11 @@ proc handleEvent(e: Event; running: var bool; ui: var UI) =
   case e.kind
   of QuitEvent, WindowCloseEvent:
     running = false
+  of WakeEvent:
+    # External events (signals, subscriptions and tray notifications) are
+    # interpreted by the application rather than by retained UI hit testing.
+    # Force exactly one application render so the event is consumed now.
+    ui.markAllDirty()
   of MouseMoveEvent:
     ui.mouseMove(e.x, e.y)
     ui.windowMouseEnter()

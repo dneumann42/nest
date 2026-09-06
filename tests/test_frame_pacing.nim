@@ -255,3 +255,8 @@ suite "frame pacing":
     let before = runLoop(@[quitEvent()], baseConfig())
     let after = runLoop(events, baseConfig())
     check after.bodyRuns > before.bodyRuns
+
+  test "an external wake always runs the application body":
+    let before = runLoop(@[quitEvent()], baseConfig())
+    let after = runLoop(@[Event(kind: WakeEvent), quitEvent()], baseConfig())
+    check after.bodyRuns > before.bodyRuns

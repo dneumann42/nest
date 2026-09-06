@@ -18,6 +18,7 @@ proc tooltipConfig(text, anchorJson, theme: string): AppConfig =
       TooltipHeight.Positive,
       title = "Nest Tooltip",
       namespace = "nest-tooltip",
+      pointerPassthrough = true,
     )
     .applyDialogAnchor(parseDialogAnchor(anchorJson))
 

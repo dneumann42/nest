@@ -211,6 +211,15 @@ suite "ui layout nesting":
     check app.layerShellConfig.marginTop == 96
     check app.layerShellConfig.marginLeft == 96
 
+  test "overlay dialogs can opt out of pointer input":
+    let app = AppConfig.overlayDialog(
+      width = 160.Positive,
+      height = 30.Positive,
+      pointerPassthrough = true,
+    )
+    check app.layerShell
+    check app.layerShellConfig.pointerPassthrough
+
   test "palette provides clean dark and light themes":
     let
       dark = Palette.dark()

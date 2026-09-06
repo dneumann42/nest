@@ -127,6 +127,7 @@ type
     lastFullRenderTicks: int
     lastMaintenanceTicks: int
     lastSourceWatchTicks: int
+    renderedDialogCloseState: bool
 
   MenuEntryKind = enum
     MenuEntryItem
@@ -4137,7 +4138,7 @@ proc render*(app: NestOwlApp, ui: var UI) =
     ui.requestRedrawAfter(0)
   if app.program.isNil:
     return
-  if app.runtime.dialogCloseRequested:
+  if app.runtime.dialogCloseRequested != app.renderedDialogCloseState:
     ui.markAllDirty()
   let fullRenderDue = app.lastFullRenderTicks == 0 or
       ui.hasPendingFullRenderInput() or
@@ -4163,6 +4164,7 @@ proc render*(app: NestOwlApp, ui: var UI) =
   discard ui.markDueTicks(now)
   app.runtime.moduleStack.add app.rootPath
   app.runtime.render(ui, app.program)
+  app.renderedDialogCloseState = app.runtime.dialogCloseRequested
   app.runtime.moduleStack.setLen(app.runtime.moduleStack.len - 1)
   if app.runtime.hasError:
     app.lastError = app.runtime.lastError

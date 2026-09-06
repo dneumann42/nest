@@ -21,3 +21,9 @@ example/layerShellBar/layerShellBar
 *.out
 docs/api/
 /tests/test_owldsl
+/deps/
+/deps.dot
+/src/nest/tray
+/tests/test_frame_pacing
+/tests/test_resize_pacing
+/tests/test_tray_dbus

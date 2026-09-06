@@ -764,6 +764,12 @@ animation (id "panel"):
     inputRelays.getTicks = proc(): int =
       ticks
     writeFile(path, """
+state "root":
+  renders = 0
+
+events:
+  += renders 1
+
 animation (id "panel") (not (dialogClosing?)):
   duration = 120
   curve = "linear"
@@ -788,6 +794,7 @@ animation (id "panel") (not (dialogClosing?)):
       ui.setDrawTicks(ticks)
       app.render(ui)
       check ui.animationValue(ui.id("panel")).progress == 1.0
+      check app.runtime.get("renders").number == 1
 
       app.runtime.requestDialogClose("")
       ticks = 1210
@@ -797,6 +804,7 @@ animation (id "panel") (not (dialogClosing?)):
       let closing = ui.animationValue(ui.id("panel"))
       check app.runtime.dialogCloseRequested
       check closing.running
+      check app.runtime.get("renders").number == 2
 
       ticks = 1230
       ui.setDrawTicks(ticks)
@@ -805,6 +813,7 @@ animation (id "panel") (not (dialogClosing?)):
       check closingAdvanced.running
       check closingAdvanced.progress < closing.progress
       check closingAdvanced.opacity < closing.opacity
+      check app.runtime.get("renders").number == 2
     finally:
       inputRelays = originalInputRelays
       if fileExists(path):
