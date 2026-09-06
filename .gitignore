@@ -22,6 +22,7 @@ example/layerShellBar/layerShellBar
 docs/api/
 /tests/test_owldsl
 /deps/
+/nim.cfg
 /deps.dot
 /src/nest/tray
 /tests/test_frame_pacing
