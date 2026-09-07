@@ -3,9 +3,8 @@ import sdl3_ttf
 import std/[atomics, hashes, os, strformat, strutils, tables]
 import nest/[coords, input, screen]
 import nest/fallbackfonts
+import nest/wayland/protocols
 
-{.compile: "wayland/wlr-layer-shell-unstable-v1-protocol.c".}
-{.compile: "wayland/xdg-shell-protocol.c".}
 {.compile: "wayland/layer_shell_shim.c".}
 {.compile: "wayland/signal_wake_shim.c".}
 {.passL: "-lwayland-client".}
