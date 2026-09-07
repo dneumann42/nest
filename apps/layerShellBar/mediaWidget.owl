@@ -4,11 +4,11 @@ import "components/media.owl"
 widget mediaWidget key:
   define:
     keyText = eval key
-    previousID = (id keyText "previous")
-    artID = (id keyText "art")
-    titleID = (id keyText "title")
-    playPauseID = (id keyText "play-pause")
-    nextID = (id keyText "next")
+    previousID = id keyText "previous"
+    artID = id keyText "art"
+    titleID = id keyText "title"
+    playPauseID = id keyText "play-pause"
+    nextID = id keyText "next"
     title = ""
     status = ""
     art = ""
@@ -16,28 +16,45 @@ widget mediaWidget key:
     displayStatus = ""
     playPauseLabel = "Play"
 
-  set title (mediaCachedQuery (id keyText "query" "title") "bar-title" "metadata --format '{{artist}} - {{title}}' 2>/dev/null" "No media")
-  set status (mediaCachedQuery (id keyText "query" "status") "bar-status" "status 2>/dev/null" "Stopped")
+  set
+    title
+    mediaCachedQuery
+      id keyText "query" "title"
+      "bar-title"
+      "metadata --format '{{artist}} - {{title}}' 2>/dev/null"
+      "No media"
+  set
+    status
+    mediaCachedQuery
+      id keyText "query" "status"
+      "bar-status"
+      "status 2>/dev/null"
+      "Stopped"
   set art (mediaArtwork (id keyText "query" "art"))
+
   when (= status statusOverride):
     set statusOverride ""
+
   set displayStatus (pick (= statusOverride "") status statusOverride)
   set playPauseLabel (pick (= displayStatus "Playing") IconPause IconPlay)
-
   redrawAfter MediaPollInterval
 
   events:
     when (clicked previousID):
       mediaAction (id keyText "action" "previous") "previous 2>/dev/null"
+
     when (and (clicked artID) (not (dialogOpen? "media"))):
       openDialog "media" "./media" "" artID (dialogAutoDismissOptions)
+
     when (and (clicked titleID) (not (dialogOpen? "media"))):
       openDialog "media" "./media" "" titleID (dialogAutoDismissOptions)
+
     when (clicked playPauseID):
       set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
       set displayStatus statusOverride
       set playPauseLabel (pick (= displayStatus "Playing") IconPause IconPlay)
       mediaAction (id keyText "action" "play-pause") "play-pause 2>/dev/null"
+
     when (clicked nextID):
       mediaAction (id keyText "action" "next") "next 2>/dev/null"
 
@@ -46,8 +63,9 @@ widget mediaWidget key:
     height = fixed BarWidgetHeight
     gap = NoSpacing
     alignItems = Center
+
     button previousID IconPrevious:
-      width = (fixed MediaBarButtonWidth)
+      width = fixed MediaBarButtonWidth
       height = fixed BarWidgetHeight
       fontName = BarIconFontName
       fontSize = BarIconFontSize
@@ -61,28 +79,36 @@ widget mediaWidget key:
       shadowOffsetY = BarWidgetShadowOffsetY
       shadowBlur = BarWidgetShadowBlur
       shadowSpread = BarWidgetShadowSpread
+
     tooltip previousID "Previous track"
+
     imageButton artID art:
-      width = (fixed MediaBarArtSize)
-      height = (fixed MediaBarArtSize)
+      width = fixed MediaBarArtSize
+      height = fixed MediaBarArtSize
+
     tooltip artID "Media"
+
     button titleID (string IconMedia " " title):
-      width = (fixed MediaBarTitleWidth)
+      width = fixed MediaBarTitleWidth
       height = fixed BarWidgetHeight
       textScroll = true
       fontName = BarIconFontName
       fontSize = BarIconFontSize
       buttonPadding = BarWidgetPadding
+
     tooltip titleID title
+
     button playPauseID playPauseLabel:
-      width = (fixed MediaBarPlayButtonWidth)
+      width = fixed MediaBarPlayButtonWidth
       height = fixed BarWidgetHeight
       fontName = BarIconFontName
       fontSize = BarIconFontSize
       buttonPadding = BarWidgetPadding
+
     tooltip playPauseID (pick (= displayStatus "Playing") "Pause" "Play")
+
     button nextID IconNext:
-      width = (fixed MediaBarButtonWidth)
+      width = fixed MediaBarButtonWidth
       height = fixed BarWidgetHeight
       fontName = BarIconFontName
       fontSize = BarIconFontSize
@@ -96,4 +122,5 @@ widget mediaWidget key:
       shadowOffsetY = BarWidgetShadowOffsetY
       shadowBlur = BarWidgetShadowBlur
       shadowSpread = BarWidgetShadowSpread
+
     tooltip nextID "Next track"

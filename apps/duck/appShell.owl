@@ -6,18 +6,30 @@ widget duckStatusBar:
       padding = 4
       gap = 12
       background = color 70 70 70
+
       label (id "duck" "status" "message") statusText:
         width = fill
         height = fit
-      label (id "duck" "status" "position") (string "Ln " (editorLine (activeEditorID)) ", Col " (editorColumn (activeEditorID))):
+
+      label
+        id "duck" "status" "position"
+        string
+          "Ln "
+          editorLine (activeEditorID)
+          ", Col "
+          editorColumn (activeEditorID):
         width = fit
         height = fit
-      label (id "duck" "status" "count") (string (lineCount (activeText)) " lines"):
+
+      label
+        id "duck" "status" "count"
+        string (lineCount (activeText)) " lines":
         width = fit
         height = fit
 
 widget duckAppShell:
   set tabSelection activeBuffer
+
   panel rootID:
     width = fill
     height = fill
@@ -25,12 +37,14 @@ widget duckAppShell:
     padding = 0.0
     alignItems = Stretch
     duckMenuBar
+
     tabs tabBarID (bufferLabels buffers) tabSelection:
       width = fill
       height = fixed 36
       padding = 4
       gap = 2
       background = color 35 40 44
+
     editorWorkspace "duck:workspace"
     duckStatusBar
     findDialog

@@ -2,12 +2,12 @@ import "../variables.owl"
 import "../components/media.owl"
 
 state "root":
-  artworkID = (id "media" "artwork")
-  previousID = (id "media" "previous")
-  playPauseID = (id "media" "play-pause")
-  nextID = (id "media" "next")
-  closeID = (id "media" "close")
-  seekID = (id "media" "seek")
+  artworkID = id "media" "artwork"
+  previousID = id "media" "previous"
+  playPauseID = id "media" "play-pause"
+  nextID = id "media" "next"
+  closeID = id "media" "close"
+  seekID = id "media" "seek"
   title = ""
   artist = ""
   album = ""
@@ -25,45 +25,98 @@ state "root":
   art = ""
   playPauseLabel = "Play"
 
-set title (mediaCachedQuery (id "media" "query" "title") "popover-title" "metadata --format '{{title}}' 2>/dev/null" "No media")
-set artist (mediaCachedQuery (id "media" "query" "artist") "popover-artist" "metadata --format '{{artist}}' 2>/dev/null" "")
-set album (mediaCachedQuery (id "media" "query" "album") "popover-album" "metadata --format '{{album}}' 2>/dev/null" "")
-set status (mediaCachedQuery (id "media" "query" "status") "popover-status" "status 2>/dev/null" "Stopped")
-set player (mediaCachedQuery (id "media" "query" "player") "popover-player" "metadata --format '{{playerName}}' 2>/dev/null" "")
-set length (mediaCachedQuery (id "media" "query" "length") "popover-length" "metadata --format '{{mpris:length}}' 2>/dev/null" "")
+set
+  title
+  mediaCachedQuery
+    id "media" "query" "title"
+    "popover-title"
+    "metadata --format '{{title}}' 2>/dev/null"
+    "No media"
+set
+  artist
+  mediaCachedQuery
+    id "media" "query" "artist"
+    "popover-artist"
+    "metadata --format '{{artist}}' 2>/dev/null"
+    ""
+set
+  album
+  mediaCachedQuery
+    id "media" "query" "album"
+    "popover-album"
+    "metadata --format '{{album}}' 2>/dev/null"
+    ""
+set
+  status
+  mediaCachedQuery
+    id "media" "query" "status"
+    "popover-status"
+    "status 2>/dev/null"
+    "Stopped"
+set
+  player
+  mediaCachedQuery
+    id "media" "query" "player"
+    "popover-player"
+    "metadata --format '{{playerName}}' 2>/dev/null"
+    ""
+set
+  length
+  mediaCachedQuery
+    id "media" "query" "length"
+    "popover-length"
+    "metadata --format '{{mpris:length}}' 2>/dev/null"
+    ""
 set rawLengthSeconds (mediaLengthSeconds (id "media" "query" "length-seconds"))
 set lengthSeconds (pick (= rawLengthSeconds "") lengthSeconds rawLengthSeconds)
 set rawPosition (mediaPositionSeconds (id "media" "query" "position"))
 set position (pick (= rawPosition "") position rawPosition)
-set url (mediaCachedQuery (id "media" "query" "url") "popover-url" "metadata --format '{{xesam:url}}' 2>/dev/null" "")
+set
+  url
+  mediaCachedQuery
+    id "media" "query" "url"
+    "popover-url"
+    "metadata --format '{{xesam:url}}' 2>/dev/null"
+    ""
 set art (mediaArtwork (id "media" "query" "art"))
+
 when (= status statusOverride):
   set statusOverride ""
+
 set displayStatus (pick (= statusOverride "") status statusOverride)
 set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
-
 redrawAfter MediaPollInterval
 
 events:
   when (keyPressed "escape"):
     requestCloseDialog ""
+
   when (clicked artworkID):
     requestCloseDialog ""
+
   when (clicked closeID):
     requestCloseDialog ""
+
   when (clicked previousID):
     mediaAction (id "media" "action" "previous") "previous 2>/dev/null"
+
   when (clicked playPauseID):
     set statusOverride (pick (= displayStatus "Playing") "Paused" "Playing")
     set displayStatus statusOverride
     set playPauseLabel (pick (= displayStatus "Playing") "Pause" "Play")
     mediaAction (id "media" "action" "play-pause") "play-pause 2>/dev/null"
+
   when (clicked nextID):
     mediaAction (id "media" "action" "next") "next 2>/dev/null"
+
   set seekValue (horizontalSlider seekID position 0 lengthSeconds)
+
   when (not (= seekValue nothing)):
     set position seekValue
-    shellAsync (id "media" "action" "seek") (mediaSeekCommand seekValue) ImmediateInterval
+    shellAsync
+      id "media" "action" "seek"
+      mediaSeekCommand seekValue
+      ImmediateInterval
 
 animation (id "media" "dialog") (not (dialogClosing?)):
   duration = DialogAnimationDuration
@@ -72,6 +125,7 @@ animation (id "media" "dialog") (not (dialogClosing?)):
   maxOpacity = 0.95
   fromScale = DialogAnimationFromScale
   offsetY = 6
+
   card (id "media" "dialog"):
     width = fill
     height = fill
@@ -80,92 +134,120 @@ animation (id "media" "dialog") (not (dialogClosing?)):
     alignItems = Stretch
     background = theme-color "panel"
     opacity = 1
+
     dialogHeader (id "media" "header"):
       width = fill
       height = fixed DialogHeaderHeightTall
       padding = DialogHeaderPadding
       alignItems = Center
+
       label (id "media" "heading") "Now Playing":
         width = fill
         height = fit
+
       button closeID "x":
         width = fixed DialogCloseButtonWidthLarge
         height = fit
+
       tooltip closeID "Close"
+
     row (id "media" "body"):
       width = fill
       height = fill
       gap = DialogPaddingWide
       alignItems = Stretch
+
       column (id "media" "left"):
-        width = (fixed MediaPopoverLeftWidth)
+        width = fixed MediaPopoverLeftWidth
         height = fill
         gap = DialogSectionGap
         alignItems = Stretch
+
         imageButton artworkID art:
           width = fill
-          height = (fixed MediaPopoverArtworkHeight)
+          height = fixed MediaPopoverArtworkHeight
+
         tooltip artworkID "Close"
+
         row (id "media" "controls"):
           width = fill
           height = fit
           gap = MediaControlGap
           justifyContent = Center
+
           button previousID "Prev":
-            width = (fixed MediaControlButtonWidth)
-            height = (fixed MediaControlHeight)
+            width = fixed MediaControlButtonWidth
+            height = fixed MediaControlHeight
+
           tooltip previousID "Previous track"
+
           button playPauseID playPauseLabel:
-            width = (fixed MediaPlayButtonWidth)
-            height = (fixed MediaControlHeight)
+            width = fixed MediaPlayButtonWidth
+            height = fixed MediaControlHeight
+
           tooltip playPauseID (pick (= displayStatus "Playing") "Pause" "Play")
+
           button nextID "Next":
-            width = (fixed MediaControlButtonWidth)
-            height = (fixed MediaControlHeight)
+            width = fixed MediaControlButtonWidth
+            height = fixed MediaControlHeight
+
           tooltip nextID "Next track"
+
         horizontalSlider seekID position 0 lengthSeconds:
           width = fill
-          height = (fixed MediaSeekHeight)
+          height = fixed MediaSeekHeight
+
         tooltip seekID "Seek"
+
       column (id "media" "details"):
         width = fill
         height = fill
         gap = MediaDetailsGap
         alignItems = Stretch
+
         label (id "media" "title") title:
           width = fill
           height = fit
           textScroll = true
+
         label (id "media" "artist") artist:
           width = fill
           height = fit
           textScroll = true
+
         label (id "media" "album") album:
           width = fill
           height = fit
           textScroll = true
+
         table (id "media" "metadata-table"):
           width = fill
           height = fit
           alignItems = Center
+
           tableHeader (id "media" "metadata-header"):
             width = fill
-            height = (fixed MediaMetadataRowHeight)
+            height = fixed MediaMetadataRowHeight
             alignItems = Center
+
             tableCell (id "media" "metadata-header-field"):
-              width = (fixed MediaMetadataLabelWidth)
+              width = fixed MediaMetadataLabelWidth
               height = fill
               padding = MediaMetadataPadding
+
               label (id "media" "metadata-header-field-label") "Field":
                 width = fill
                 height = fit
+
             tableCell (id "media" "metadata-header-value"):
               width = fill
               height = fill
               padding = MediaMetadataPadding
+
               label (id "media" "metadata-header-value-label") "Value":
                 width = fill
                 height = fit
+
           mediaMetadataRow "media" "Status" displayStatus
           mediaMetadataRow "media" "Player" player
           mediaMetadataRow "media" "Length" length

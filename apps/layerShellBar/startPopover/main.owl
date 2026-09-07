@@ -4,125 +4,479 @@ state "root":
   commands = []:
     {}:
       label = "Packages"
-      name = (id "menu" "packages")
+      name = id "menu" "packages"
       cmd = "shelly-ui"
       place = "left"
+
     {}:
       label = "Alatar"
-      name = (id "menu" "alatar")
+      name = id "menu" "alatar"
       cmd = "ghostty --title='Alatar' -e bash -lc 'exec $HOME/.alatar/bin/alatar'"
       place = "left"
+
     {}:
       label = "Wallpaper"
-      name = (id "menu" "wallpaper")
+      name = id "menu" "wallpaper"
       cmd = "open-wallpaper-switcher"
       place = "left"
+
     {}:
       label = "Monitor On/Off"
-      name = (id "menu" "monitors")
+      name = id "menu" "monitors"
       cmd = "foot /home/dneumann/.config/sway/scripts/monitors.sh pick"
       place = "left"
+
     {}:
       label = "Monitor Mode"
-      name = (id "menu" "recording-resolution")
+      name = id "menu" "recording-resolution"
       cmd = "/home/dneumann/.alatar/bin/toggle-main-monitor-resolution"
       place = "left"
+
     {}:
       label = "Float Rules"
-      name = (id "menu" "float-rules")
+      name = id "menu" "float-rules"
       cmd = "foot /home/dneumann/.config/sway/scripts/sway-float-rules"
       place = "left"
+
     {}:
       label = "Editor"
-      name = (id "menu" "editor")
+      name = id "menu" "editor"
       cmd = "$HOME/.nimble/bin/nest run $HOME/.workspace/nest/apps/duck"
       place = "right"
+
     {}:
       label = "Office"
-      name = (id "menu" "libreoffice")
+      name = id "menu" "libreoffice"
       cmd = "libreoffice"
       place = "right"
+
     {}:
       label = "Files"
-      name = (id "menu" "files")
+      name = id "menu" "files"
       cmd = "pcmanfm-qt"
       place = "right"
+
     {}:
       label = "Music"
-      name = (id "menu" "music")
+      name = id "menu" "music"
       cmd = "ghostty -e ncmpcpp"
       place = "right"
+
     {}:
       label = "Maindo"
-      name = (id "menu" "maindo")
+      name = id "menu" "maindo"
       cmd = "wish ~/.projects/maindo_tcl/main.tcl"
       place = "right"
+
     {}:
       label = "Library"
-      name = (id "menu" "library")
+      name = id "menu" "library"
       cmd = "pcmanfm $HOME/Documents/Library"
       place = "left"
+
     {}:
       label = "Perf Overlay"
-      name = (id "menu" "perf-overlay")
+      name = id "menu" "perf-overlay"
       cmd = "toggle-perf-overlay"
       place = "right"
+
     {}:
       label = "Btop"
-      name = (id "menu" "btop")
+      name = id "menu" "btop"
       cmd = "foot btop"
-      place = "middle"
+      place = "right"
+
     {}:
       label = "Logout"
-      name = (id "menu" "logout")
+      name = id "menu" "logout"
       cmd = "logout"
       place = "bottom"
 
     {}:
       label = "Shutdown"
-      name = (id "menu" "shutdown")
+      name = id "menu" "shutdown"
       cmd = "shutdown"
       place = "bottom"
+
     {}:
       label = "Reboot"
-      name = (id "menu" "reboot")
+      name = id "menu" "reboot"
       cmd = "reboot"
       place = "bottom"
-
-  opencodeInputID = (id "opencode" "input")
-  opencodeSubmitID = (id "opencode" "submit")
+  opencodeInputID = id "opencode" "input"
+  opencodeSubmitID = id "opencode" "submit"
+  opencodeNewSessionID = id "opencode" "new-session"
+  opencodeDeleteSessionID = id "opencode" "delete-session"
+  opencodeSessionSelectID = id "opencode" "session-select"
   opencodePrompt = ""
   opencodeResponse = ""
+  opencodeHistory = ""
   opencodeQueryKey = 0
   opencodeInputFocused = false
+  opencodeSessionID = ""
+  opencodeSessionIndex = 0
+  opencodeSessionOptions = []
+  opencodeSessionIDs = []
+  opencodeIsProcessing = false
+  opencodeStartTime = 0
+  opencodeElapsed = 0
+  opencodeDone = ""
+  pickedSessionIndex = nothing
+  responseLineIndex = 0
 
 fun opencodeQueryCommand message:
-  string "NO_COLOR=1 opencode run -m opencode/big-pickle -- " (shellQuote message) " 2>/dev/null"
+  define:
+    sessionFlag = pick
+      = opencodeSessionID ""
+      ""
+      string "-s " (shellQuote opencodeSessionID)
+
+  string
+    "NO_COLOR=1 opencode run -m opencode/big-pickle "
+    sessionFlag
+    " -- "
+    shellQuote message
+    " 2>/dev/null > /tmp/nest-opencode-"
+    opencodeQueryKey
+    ".txt; echo done > /tmp/nest-opencode-"
+    opencodeQueryKey
+    ".done"
+
+fun sessionListCommand:
+  string
+    "opencode session list 2>/dev/null | tail -n +3 | awk '{id=$1; $1=\"\"; sub(/^ /,\"\"); printf \"%s\\t%s\\n\", id, $0}'"
+
+fun deleteSessionCommand sid:
+  string "opencode session delete " (shellQuote sid) " 2>/dev/null"
+
+fun elapsedCommand startTime:
+  if (= startTime 0):
+    string "echo 0"
+  else:
+    string "echo $(( $(date +%s) - " startTime " ))"
+
+fun sessionRowOptions rows:
+  define:
+    result = list
+
+  for r (iter rows):
+    set result (listAppend result (tsvCell r 0 1))
+
+  result
+
+fun sessionRowIDs rows:
+  define:
+    result = list
+
+  for r (iter rows):
+    set result (listAppend result (tsvCell r 0 0))
+
+  result
+
+fun latest-line:
+  define:
+    lines = textLines opencodeResponse
+    count = length lines
+
+  if (= count 0):
+    ""
+  else:
+    nth lines (- count 1)
+
+fun thinking-line:
+  if (= opencodeResponse ""):
+    string "Thinking... (" opencodeElapsed "s)"
+  else:
+    string (latest-line) " (" opencodeElapsed "s)"
+
+fun prior-history:
+  if (= opencodeHistory ""):
+    list
+  else:
+    textLines opencodeHistory
+
+fun response-lines:
+  if (= opencodeResponse ""):
+    list
+  else:
+    textLines opencodeResponse
 
 events:
   when (keyPressed "escape"):
     requestCloseDialog ""
+
   when (not opencodeInputFocused):
     set opencodeInputFocused true
     focus opencodeInputID
+
   when (or (clicked opencodeSubmitID) (submitted opencodeInputID)):
     define:
-      query = (editorText opencodeInputID)
+      query = editorText opencodeInputID
+
     when (not (= query "")):
       setDialogPinned true
+      set
+        opencodeHistory
+        string
+          opencodeHistory
+          pick (= opencodeHistory "") "" "\n"
+          pick
+            = opencodePrompt ""
+            ""
+            string
+              "> "
+              opencodePrompt
+              pick (= opencodeResponse "") "" (string "\n\n" opencodeResponse)
       set opencodePrompt query
-      += opencodeQueryKey 1
+      set opencodeIsProcessing true
+      set opencodeStartTime (shell "date +%s")
+      set opencodeElapsed 0
       set opencodeResponse ""
-  for command (iter commands):
-    when (clicked command.name):
-      if (or (= command.cmd "toggle-perf-overlay") (= command.cmd "open-wallpaper-switcher") (= command.cmd "logout") (= command.cmd "shutdown") (= command.cmd "reboot")):
-        requestCloseDialog command.cmd
-      else:
-        shellLaunch command.cmd
-        requestCloseDialog command.name
+      += opencodeQueryKey 1
+      shellLaunch (opencodeQueryCommand query)
 
-when (not (= opencodePrompt "")):
-  set opencodeResponse (shellOnce (id "opencode" "query" opencodeQueryKey) (opencodeQueryCommand opencodePrompt))
+  when (clicked opencodeNewSessionID):
+    set opencodeSessionID ""
+    set opencodeSessionIndex 0
+
+  when (clicked opencodeDeleteSessionID):
+    when (not (= opencodeSessionID "")):
+      shell (deleteSessionCommand opencodeSessionID)
+      set opencodeSessionID ""
+      set opencodeSessionIndex 0
+
+  set
+    pickedSessionIndex
+    combobox opencodeSessionSelectID opencodeSessionIndex opencodeSessionOptions
+
+  when (not (= pickedSessionIndex nothing)):
+    set opencodeSessionIndex pickedSessionIndex
+
+    when (< pickedSessionIndex (length opencodeSessionIDs)):
+      set opencodeSessionID (nth opencodeSessionIDs pickedSessionIndex)
+
+set
+  opencodeSessionOptions
+  sessionRowOptions
+    textLines
+      shellAsync
+        id "opencode" "sessions"
+        (sessionListCommand)
+        StoragePollInterval
+set
+  opencodeSessionIDs
+  sessionRowIDs
+    textLines
+      shellAsync
+        id "opencode" "sessions"
+        (sessionListCommand)
+        StoragePollInterval
+
+when opencodeIsProcessing:
+  redrawAfter 500
+
+  when (not (= opencodeDone "")):
+    set opencodeIsProcessing false
+    set opencodeDone ""
+
+set
+  opencodeResponse
+  shellAsync
+    id "opencode" "query" opencodeQueryKey
+    string "cat /tmp/nest-opencode-" opencodeQueryKey ".txt 2>/dev/null"
+    FastPollInterval
+set
+  opencodeElapsed
+  shellAsync
+    id "opencode" "elapsed" opencodeQueryKey
+    elapsedCommand opencodeStartTime
+    FastPollInterval
+set
+  opencodeDone
+  shellAsync
+    id "opencode" "done" opencodeQueryKey
+    string "cat /tmp/nest-opencode-" opencodeQueryKey ".done 2>/dev/null"
+    FastPollInterval
+
+fun heading:
+  image (id "menu" "banner") "apps/layerShellBar/assets/nomicon.bmp":
+    width = fixed StartMenuBannerWidth
+    height = fixed StartMenuBannerHeight
+    alignSelf = Center
+
+  label (id "menu" "subtitle") "Launch application":
+    width = fit
+    height = fit
+    alignSelf = Center
+
+fun columns-row:
+  row (id "menu" "apps"):
+    width = fill
+    height = fill
+    gap = DialogSectionGap
+    alignItems = Stretch
+
+    column (id "menu" "left"):
+      width = fill
+      height = fit
+      gap = DialogGap
+      alignItems = Stretch
+
+      for cmd (iter commands):
+        when (= (field cmd "place") "left"):
+          button (field cmd "name") (field cmd "label"):
+            width = fill
+            height = fit
+
+          tooltip (field cmd "name") (field cmd "label")
+
+    column (id "menu" "right"):
+      width = fill
+      height = fit
+      gap = DialogGap
+      alignItems = Stretch
+
+      for cmd (iter commands):
+        when (= (field cmd "place") "right"):
+          button (field cmd "name") (field cmd "label"):
+            width = fill
+            height = fit
+
+          tooltip (field cmd "name") (field cmd "label")
+
+fun columns:
+  column (id "left container"):
+    width = fill
+    height = fill
+    gap = 32
+    heading
+    columns-row
+    middle
+    bottom
+
+fun middle:
+  column (id "menu" "middle"):
+    width = fill
+    height = fit
+    gap = DialogGap
+    alignItems = Center
+    justifyContent = Center
+
+    for cmd (iter commands):
+      when (= (field cmd "place") "middle"):
+        button (field cmd "name") (field cmd "label"):
+          width = fill
+          height = fit
+
+        tooltip (field cmd "name") (field cmd "label")
+
+fun bottom:
+  row (id "menu" "bottom"):
+    width = fill
+    height = fit
+    gap = DialogGap
+    alignItems = Center
+    justifyContent = Center
+
+    for cmd (iter commands):
+      when (= (field cmd "place") "bottom"):
+        button (field cmd "name") (field cmd "label"):
+          width = fixed StartMenuPowerButtonWidth
+          height = fit
+
+        tooltip (field cmd "name") (field cmd "label")
+
+fun opencode:
+  column (id "opencode" "column"):
+    width = fill
+    height = fill
+    gap = DialogSectionGap
+    alignItems = Stretch
+
+    label (id "opencode" "title") "What can I do for you?":
+      width = fill
+      height = fit
+
+    row (id "opencode" "session-row"):
+      width = fill
+      height = fit
+      gap = DialogGap
+      alignItems = Center
+
+      combobox
+        opencodeSessionSelectID
+        opencodeSessionIndex
+        opencodeSessionOptions:
+        width = fill
+        height = fit
+
+      tooltip opencodeSessionSelectID "Switch session"
+
+      button opencodeNewSessionID "New":
+        width = fit
+        height = fit
+
+      tooltip opencodeNewSessionID "New session"
+
+      if (not (= opencodeSessionID "")):
+        button opencodeDeleteSessionID "Del":
+          width = fit
+          height = fit
+
+        tooltip opencodeDeleteSessionID "Delete session"
+
+    row (id "opencode" "input-row"):
+      width = fill
+      height = fit
+      gap = DialogGap
+      alignItems = Center
+
+      lineInput opencodeInputID "":
+        width = fill
+        height = fixed NetworkInputHeight
+
+      button opencodeSubmitID "Send":
+        width = fit
+        height = fit
+
+      tooltip opencodeSubmitID "Ask OpenCode"
+
+    column (id "opencode" "response-scroll"):
+      width = fill
+      height = fill
+      gap = DialogGap
+      scrollY = true
+      set responseLineIndex 0
+
+      for line (iter (prior-history)):
+        when (not (= line "")):
+          label (id "opencode" "history" responseLineIndex) line:
+            width = fill
+            height = fit
+            opacity = DialogMutedOpacity
+
+        += responseLineIndex 1
+
+      when (not (= opencodePrompt "")):
+        label (id "opencode" "prompt") (string "> " opencodePrompt):
+          width = fill
+          height = fit
+
+        += responseLineIndex 1
+
+      if opencodeIsProcessing:
+        label (id "opencode" "thinking-line") (thinking-line):
+          width = fill
+          height = fit
+          opacity = DialogMutedOpacity
+      else:
+        for line (iter (response-lines)):
+          when (not (= line "")):
+            label (id "opencode" "response" responseLineIndex) line:
+              width = fill
+              height = fit
+
+          += responseLineIndex 1
 
 animation (id "menu" "panel") (not (dialogClosing?)):
   duration = DialogAnimationDuration
@@ -131,6 +485,7 @@ animation (id "menu" "panel") (not (dialogClosing?)):
   maxOpacity = 0.95
   fromScale = DialogAnimationFromScale
   offsetY = 6
+
   card (id "menu" "panel"):
     width = fill
     height = fill
@@ -140,90 +495,10 @@ animation (id "menu" "panel") (not (dialogClosing?)):
     background = color 0 0 0
     opacity = 1
     padding = 64
-    image (id "menu" "banner") "apps/layerShellBar/assets/nomicon.bmp":
-      width = fixed StartMenuBannerWidth
-      height = fixed StartMenuBannerHeight
-      alignSelf = Center
-    label (id "menu" "subtitle") "Launch application":
-      width = fit
-      height = fit
-      alignSelf = Center
-    row (id "menu" "apps"):
+
+    row (id "left row"):
       width = fill
       height = fill
-      gap = DialogSectionGap
-      alignItems = Stretch
-      column (id "menu" "left"):
-        width = fill
-        height = fit
-        gap = DialogGap
-        alignItems = Stretch
-        for cmd (iter commands):
-          when (= cmd.place "left"):
-            button cmd.name cmd.label:
-              width = fill
-              height = fit
-            tooltip cmd.name cmd.label
-      column (id "menu" "right"):
-        width = fill
-        height = fit
-        gap = DialogGap
-        alignItems = Stretch
-        for cmd (iter commands):
-          when (= cmd.place "right"):
-            button cmd.name cmd.label:
-              width = fill
-              height = fit
-            tooltip cmd.name cmd.label
-      column (id "opencode" "column"):
-        width = fill
-        height = fill
-        gap = DialogSectionGap
-        alignItems = Stretch
-        label (id "opencode" "title") "OpenCode":
-          width = fill
-          height = fit
-        row (id "opencode" "input-row"):
-          width = fill
-          height = fit
-          gap = DialogGap
-          alignItems = Center
-          lineInput opencodeInputID "":
-            width = fill
-            height = fixed NetworkInputHeight
-          button opencodeSubmitID "Send":
-            width = fit
-            height = fit
-          tooltip opencodeSubmitID "Ask OpenCode"
-        column (id "opencode" "response-scroll"):
-          width = fill
-          height = fill
-          scrollY = true
-          label (id "opencode" "response") (pick (= opencodeResponse "") (pick (= opencodePrompt "") "Type a message and press Send" "Thinking...") opencodeResponse):
-            width = fill
-            height = fixed 240
-            textScroll = true
-    column (id "menu" "middle"):
-      width = fill
-      height = fit
-      gap = DialogGap
-      alignItems = Center
-      justifyContent = Center
-      for cmd (iter commands):
-        when (= cmd.place "middle"):
-          button cmd.name cmd.label:
-            width = fill
-            height = fit
-          tooltip cmd.name cmd.label
-    row (id "menu" "bottom"):
-      width = fill
-      height = fit
-      gap = DialogGap
-      alignItems = Center
-      justifyContent = Center
-      for cmd (iter commands):
-        when (= cmd.place "bottom"):
-          button cmd.name cmd.label:
-            width = fixed StartMenuPowerButtonWidth
-            height = fit
-          tooltip cmd.name cmd.label
+      gap = 32
+      columns
+      opencode

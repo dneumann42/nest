@@ -1,11 +1,11 @@
 import "variables.owl"
 
 state "root":
-  startID = (id "start")
-  clockID = (id "clock")
+  startID = id "start"
+  clockID = id "clock"
   lastAction = ""
 
-fun startMenu lbl:  
+fun startMenu lbl:
   imageButton startID "apps/layerShellBar/assets/nomicon-small.bmp":
     width = fixed BarIconSize
     height = fixed BarIconSize
@@ -18,6 +18,7 @@ fun startMenu lbl:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip startID "Start"
 
 fun dateTime:
@@ -35,6 +36,7 @@ fun dateTime:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip clockID "Calendar"
 
 fun defaultConfig:
@@ -60,29 +62,48 @@ import "components/tray.owl"
 
 events:
   when (external "sigusr1"):
-    toggleDialog "start" "./startPopover" (dict-get cfg "start-label") startID (dialogAutoDismissOptions)
+    toggleDialog
+      "start"
+      "./startPopover"
+      dict-get cfg "start-label"
+      startID
+      (dialogAutoDismissOptions)
+
   when (and (clicked startID) (not (dialogOpen? "start"))):
-    openDialog "start" "./startPopover" (dict-get cfg "start-label") startID (dialogAutoDismissOptions)
+    openDialog
+      "start"
+      "./startPopover"
+      dict-get cfg "start-label"
+      startID
+      (dialogAutoDismissOptions)
+
   when (and (clicked clockID) (not (dialogOpen? "clock"))):
     openDialog "clock" "./clock" "" clockID (dialogAutoDismissOptions)
+
   when (not (= (dialogResult "start") nothing)):
     set lastAction (dialogResult "start")
     clearDialogResult "start"
+
   when (= lastAction "toggle-perf-overlay"):
     togglePerfOverlay
     set lastAction ""
+
   when (= lastAction "open-wallpaper-switcher"):
     shellLaunch (wallpaperSwitcherCommand)
     set lastAction ""
+
   when (= lastAction "run-system-updates"):
     shellLaunch (systemUpdateCommand)
     set lastAction ""
+
   when (= lastAction "logout"):
     shellLaunch "loginctl terminate-session"
     set lastAction ""
+
   when (= lastAction "shutdown"):
     shellLaunch "systemctl poweroff"
     set lastAction ""
+
   when (= lastAction "reboot"):
     shellLaunch "systemctl reboot"
     set lastAction ""
@@ -91,7 +112,7 @@ column (id "root"):
   width = fill
   height = fill
   alignItems = Stretch
-  
+
   panel (id "bar"):
     width = fill
     height = fixed BarHeight
@@ -99,12 +120,12 @@ column (id "root"):
     alignItems = Stretch
     background = theme-color "panel"
     opacity = BarOpacity
-    
+
     overlay (id "content"):
       width = fill
       height = fill
       alignItems = Center
-    
+
       row (id "left"):
         width = fill
         height = fill
@@ -112,11 +133,10 @@ column (id "root"):
         alignItems = Center
         alignSelf = Stretch
         justifyContent = Start
-
         startMenu (dict-get cfg "start-label")
         workspaces "bar"
         activeWindow "bar"
-      
+
       row (id "right"):
         width = fill
         height = fill
@@ -124,7 +144,6 @@ column (id "root"):
         alignItems = Center
         justifyContent = End
         alignSelf = Stretch
-
         trayWidget "bar"
         volumeWidget "bar"
         notificationWidget "bar"
@@ -141,5 +160,4 @@ column (id "root"):
         alignItems = Center
         justifyContent = Center
         alignSelf = Stretch
-
         dateTime

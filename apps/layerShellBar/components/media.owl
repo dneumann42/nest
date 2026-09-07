@@ -10,11 +10,28 @@ fun mediaQuery key command:
   shellAsync key (mediaPlayerCommand command) FastPollInterval
 
 fun mediaCachedValue cacheName fallback:
-  shell (string (mediaTool) " cache " (shellQuote cacheName) " " (shellQuote fallback))
+  shell
+    string
+      (mediaTool)
+      " cache "
+      shellQuote cacheName
+      " "
+      shellQuote fallback
 
 fun mediaCachedQuery key cacheName command fallback:
   define:
-    value = (shellAsync key (string (mediaTool) " cached " (shellQuote cacheName) " " (shellQuote fallback) " " command) FastPollInterval)
+    value = shellAsync
+      key
+      string
+        (mediaTool)
+        " cached "
+        shellQuote cacheName
+        " "
+        shellQuote fallback
+        " "
+        command
+      FastPollInterval
+
   if (= value ""):
     fallback
   else:
@@ -28,31 +45,40 @@ fun mediaSeekCommand value:
 
 fun mediaArtwork key:
   define:
-    value = (shellAsync key (string (mediaTool) " artwork") FastPollInterval)
+    value = shellAsync key (string (mediaTool) " artwork") FastPollInterval
+
   value
 
 fun mediaLengthSeconds key:
-  mediaQuery key "metadata --format '{{mpris:length}}' 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1 / 1000000; else printf \"0\" }'"
+  mediaQuery
+    key
+    "metadata --format '{{mpris:length}}' 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1 / 1000000; else printf \"0\" }'"
 
 fun mediaPositionSeconds key:
-  mediaQuery key "position 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1; else printf \"0\" }'"
+  mediaQuery
+    key
+    "position 2>/dev/null | awk '{ if ($1 ~ /^[0-9.]+$/) printf \"%.3f\", $1; else printf \"0\" }'"
 
 fun mediaMetadataRow key labelText valueText:
   tableRow (id key "metadata" labelText):
     width = fill
-    height = (fixed MediaMetadataRowHeight)
+    height = fixed MediaMetadataRowHeight
     alignItems = Center
+
     tableCell (id key "metadata-label-cell" labelText):
-      width = (fixed MediaMetadataLabelWidth)
+      width = fixed MediaMetadataLabelWidth
       height = fill
       padding = MediaMetadataPadding
+
       label (id key "metadata-label" labelText) labelText:
         width = fill
         height = fit
+
     tableCell (id key "metadata-value-cell" labelText):
       width = fill
       height = fill
       padding = MediaMetadataPadding
+
       label (id key "metadata-value" labelText) valueText:
         width = fill
         height = fit

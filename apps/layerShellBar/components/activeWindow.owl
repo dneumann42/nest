@@ -2,18 +2,20 @@ import "../variables.owl"
 
 widget activeWindow key:
   define:
-    keyText = (eval key)
-    title = (swayActiveWindowSubscription (id keyText "active-window-query"))
-    displayTitle = (pick (= title "") IconWindow (string IconWindow " " title))
+    keyText = eval key
+    title = swayActiveWindowSubscription (id keyText "active-window-query")
+    displayTitle = pick (= title "") IconWindow (string IconWindow " " title)
 
   row (id keyText "active-window"):
     width = fixed ActiveWindowWidth
     height = fixed BarWidgetHeight
     alignItems = Center
+
     label (id keyText "active-window" "title") displayTitle:
       width = fill
       height = fit
       fontName = BarIconFontName
       fontSize = BarIconFontSize
       textScroll = true
+
   tooltip (id keyText "active-window") (pick (= title "") "Active window" title)

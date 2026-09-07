@@ -1,13 +1,17 @@
 import "../variables.owl"
 
 fun updateCountCommand:
-  string "state=${XDG_STATE_HOME:-$HOME/.local/state}/alatar/pacman-updates.count; if [ -r \"$state\" ]; then cat \"$state\"; else printf '?'; fi"
+  string
+    "state=${XDG_STATE_HOME:-$HOME/.local/state}/alatar/pacman-updates.count; if [ -r \"$state\" ]; then cat \"$state\"; else printf '?'; fi"
 
 widget updateWidget key:
   define:
-    keyText = (eval key)
-    buttonID = (id keyText "updates")
-    count = (shellAsync (id keyText "update-count") (updateCountCommand) StoragePollInterval)
+    keyText = eval key
+    buttonID = id keyText "updates"
+    count = shellAsync
+      id keyText "update-count"
+      (updateCountCommand)
+      StoragePollInterval
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "updates"))):
@@ -28,15 +32,17 @@ widget updateWidget key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip buttonID "System updates"
 
 fun protonDriveSyncCommand:
-  string "ghostty --title='Proton Drive Sync' -e bash -lc 'exec $HOME/.alatar/bin/proton-drive-sync'"
+  string
+    "ghostty --title='Proton Drive Sync' -e bash -lc 'exec $HOME/.alatar/bin/proton-drive-sync'"
 
 widget protonDriveSyncWidget key:
   define:
-    keyText = (eval key)
-    buttonID = (id keyText "proton-drive-sync")
+    keyText = eval key
+    buttonID = id keyText "proton-drive-sync"
 
   events:
     when (clicked buttonID):
@@ -56,4 +62,5 @@ widget protonDriveSyncWidget key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip buttonID "Proton Drive Sync"

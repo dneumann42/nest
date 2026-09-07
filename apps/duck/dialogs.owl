@@ -4,9 +4,11 @@ fun labeledInput rowID labelText inputID initialText:
     height = fit
     gap = 8
     alignItems = Center
+
     label (id rowID "label") labelText:
       width = fixed 96
       height = fit
+
     lineInput inputID initialText:
       width = fill
       height = fixed 30
@@ -27,21 +29,27 @@ fun findDialog:
     gap = 10
     alignItems = Stretch
     background = color 30 30 30
+
     dialogHeader (id "duck" "find" "header"):
       width = fill
       height = fit
       padding = 6
+
       label (id "duck" "find" "title") "Find":
         width = fill
         height = fit
+
     labeledInput (id "duck" "find" "row") "Find what:" findInputID ""
+
     checkbox (id "duck" "find" "match") "Match case" matchCase:
       width = fit
       height = fit
+
     actionRow (id "duck" "find" "actions"):
       button findNextID "Find Next":
         width = fixed 100
         height = fit
+
       button findCloseID "Cancel":
         width = fixed 82
         height = fit
@@ -54,25 +62,40 @@ fun replaceDialog:
     gap = 10
     alignItems = Stretch
     background = color 30 30 30
+
     dialogHeader (id "duck" "replace" "header"):
       width = fill
       height = fit
       padding = 6
+
       label (id "duck" "replace" "title") "Replace":
         width = fill
         height = fit
-    labeledInput (id "duck" "replace" "findrow") "Find what:" replaceFindInputID ""
-    labeledInput (id "duck" "replace" "withrow") "Replace with:" replaceWithInputID ""
+
+    labeledInput
+      id "duck" "replace" "findrow"
+      "Find what:"
+      replaceFindInputID
+      ""
+    labeledInput
+      id "duck" "replace" "withrow"
+      "Replace with:"
+      replaceWithInputID
+      ""
+
     actionRow (id "duck" "replace" "actions"):
       button replaceNextID "Find Next":
         width = fixed 96
         height = fit
+
       button replaceOneID "Replace":
         width = fixed 88
         height = fit
+
       button replaceAllID "Replace All":
         width = fixed 110
         height = fit
+
       button replaceCloseID "Cancel":
         width = fixed 80
         height = fit
@@ -85,18 +108,23 @@ fun gotoDialog:
     gap = 10
     alignItems = Stretch
     background = color 30 30 30
+
     dialogHeader (id "duck" "goto" "header"):
       width = fill
       height = fit
       padding = 6
+
       label (id "duck" "goto" "title") "Go To Line":
         width = fill
         height = fit
+
     labeledInput (id "duck" "goto" "row") "Line number:" gotoInputID "1"
+
     actionRow (id "duck" "goto" "actions"):
       button gotoButtonID "Go To":
         width = fixed 82
         height = fit
+
       button gotoCloseID "Cancel":
         width = fixed 82
         height = fit
@@ -109,24 +137,32 @@ fun aboutDialog:
     gap = 0
     alignItems = Stretch
     background = color 30 30 30
+
     dialogHeader (id "duck" "about" "header"):
       width = fill
       height = fit
       padding = 6
+
       label (id "duck" "about" "title") "About Duck":
         width = fill
         height = fit
+
     column (id):
       width = fill
       height = fill
       padding = 12
       gap = 20
+
       label (id "duck" "about" "body") "Duck Editor v0.0.0":
         width = fill
         height = fit
-      label (id "duck" "about" "features") "Text editor written in owl using nest":
+
+      label
+        id "duck" "about" "features"
+        "Text editor written in owl using nest":
         width = fill
         height = fit
+
       actionRow (id "duck" "about" "actions"):
         button aboutCloseID "OK":
           width = fixed 82

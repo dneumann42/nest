@@ -4,13 +4,12 @@ define:
   MediaPollInterval = 2000
   StoragePollInterval = 8000
   NoSpacing = 0
-
   BarHeight = 30
   BarOpacity = 0.8
   BarPadding = 4
   BarWidgetHeight = - BarHeight (* BarPadding 2)
   BarWidgetRadius = 8
-  BarWidgetShadowColor = (color 0 0 0 90)
+  BarWidgetShadowColor = color 0 0 0 90
   BarWidgetShadowOffsetX = 0
   BarWidgetShadowOffsetY = 2
   BarWidgetShadowBlur = 6
@@ -22,10 +21,13 @@ define:
   BarWidgetPaddingAll = 0
   BarWidgetPaddingX = 8
   BarWidgetPaddingY = 0
-  BarWidgetPadding = (insets (+ BarWidgetPaddingX BarWidgetPaddingAll) (+ BarWidgetPaddingY BarWidgetPaddingAll) (+ BarWidgetPaddingX BarWidgetPaddingAll) (+ BarWidgetPaddingY BarWidgetPaddingAll))
+  BarWidgetPadding = insets
+    + BarWidgetPaddingX BarWidgetPaddingAll
+    + BarWidgetPaddingY BarWidgetPaddingAll
+    + BarWidgetPaddingX BarWidgetPaddingAll
+    + BarWidgetPaddingY BarWidgetPaddingAll
   BarLeftGap = 14
   BarRightGap = 8
-
   DialogPadding = 8
   DialogPaddingWide = 8
   DialogGap = 8
@@ -42,23 +44,19 @@ define:
   DialogAnimationDuration = 250
   DialogAnimationFromScale = 0.5
   DialogDismissGraceMs = 350
-
   ActiveWindowWidth = 200
   WorkspaceGap = 1
   WorkspaceEmptyWidth = 24
-
   MetricCpuWidth = 100
   MetricMemoryWidth = 150
   MetricStorageWidth = 100
   MetricNetworkWidth = 120
-
   NetworkRowGap = 4
   NetworkRowHeight = BarHeight
   NetworkInputHeight = BarHeight
   NetworkConnectButtonWidth = 92
   NetworkActionButtonWidth = 70
   NetworkSelectedOpacity = 0.95
-
   MediaBarButtonWidth = 28
   MediaBarArtSize = BarWidgetHeight
   MediaBarTitleWidth = 150
@@ -74,21 +72,17 @@ define:
   MediaMetadataRowHeight = BarHeight
   MediaMetadataLabelWidth = 88
   MediaMetadataPadding = 7
-
   VolumeMax = 150
   VolumeBodyGap = 12
   VolumeSmallButtonWidth = 48
   VolumeMuteButtonWidth = 78
   VolumeSliderWidth = 46
-
   NotificationListGap = 4
   NotificationRowPadding = 8
-
   StartMenuPadding = 32
   StartMenuBannerWidth = 256
   StartMenuBannerHeight = 70
   StartMenuPowerButtonWidth = 116
-
   CalendarPadding = 8
   CalendarPopoverPadding = 16
   CalendarGap = 6
@@ -99,7 +93,6 @@ define:
   CalendarPopoverDayWidth = 42
   CalendarBlankHeight = BarHeight
   CalendarPopoverOpacity = 0.5
-
   IconCpu = ""
   IconMemory = ""
   IconDisk = ""

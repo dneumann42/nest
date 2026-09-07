@@ -6,8 +6,8 @@ state "tray":
 
 widget trayWidget key:
   define:
-    keyText = (eval key)
-    items = (trayItems)
+    keyText = eval key
+    items = trayItems
 
   set menuData (trayMenuData menuTarget)
 
@@ -23,36 +23,49 @@ widget trayWidget key:
     height = fixed BarWidgetHeight
     gap = WorkspaceGap
     alignItems = Center
+
     if (empty? items):
       label (id keyText "tray-empty") "":
-        width = (fixed 0)
+        width = fixed 0
         height = fixed BarWidgetHeight
     else:
       for item (iter items):
         define:
-          itemID = (id keyText "item" (dict-get item "id"))
-          iconPath = (dict-get item "iconPath")
-          iconPresent = (dict-get item "hasIcon")
-          itemTitle = (dict-get item "title")
-          attention = (dict-get item "needsAttention")
+          itemID = id keyText "item" (dict-get item "id")
+          iconPath = dict-get item "iconPath"
+          iconPresent = dict-get item "hasIcon"
+          itemTitle = dict-get item "title"
+          attention = dict-get item "needsAttention"
 
         events:
           when (clicked itemID):
             trayActivate (string (dict-get item "id"))
+
           when (middleClicked itemID):
             traySecondaryActivate (string (dict-get item "id"))
+
           when (rightClicked itemID):
             set menuTarget (string (dict-get item "id"))
             set menuData ""
             trayRequestMenu (string (dict-get item "id"))
-          when (and (= menuTarget (string (dict-get item "id"))) (not (= menuData "")) (not (dialogOpen? "tray-menu"))):
-            openDialog "tray-menu" "./trayMenu" menuData itemID (dialogAutoDismissOptions)
+
+          when
+            and
+              = menuTarget (string (dict-get item "id"))
+              not (= menuData "")
+              not (dialogOpen? "tray-menu"):
+            openDialog
+              "tray-menu"
+              "./trayMenu"
+              menuData
+              itemID
+              (dialogAutoDismissOptions)
 
         if iconPresent:
           imageButton itemID (string iconPath):
             width = fixed BarIconSize
             height = fixed BarIconSize
-            background = (pick attention (color 118 70 20) (color 0 0 0 0))
+            background = pick attention (color 118 70 20) (color 0 0 0 0)
             cornerStyle = "rounded"
             radius = BarWidgetRadius
             shadow = attention
@@ -68,7 +81,7 @@ widget trayWidget key:
             fontName = BarIconFontName
             fontSize = BarIconFontSize
             buttonPadding = BarWidgetPadding
-            background = (pick attention (color 118 70 20) (color 20 20 20))
+            background = pick attention (color 118 70 20) (color 20 20 20)
             cornerStyle = "rounded"
             radius = BarWidgetRadius
             shadow = attention

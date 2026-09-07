@@ -1,30 +1,42 @@
 import "../variables.owl"
 
 fun cpuCommand:
-  string "a=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); sleep 0.2; b=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); set -- $a $b; total=$(($3-$1)); idle=$(($4-$2)); if [ \"$total\" -gt 0 ]; then printf '%d%%' $(( (100 * (total - idle)) / total )); else printf '0%%'; fi"
+  string
+    "a=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); sleep 0.2; b=$(awk 'NR==1{print $2+$3+$4+$5+$6+$7+$8 \" \" $5+$6}' /proc/stat); set -- $a $b; total=$(($3-$1)); idle=$(($4-$2)); if [ \"$total\" -gt 0 ]; then printf '%d%%' $(( (100 * (total - idle)) / total )); else printf '0%%'; fi"
 
 fun memoryCommand:
-  string "awk 'function gb(kb){return kb/1024/1024} /^MemTotal:/ {total=$2} /^MemAvailable:/ {avail=$2} END {if (total > 0) printf \"%.1fG %d%%\", gb(total-avail), int(100*(total-avail)/total+0.5); else printf \"n/a\"}' /proc/meminfo"
+  string
+    "awk 'function gb(kb){return kb/1024/1024} /^MemTotal:/ {total=$2} /^MemAvailable:/ {avail=$2} END {if (total > 0) printf \"%.1fG %d%%\", gb(total-avail), int(100*(total-avail)/total+0.5); else printf \"n/a\"}' /proc/meminfo"
 
 fun storageCommand:
-  string "df -P / | awk 'NR==2 {printf \"%s\", $5} END {if (NR < 2) printf \"n/a\"}'"
+  string
+    "df -P / | awk 'NR==2 {printf \"%s\", $5} END {if (NR < 2) printf \"n/a\"}'"
 
 ; fun networkCommand key:
 ;   string "iface=$(awk '$2==\"00000000\" {print $1; exit}' /proc/net/route); if [ -z \"$iface\" ]; then printf 'offline'; exit 0; fi; rx=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || printf 0); tx=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || printf 0); now=$(date +%s); state=/tmp/nest-network-" key "; if [ -f \"$state\" ]; then read prx ptx pnow piface < \"$state\"; else prx=$rx; ptx=$tx; pnow=$now; piface=$iface; fi; printf '%s %s %s %s\n' \"$rx\" \"$tx\" \"$now\" \"$iface\" > \"$state\"; dt=$((now-pnow)); if [ \"$dt\" -le 0 ] || [ \"$piface\" != \"$iface\" ]; then down=0; up=0; else down=$(((rx-prx)/dt)); up=$(((tx-ptx)/dt)); fi; fmt(){ b=$1; if [ \"$b\" -lt 1024 ]; then printf '%dB' \"$b\"; elif [ \"$b\" -lt 1048576 ]; then awk -v b=\"$b\" 'BEGIN{printf \"%.1fK\", b/1024}'; elif [ \"$b\" -lt 1073741824 ]; then awk -v b=\"$b\" 'BEGIN{printf \"%.1fM\", b/1048576}'; else awk -v b=\"$b\" 'BEGIN{printf \"%.1fG\", b/1073741824}'; fi; }; printf '↓%s/s ↑%s/s' \"$(fmt $down)\" \"$(fmt $up)\""
 
 fun networkCommand key:
-  string "iface=$(awk '$2==\"00000000\"{print $1;exit}' /proc/net/route); [ -z \"$iface\" ] && { printf 'offline'; exit; }; rx=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || echo 0); tx=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || echo 0); now=$(date +%s); state=/tmp/nest-network-" key "; read prx ptx then oldiface < \"$state\" 2>/dev/null || { prx=$rx; ptx=$tx; then=$now; oldiface=$iface; }; printf '%s %s %s %s\n' \"$rx\" \"$tx\" \"$now\" \"$iface\" > \"$state\"; dt=$((now-then)); if [ \"$dt\" -gt 0 ] && [ \"$oldiface\" = \"$iface\" ]; then down=$(((rx-prx)/dt)); up=$(((tx-ptx)/dt)); else down=0; up=0; fi; fmt(){ awk -v n=\"$1\" 'BEGIN{split(\"B K M G\",u); i=1; while(n>=1024&&i<4){n/=1024;i++} if(i==1)printf \"%d%s\",n,u[i]; else printf \"%.1f%s\",n,u[i]}' | sed 's/\\.0//'; }; [ \"$down\" -gt 0 ] && printf '↓%s' \"$(fmt \"$down\")\"; [ \"$down\" -gt 0 ] && [ \"$up\" -gt 0 ] && printf ' '; [ \"$up\" -gt 0 ] && printf '↑%s' \"$(fmt \"$up\")\"; [ \"$down\" -eq 0 ] && [ \"$up\" -eq 0 ] && printf 'idle'"
+  string
+    "iface=$(awk '$2==\"00000000\"{print $1;exit}' /proc/net/route); [ -z \"$iface\" ] && { printf 'offline'; exit; }; rx=$(cat /sys/class/net/$iface/statistics/rx_bytes 2>/dev/null || echo 0); tx=$(cat /sys/class/net/$iface/statistics/tx_bytes 2>/dev/null || echo 0); now=$(date +%s); state=/tmp/nest-network-"
+    key
+    "; read prx ptx then oldiface < \"$state\" 2>/dev/null || { prx=$rx; ptx=$tx; then=$now; oldiface=$iface; }; printf '%s %s %s %s\n' \"$rx\" \"$tx\" \"$now\" \"$iface\" > \"$state\"; dt=$((now-then)); if [ \"$dt\" -gt 0 ] && [ \"$oldiface\" = \"$iface\" ]; then down=$(((rx-prx)/dt)); up=$(((tx-ptx)/dt)); else down=0; up=0; fi; fmt(){ awk -v n=\"$1\" 'BEGIN{split(\"B K M G\",u); i=1; while(n>=1024&&i<4){n/=1024;i++} if(i==1)printf \"%d%s\",n,u[i]; else printf \"%.1f%s\",n,u[i]}' | sed 's/\\.0//'; }; [ \"$down\" -gt 0 ] && printf '↓%s' \"$(fmt \"$down\")\"; [ \"$down\" -gt 0 ] && [ \"$up\" -gt 0 ] && printf ' '; [ \"$up\" -gt 0 ] && printf '↑%s' \"$(fmt \"$up\")\"; [ \"$down\" -eq 0 ] && [ \"$up\" -eq 0 ] && printf 'idle'"
 
-fun tint col-name:  
+fun tint col-name:
   mix-color
-    (mix-color (theme-color col-name) (color 200 200 200) 0.38) 
-    (color 0 0 0)
+    mix-color (theme-color col-name) (color 200 200 200) 0.38
+    color 0 0 0
     0.55
 
 widget cpuMeter key:
   define:
-    cpuID = (id (eval key) "cpu")
-  button cpuID (string IconCpu " " (shellAsync (id (eval key) "cpu-query") (cpuCommand) FastPollInterval)):
+    cpuID = id (eval key) "cpu"
+
+  button
+    cpuID
+    string
+      IconCpu
+      " "
+      shellAsync (id (eval key) "cpu-query") (cpuCommand) FastPollInterval:
     width = fixed MetricCpuWidth
     height = fixed BarWidgetHeight
     background = tint "primary"
@@ -40,12 +52,22 @@ widget cpuMeter key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip cpuID "CPU usage"
 
 widget memoryMeter key:
   define:
-    memoryID = (id (eval key) "memory")
-  button memoryID (string IconMemory " " (shellAsync (id (eval key) "memory-query") (memoryCommand) MediaPollInterval)):
+    memoryID = id (eval key) "memory"
+
+  button
+    memoryID
+    string
+      IconMemory
+      " "
+      shellAsync
+        id (eval key) "memory-query"
+        (memoryCommand)
+        MediaPollInterval:
     width = fixed MetricMemoryWidth
     height = fixed BarWidgetHeight
     background = tint "rose"
@@ -61,12 +83,22 @@ widget memoryMeter key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip memoryID "Memory usage"
 
 widget storageMeter key:
   define:
-    storageID = (id (eval key) "storage")
-  button storageID (string IconDisk " " (shellAsync (id (eval key) "storage-query") (storageCommand) StoragePollInterval)):
+    storageID = id (eval key) "storage"
+
+  button
+    storageID
+    string
+      IconDisk
+      " "
+      shellAsync
+        id (eval key) "storage-query"
+        (storageCommand)
+        StoragePollInterval:
     width = fixed MetricStorageWidth
     height = fixed BarWidgetHeight
     background = tint "mauve"
@@ -82,13 +114,17 @@ widget storageMeter key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip storageID "Disk usage"
 
 widget networkMeter key:
   define:
-    keyText = (eval key)
-    buttonID = (id keyText "network")
-    status = (shellAsync (id keyText "network-query") (networkCommand keyText) FastPollInterval)
+    keyText = eval key
+    buttonID = id keyText "network"
+    status = shellAsync
+      id keyText "network-query"
+      networkCommand keyText
+      FastPollInterval
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "network"))):
@@ -110,4 +146,5 @@ widget networkMeter key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip buttonID "Network throughput"

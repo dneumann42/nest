@@ -2,19 +2,20 @@ import "../variables.owl"
 
 widget dateSelector key target:
   define:
-    keyText = (eval key)
-    selected = (eval target)
-    year = (date-year selected)
-    month = (date-month selected)
-    firstWeekday = (date-first-weekday year month)
-    days = (date-days-in-month year month)
-    cellDay = (- 1 firstWeekday)
-    previousID = (id keyText "previous-month")
-    nextID = (id keyText "next-month")
+    keyText = eval key
+    selected = eval target
+    year = date-year selected
+    month = date-month selected
+    firstWeekday = date-first-weekday year month
+    days = date-days-in-month year month
+    cellDay = - 1 firstWeekday
+    previousID = id keyText "previous-month"
+    nextID = id keyText "next-month"
 
   events:
     when (clicked previousID):
       set (value-of target) (date-add-months selected -1)
+
     when (clicked nextID):
       set (value-of target) (date-add-months selected 1)
 
@@ -24,88 +25,110 @@ widget dateSelector key target:
     padding = CalendarPadding
     gap = CalendarGap
     alignItems = Stretch
+
     row (id keyText "calendar-header"):
       width = fill
       height = fit
       gap = CalendarGap
       alignItems = Center
+
       button previousID "<":
-        width = (fixed CalendarNavButtonWidth)
+        width = fixed CalendarNavButtonWidth
         height = fit
+
       tooltip previousID "Previous month"
+
       label (id keyText "calendar-title") (date-month-title year month):
         width = fill
         height = fit
+
       button nextID ">":
-        width = (fixed CalendarNavButtonWidth)
+        width = fixed CalendarNavButtonWidth
         height = fit
+
       tooltip nextID "Next month"
+
     row (id keyText "calendar-weekdays"):
       width = fill
       height = fit
       gap = CalendarWeekGap
+
       label (id keyText "weekday" 0) "Su":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
       label (id keyText "weekday" 1) "Mo":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
       label (id keyText "weekday" 2) "Tu":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
       label (id keyText "weekday" 3) "We":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
       label (id keyText "weekday" 4) "Th":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
       label (id keyText "weekday" 5) "Fr":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
       label (id keyText "weekday" 6) "Sa":
-        width = (fixed CalendarWeekdayWidth)
+        width = fixed CalendarWeekdayWidth
         height = fit
+
     for week (range 0 6):
       row (id keyText "week" week):
         width = fill
         height = fit
         gap = CalendarWeekGap
+
         for weekday (range 0 7):
           if (and (>= cellDay 1) (<= cellDay days)):
             define:
-              dayID = (id keyText "day" cellDay)
-              cellDate = (date year month cellDay)
+              dayID = id keyText "day" cellDay
+              cellDate = date year month cellDay
+
             events:
               when (clicked dayID):
                 set (value-of target) cellDate
+
             button dayID cellDay:
-              width = (fixed CalendarDayWidth)
+              width = fixed CalendarDayWidth
               height = fit
+
             tooltip dayID (string "Select " cellDate)
             else:
               spacer (id keyText "blank" week weekday):
-                width = (fixed CalendarDayWidth)
-                height = (fixed CalendarBlankHeight)
+                width = fixed CalendarDayWidth
+                height = fixed CalendarBlankHeight
+
           += cellDay 1
+
     label (id keyText "selected-date") selected:
       width = fill
       height = fit
 
 widget dateSelectorWithSignal key target clickedTarget:
   define:
-    keyText = (eval key)
-    selected = (eval target)
-    year = (date-year selected)
-    month = (date-month selected)
-    firstWeekday = (date-first-weekday year month)
-    days = (date-days-in-month year month)
-    cellDay = (- 1 firstWeekday)
-    previousID = (id keyText "previous-month")
-    nextID = (id keyText "next-month")
+    keyText = eval key
+    selected = eval target
+    year = date-year selected
+    month = date-month selected
+    firstWeekday = date-first-weekday year month
+    days = date-days-in-month year month
+    cellDay = - 1 firstWeekday
+    previousID = id keyText "previous-month"
+    nextID = id keyText "next-month"
 
   events:
     when (clicked previousID):
       set (value-of target) (date-add-months selected -1)
+
     when (clicked nextID):
       set (value-of target) (date-add-months selected 1)
 
@@ -117,72 +140,94 @@ widget dateSelectorWithSignal key target clickedTarget:
     alignItems = Stretch
     background = color 0 0 0
     opacity = CalendarPopoverOpacity
+
     row (id keyText "calendar-header"):
       width = fill
       height = fit
       gap = CalendarGap
       alignItems = Center
+
       button previousID "<":
-        width = (fixed CalendarNavButtonWidth)
+        width = fixed CalendarNavButtonWidth
         height = fit
+
       tooltip previousID "Previous month"
+
       label (id keyText "calendar-title") (date-month-title year month):
         width = fill
         height = fit
+
       button nextID ">":
-        width = (fixed CalendarNavButtonWidth)
+        width = fixed CalendarNavButtonWidth
         height = fit
+
       tooltip nextID "Next month"
+
     define:
       bw = CalendarPopoverDayWidth
+
     row (id keyText "calendar-weekdays"):
       width = fill
       height = fit
       gap = CalendarWeekGap
+
       label (id keyText "weekday" 0) "Su":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
       label (id keyText "weekday" 1) "Mo":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
       label (id keyText "weekday" 2) "Tu":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
       label (id keyText "weekday" 3) "We":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
       label (id keyText "weekday" 4) "Th":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
       label (id keyText "weekday" 5) "Fr":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
       label (id keyText "weekday" 6) "Sa":
-        width = (fixed bw)
+        width = fixed bw
         height = fit
+
     for week (range 0 6):
       row (id keyText "week" week):
         width = fill
         height = fit
         gap = CalendarWeekGap
+
         for weekday (range 0 7):
           if (and (>= cellDay 1) (<= cellDay days)):
             define:
-              dayID = (id keyText "day" cellDay)
-              cellDate = (date year month cellDay)
+              dayID = id keyText "day" cellDay
+              cellDate = date year month cellDay
+
             events:
               when (clicked dayID):
                 set (value-of target) cellDate
                 set (value-of clickedTarget) cellDate
+
             button dayID cellDay:
-              width = (fixed bw)
+              width = fixed bw
               height = fit
+
             tooltip dayID (string "Select " cellDate)
             else:
               spacer (id keyText "blank" week weekday):
-                width = (fixed bw)
-                height = (fixed CalendarBlankHeight)
+                width = fixed bw
+                height = fixed CalendarBlankHeight
+
           += cellDay 1
+
     label (id keyText "selected-date") selected:
       width = fill
       height = fit

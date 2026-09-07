@@ -1,6 +1,16 @@
-
 use search:
-  include textReplaceAllFrom textReplaceAll openFindDialog openReplaceDialog findFrom findNextWith findNext replaceCurrent replaceAll gotoLine timeDate
+  include
+    textReplaceAllFrom
+    textReplaceAll
+    openFindDialog
+    openReplaceDialog
+    findFrom
+    findNextWith
+    findNext
+    replaceCurrent
+    replaceAll
+    gotoLine
+    timeDate
 
 use menu:
   include handleMenuAction duckMenuBar
@@ -9,28 +19,41 @@ use dialogs:
   include labeledInput actionRow findDialog replaceDialog gotoDialog aboutDialog
 
 use editorWorkspace:
-  include leafPane splitPane clonePaneTree firstPaneID paneCount paneEditorID paneBufferKey setPaneBuffer replaceBuffer splitLeaf unsplitLeaf editorTree editorWorkspace
+  include
+    leafPane
+    splitPane
+    clonePaneTree
+    firstPaneID
+    paneCount
+    paneEditorID
+    paneBufferKey
+    setPaneBuffer
+    replaceBuffer
+    splitLeaf
+    unsplitLeaf
+    editorTree
+    editorWorkspace
 
 use appShell:
   include duckStatusBar duckAppShell
 
 state "root":
   rootID = id
-  menuID = (id "duck" "menubar")
-  tabBarID = (id "duck" "tabs")
-  findInputID = (id "duck" "find" "input")
-  replaceFindInputID = (id "duck" "replace" "find")
-  replaceWithInputID = (id "duck" "replace" "with")
-  gotoInputID = (id "duck" "goto" "line")
-  findNextID = (id "duck" "find" "next")
-  findCloseID = (id "duck" "find" "close")
-  replaceNextID = (id "duck" "replace" "next")
-  replaceOneID = (id "duck" "replace" "one")
-  replaceAllID = (id "duck" "replace" "all")
-  replaceCloseID = (id "duck" "replace" "close")
-  gotoButtonID = (id "duck" "goto" "go")
-  gotoCloseID = (id "duck" "goto" "close")
-  aboutCloseID = (id "duck" "about" "close")
+  menuID = id "duck" "menubar"
+  tabBarID = id "duck" "tabs"
+  findInputID = id "duck" "find" "input"
+  replaceFindInputID = id "duck" "replace" "find"
+  replaceWithInputID = id "duck" "replace" "with"
+  gotoInputID = id "duck" "goto" "line"
+  findNextID = id "duck" "find" "next"
+  findCloseID = id "duck" "find" "close"
+  replaceNextID = id "duck" "replace" "next"
+  replaceOneID = id "duck" "replace" "one"
+  replaceAllID = id "duck" "replace" "all"
+  replaceCloseID = id "duck" "replace" "close"
+  gotoButtonID = id "duck" "goto" "go"
+  gotoCloseID = id "duck" "goto" "close"
+  aboutCloseID = id "duck" "about" "close"
   menuAction = nothing
   pickedFile = ""
   statusText = "Ready"
@@ -68,37 +91,42 @@ fun activeText:
   editorText (activeEditorID)
 
 fun bufferDirtyAt index buffer:
-  not (= (editorText buffer.key) buffer.savedText)
+  not (= (editorText (field buffer "key")) (field buffer "savedText"))
 
 fun bufferTitle index buffer:
   if (bufferDirtyAt index buffer):
-    string "*" buffer.name
+    string "*" (field buffer "name")
   else:
-    buffer.name
+    field buffer "name"
 
 fun bufferLabels source:
   define:
     labels = list
     bufferIndex = 0
+
   for buffer (iter source):
     set labels (listAppend labels (bufferTitle bufferIndex buffer))
     += bufferIndex 1
+
   labels
 
 fun bufferIndexForKey source key index:
   cond:
     when (empty? source):
       -1
-    when (= (first source).key key):
+
+    when (= (field (first source) "key") key):
       index
+
     when true:
       bufferIndexForKey (rest source) key (+ index 1)
 
 fun bufferNameForKey key:
   define:
-    foundIndex = (bufferIndexForKey buffers key 0)
+    foundIndex = bufferIndexForKey buffers key 0
+
   if (>= foundIndex 0):
-    (nth buffers foundIndex).name
+    field (nth buffers foundIndex) "name"
   else:
     "Closed buffer"
 
@@ -117,22 +145,25 @@ fun timeDateStamp:
 fun clampActiveBuffer:
   when (empty? buffers):
     newBuffer
+
   when (>= activeBuffer (length buffers)):
     set activeBuffer (- (length buffers) 1)
+
   when (< activeBuffer 0):
     set activeBuffer 0
 
 fun newBuffer:
   define:
     createdBuffer = {}:
-      key = (string "duck:buffer:" nextBuffer)
+      key = string "duck:buffer:" nextBuffer
       path = ""
-      name = (string "Untitled " nextBuffer)
+      name = string "Untitled " nextBuffer
       savedText = ""
+
   set buffers (listAppend buffers createdBuffer)
   set activeBuffer (- (length buffers) 1)
   += nextBuffer 1
-  send "duck.editor.switch-buffer" createdBuffer.key
+  send "duck.editor.switch-buffer" (field createdBuffer "key")
   clearEditor (activeEditorID)
   set statusText "New document"
 
@@ -140,54 +171,61 @@ fun openFileInEditor path:
   define:
     openedContent = ""
     openedBuffer = {}:
-      key = (string "duck:buffer:" nextBuffer)
+      key = string "duck:buffer:" nextBuffer
       path = path
-      name = (pathBaseName path)
+      name = pathBaseName path
       savedText = ""
+
   with (open-file path "rb") stream:
     set openedContent (read-all stream)
-  set openedBuffer.savedText openedContent
+
+  set (field openedBuffer "savedText") openedContent
   set buffers (listAppend buffers openedBuffer)
   set activeBuffer (- (length buffers) 1)
   += nextBuffer 1
-  send "duck.editor.switch-buffer" openedBuffer.key
+  send "duck.editor.switch-buffer" (field openedBuffer "key")
   setEditorText (activeEditorID) openedContent
   set statusText (string "Opened " path)
 
 fun saveActiveBufferAs path:
   define:
-    content = (activeText)
+    content = activeText
+
   with (open-file path "wb") stream:
     write stream content
-  set buffers.[activeBuffer].path path
-  set buffers.[activeBuffer].name (pathBaseName path)
-  set buffers.[activeBuffer].savedText content
+
+  set (field (index buffers (activeBuffer)) "path") path
+  set (field (index buffers (activeBuffer)) "name") (pathBaseName path)
+  set (field (index buffers (activeBuffer)) "savedText") content
   set statusText (string "Saved " path)
 
 fun saveActiveBuffer:
-  if (= buffers.[activeBuffer].path ""):
+  if (= (field (index buffers (activeBuffer)) "path") ""):
     pickFileEvent "duck:saveAsPicked"
   else:
-    saveActiveBufferAs buffers.[activeBuffer].path
+    saveActiveBufferAs (field (index buffers (activeBuffer)) "path")
 
 fun closeBufferAt index:
   if (> (length buffers) 1):
     define:
-      closingKey = (bufferKeyAt index)
-      fallbackIndex = (pick (= index 0) 1 0)
-      fallbackKey = (bufferKeyAt fallbackIndex)
+      closingKey = bufferKeyAt index
+      fallbackIndex = pick (= index 0) 1 0
+      fallbackKey = bufferKeyAt fallbackIndex
+
     set closingBufferKey closingKey
     set replacementBufferKey fallbackKey
     send "duck.editor.replace-buffer" true
     send "duck.editor.close-pane" true
     set buffers (removeAt buffers index)
-    set activeBuffer (pick (>= index (length buffers)) (- (length buffers) 1) index)
+    set
+      activeBuffer
+      pick (>= index (length buffers)) (- (length buffers) 1) index
     set statusText "Buffer closed"
   else:
     clearEditor (activeEditorID)
-    set buffers.[0].path ""
-    set buffers.[0].name "Untitled 1"
-    set buffers.[0].savedText ""
+    set (field (index buffers (0)) "path") ""
+    set (field (index buffers (0)) "name") "Untitled 1"
+    set (field (index buffers (0)) "savedText") ""
     set activeBuffer 0
     set statusText "Last buffer cleared"
 
@@ -199,8 +237,10 @@ clampActiveBuffer
 events:
   when (keyPressed "f3"):
     findNext
+
   when (keyPressed "f5"):
     timeDate
+
   when (keyPressed "escape"):
     set showFind false
     set showReplace false
@@ -209,41 +249,59 @@ events:
 
   when (clicked findNextID):
     findNext
+
   when (submitted findInputID):
     findNext
+
   when (clicked findCloseID):
     set showFind false
+
   when (clicked (id "duck" "find" "match")):
     set matchCase (not matchCase)
+
   when (clicked replaceNextID):
     findNextWith (editorText replaceFindInputID)
+
   when (clicked replaceOneID):
     replaceCurrent
+
   when (clicked replaceAllID):
     replaceAll
+
   when (clicked replaceCloseID):
     set showReplace false
+
   when (clicked gotoButtonID):
     gotoLine
+
   when (submitted gotoInputID):
     gotoLine
+
   when (clicked gotoCloseID):
     set showGoto false
+
   when (clicked aboutCloseID):
     set showAbout false
 
   state "root":
     tabIndex = 0
+
   set tabIndex 0
+
   for buffer (iter buffers):
     when (and (not suppressTabClick) (clicked (id tabBarID "tab" tabIndex))):
       set activeBuffer tabIndex
-      send "duck.editor.switch-buffer" buffer.key
-    when (and (not suppressTabClick) (middleClicked (id tabBarID "tab" tabIndex))):
-      closeBufferAt tabIndex
+      send "duck.editor.switch-buffer" (field buffer "key")
+
+    when
+      and (not suppressTabClick) (middleClicked (id tabBarID "tab" tabIndex)):
+        closeBufferAt tabIndex
+
     += tabIndex 1
+
   when suppressTabClick:
     set suppressTabClick false
+
   when (>= pendingActiveBuffer 0):
     set activeBuffer pendingActiveBuffer
     send "duck.editor.switch-buffer" (activeEditorID)

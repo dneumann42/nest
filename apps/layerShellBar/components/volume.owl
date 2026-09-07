@@ -1,13 +1,16 @@
 import "../variables.owl"
 
 fun volumeStatusCommand:
-  string "if pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -qi yes; then printf 'muted'; else pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR==1 {gsub(/[^0-9]/,\"\",$2); if ($2 == \"\") print \"n/a\"; else printf \"%s%%\", $2; exit} END {if (NR == 0) printf \"n/a\"}'; fi"
+  string
+    "if pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -qi yes; then printf 'muted'; else pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR==1 {gsub(/[^0-9]/,\"\",$2); if ($2 == \"\") print \"n/a\"; else printf \"%s%%\", $2; exit} END {if (NR == 0) printf \"n/a\"}'; fi"
 
 fun volumeDialogStatusCommand:
-  string "if pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -qi yes; then printf 'Muted'; else printf 'Unmuted'; fi"
+  string
+    "if pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -qi yes; then printf 'Muted'; else printf 'Unmuted'; fi"
 
 fun volumePercentCommand:
-  string "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR==1 {gsub(/[^0-9]/,\"\",$2); if ($2 == \"\") print 0; else print $2; exit} END {if (NR == 0) print 0}'"
+  string
+    "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR==1 {gsub(/[^0-9]/,\"\",$2); if ($2 == \"\") print 0; else print $2; exit} END {if (NR == 0) print 0}'"
 
 fun volumeDefaultSinkCommand:
   string "pactl info 2>/dev/null | awk -F': ' '/Default Sink/ {print $2; exit}'"
@@ -16,7 +19,10 @@ fun volumeSinkListCommand:
   string "pactl list short sinks 2>/dev/null | cut -f2"
 
 fun volumeSinkSwitchCommand sink:
-  string "sink=" sink "; pactl set-default-sink \"$sink\"; pactl list short sink-inputs 2>/dev/null | cut -f1 | while read -r input; do pactl move-sink-input \"$input\" \"$sink\" 2>/dev/null; done"
+  string
+    "sink="
+    sink
+    "; pactl set-default-sink \"$sink\"; pactl list short sink-inputs 2>/dev/null | cut -f1 | while read -r input; do pactl move-sink-input \"$input\" \"$sink\" 2>/dev/null; done"
 
 fun volumeActionCommand action:
   if (= action "toggle"):
@@ -31,13 +37,19 @@ fun volumeActionCommand action:
               string "pavucontrol"
 
 fun volumeSetCommand value:
-  string "value='" value "'; pct=$(awk -v v=\"$value\" 'BEGIN { if (v < 0) v = 0; if (v > 150) v = 150; printf \"%.0f%%\", v }'); log=/tmp/nest-volume-slider.log; printf '%s requested=%s pct=%s sink=%s\n' \"$(date +%s.%N)\" \"$value\" \"$pct\" \"$(pactl info 2>&1 | awk -F': ' '/Default Sink/ {print $2; exit}')\" >> \"$log\"; pactl set-sink-volume @DEFAULT_SINK@ \"$pct\" >> \"$log\" 2>&1; rc=$?; printf '%s rc=%s after=%s\n' \"$(date +%s.%N)\" \"$rc\" \"$(pactl get-sink-volume @DEFAULT_SINK@ 2>&1 | tr '\n' ' ')\" >> \"$log\"; exit $rc"
+  string
+    "value='"
+    value
+    "'; pct=$(awk -v v=\"$value\" 'BEGIN { if (v < 0) v = 0; if (v > 150) v = 150; printf \"%.0f%%\", v }'); log=/tmp/nest-volume-slider.log; printf '%s requested=%s pct=%s sink=%s\n' \"$(date +%s.%N)\" \"$value\" \"$pct\" \"$(pactl info 2>&1 | awk -F': ' '/Default Sink/ {print $2; exit}')\" >> \"$log\"; pactl set-sink-volume @DEFAULT_SINK@ \"$pct\" >> \"$log\" 2>&1; rc=$?; printf '%s rc=%s after=%s\n' \"$(date +%s.%N)\" \"$rc\" \"$(pactl get-sink-volume @DEFAULT_SINK@ 2>&1 | tr '\n' ' ')\" >> \"$log\"; exit $rc"
 
 widget volumeWidget key:
   define:
-    keyText = (eval key)
-    buttonID = (id keyText "volume")
-    status = (shellAsync (id keyText "volume-query") (volumeStatusCommand) FastPollInterval)
+    keyText = eval key
+    buttonID = id keyText "volume"
+    status = shellAsync
+      id keyText "volume-query"
+      (volumeStatusCommand)
+      FastPollInterval
 
   events:
     when (and (clicked buttonID) (not (dialogOpen? "volume"))):
@@ -58,4 +70,5 @@ widget volumeWidget key:
     shadowOffsetY = BarWidgetShadowOffsetY
     shadowBlur = BarWidgetShadowBlur
     shadowSpread = BarWidgetShadowSpread
+
   tooltip buttonID "Volume"
