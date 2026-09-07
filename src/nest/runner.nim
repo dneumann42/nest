@@ -10,9 +10,10 @@ import nest/[
   projectConfig,
   runtime,
   singleInstance,
-  tray,
   ui,
 ]
+when defined(linux):
+  import nest/tray
 
 proc needsSingleInstance(config: ProjectConfig; dialogMode: bool): bool =
   not dialogMode and config.layerShell.normalize in ["top", "bottom", "left", "right"]
@@ -144,6 +145,7 @@ proc runProject*(
   finally:
     result = app.runtime.dialogCloseValue
     app.close()
-    tray.closeTrayHost()
+    when defined(linux):
+      tray.closeTrayHost()
     app.closeOwlErrorDialog()
     instanceLock.removeSingleInstanceLock()
