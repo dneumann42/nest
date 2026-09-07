@@ -3,15 +3,23 @@ import sdl3_ttf
 import std/[atomics, hashes, os, strformat, strutils, tables]
 import nest/[coords, input, screen]
 import nest/fallbackfonts
-import nest/wayland/protocols
 
-{.compile: "wayland/layer_shell_shim.c".}
-{.compile: "wayland/signal_wake_shim.c".}
-{.passL: "-lwayland-client".}
+when defined(linux):
+  import nest/wayland/protocols
+  {.compile: "wayland/layer_shell_shim.c".}
+  {.compile: "wayland/signal_wake_shim.c".}
+  {.passL: "-lwayland-client".}
+
+when defined(windows):
+  const SdlImageLibName = "SDL3_image.dll"
+elif defined(macosx):
+  const SdlImageLibName = "libSDL3_image.dylib"
+else:
+  const SdlImageLibName = "libSDL3_image.so"
 
 proc imgLoad(
   file: cstring
-): ptr Surface {.importc: "IMG_Load", cdecl, dynlib: "libSDL3_image.so".}
+): ptr Surface {.importc: "IMG_Load", cdecl, dynlib: SdlImageLibName.}
 
 proc ttfOpenFontIO(
   src: sdl3.IOStream, closeio: bool, ptsize: cfloat
@@ -165,29 +173,49 @@ proc layerSurfaceHeight(config: LayerShellConfig, height: int): uint32 =
   else:
     height.uint32
 
-proc nestLayerShellConfigure(
-  display, surface: pointer,
-  width, height, layer, anchor: uint32,
-  exclusiveZone, marginTop, marginRight, marginBottom, marginLeft: int32,
-  keyboard, pointerPassthrough: uint32,
-  namespace: cstring,
-  configuredWidth, configuredHeight: ptr uint32,
-): cint {.importc: "nest_wayland_layer_shell_configure".}
+when defined(linux):
+  proc nestLayerShellConfigure(
+    display, surface: pointer,
+    width, height, layer, anchor: uint32,
+    exclusiveZone, marginTop, marginRight, marginBottom, marginLeft: int32,
+    keyboard, pointerPassthrough: uint32,
+    namespace: cstring,
+    configuredWidth, configuredHeight: ptr uint32,
+  ): cint {.importc: "nest_wayland_layer_shell_configure".}
 
-proc nestSignalWakeStart(): cint {.importc: "nest_signal_wake_start".}
-proc nestSignalWakeNotify() {.importc: "nest_signal_wake_notify".}
-proc nestSignalWakeTakePending(): cint {.
-  importc: "nest_signal_wake_take_pending".}
-proc nestWaylandWaitForEventOrWake(display: pointer, timeoutMs: cint): cint {.
-  importc: "nest_wayland_wait_for_event_or_wake".}
-proc nestSignalWakeStop() {.importc: "nest_signal_wake_stop".}
+  proc nestSignalWakeStart(): cint {.importc: "nest_signal_wake_start".}
+  proc nestSignalWakeNotify() {.importc: "nest_signal_wake_notify".}
+  proc nestSignalWakeTakePending(): cint {.
+    importc: "nest_signal_wake_take_pending".}
+  proc nestWaylandWaitForEventOrWake(display: pointer, timeoutMs: cint): cint {.
+    importc: "nest_wayland_wait_for_event_or_wake".}
+  proc nestSignalWakeStop() {.importc: "nest_signal_wake_stop".}
 
-proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
-proc nestLayerShellTakeConfiguredSize(
-  configuredWidth, configuredHeight: ptr uint32,
-): cint {.importc: "nest_wayland_layer_shell_take_configured_size".}
-proc nestLayerShellSetMargin(top, right, bottom,
-    left: int32) {.importc: "nest_wayland_layer_shell_set_margin".}
+  proc nestLayerShellDestroy() {.importc: "nest_wayland_layer_shell_destroy".}
+  proc nestLayerShellTakeConfiguredSize(
+    configuredWidth, configuredHeight: ptr uint32,
+  ): cint {.importc: "nest_wayland_layer_shell_take_configured_size".}
+  proc nestLayerShellSetMargin(top, right, bottom,
+      left: int32) {.importc: "nest_wayland_layer_shell_set_margin".}
+else:
+  proc nestLayerShellConfigure(
+    display, surface: pointer,
+    width, height, layer, anchor: uint32,
+    exclusiveZone, marginTop, marginRight, marginBottom, marginLeft: int32,
+    keyboard, pointerPassthrough: uint32,
+    namespace: cstring,
+    configuredWidth, configuredHeight: ptr uint32,
+  ): cint = -1
+  proc nestSignalWakeStart(): cint = 0
+  proc nestSignalWakeNotify() = discard
+  proc nestSignalWakeTakePending(): cint = 0
+  proc nestWaylandWaitForEventOrWake(display: pointer, timeoutMs: cint): cint = -1
+  proc nestSignalWakeStop() = discard
+  proc nestLayerShellDestroy() = discard
+  proc nestLayerShellTakeConfiguredSize(
+    configuredWidth, configuredHeight: ptr uint32,
+  ): cint = 0
+  proc nestLayerShellSetMargin(top, right, bottom, left: int32) = discard
 
 proc `==`(a, b: MeasureCacheKey): bool {.inline.} =
   a.fontId == b.fontId and a.text == b.text
@@ -1573,8 +1601,9 @@ proc sdlQuitRequest() =
 proc selectWaylandVideoDriver() =
   putEnv("SDL_VIDEO_DRIVER", "wayland")
   putEnv("SDL_VIDEODRIVER", "wayland")
-  discard setenvUnsafe(cstring"SDL_VIDEO_DRIVER", cstring"wayland", 1)
-  discard setenvUnsafe(cstring"SDL_VIDEODRIVER", cstring"wayland", 1)
+  when defined(linux):
+    discard setenvUnsafe(cstring"SDL_VIDEO_DRIVER", cstring"wayland", 1)
+    discard setenvUnsafe(cstring"SDL_VIDEODRIVER", cstring"wayland", 1)
   discard
     setHintWithPriority(cstring(HINT_VIDEO_DRIVER), cstring"wayland", HINT_OVERRIDE)
 
@@ -1635,6 +1664,9 @@ proc initSdl3Driver*() =
 proc initLayerShellSdl3Driver*() =
   ## Install the SDL3 relays for a Wayland layer-shell surface, configured
   ## beforehand through `layerShellConfig`.
-  useLayerShell = true
-  selectWaylandVideoDriver()
-  installSdl3Relays()
+  when defined(linux):
+    useLayerShell = true
+    selectWaylandVideoDriver()
+    installSdl3Relays()
+  else:
+    quit("Nest layer-shell windows are only available on Linux")

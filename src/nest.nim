@@ -8,8 +8,9 @@ import nest/layerShellSdl3Driver
 export LayerShellConfig, LayerShellLayer, LayerShellEdge, LayerShellKeyboardMode
 export dockTop, dockBottom, dockLeft, dockRight
 
-import nest/wayland
-export wayland
+when defined(linux):
+  import nest/wayland
+  export wayland
 
 import owl
 export owl
